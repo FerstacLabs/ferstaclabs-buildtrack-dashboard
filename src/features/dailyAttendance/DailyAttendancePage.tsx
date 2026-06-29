@@ -1,4 +1,4 @@
-import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons'
+﻿import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { FilterBar } from '../../components/layout/FilterBar'
 import { DonutChartCard } from '../../components/charts/DonutChartCard'
@@ -50,14 +50,22 @@ export const DailyAttendancePage = () => {
         <KpiCard icon={<ClockCircleOutlined />} title="Aktiv Saat" value={formatHours(summary.activeHours, 0)} trend="gələnlər üzrə" tone="blue" />
       </section>
 
-      <section className="content-grid">
-        <DataTable
-          title="Günlük Davamiyyət Siyahısı"
-          columns={columns}
-          data={rows}
-          extra={<ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('gunluk-davamiyyet', rows)}>Export</ToolbarButton>}
-        />
-        <DonutChartCard title="Status üzrə xülasə" data={summary.donut} centerValue={formatNumber(summary.total)} centerLabel="cəmi nəfər" />
+      <DataTable
+        title="Günlük Davamiyyət Siyahısı"
+        columns={columns}
+        data={rows}
+        extra={<ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('gunluk-davamiyyet', rows)}>Export</ToolbarButton>}
+      />
+
+      <section className="daily-summary-grid">
+        <DonutChartCard title="Status üzrə xülasə" data={summary.donut} centerValue={formatNumber(summary.total)} centerLabel="cəmi nəfər" height={220} />
+        <aside className="panel-card daily-insight-card">
+          <h2>Günün xülasəsi</h2>
+          <div className="summary-metric"><span>Davamiyyət faizi</span><strong>{formatPercent((summary.present / summary.total) * 100)}</strong></div>
+          <div className="summary-metric"><span>Riskli və gecikən qeydlər</span><strong>{formatNumber(summary.late + summary.early)}</strong></div>
+          <div className="summary-metric"><span>Aktiv iş saatı</span><strong>{formatHours(summary.activeHours, 0)}</strong></div>
+          <p>Bu bölmə cədvəli sıxmadan status paylanmasını və əsas günlük göstəriciləri oxunaqlı göstərir.</p>
+        </aside>
       </section>
 
       <section className="explanation-grid">
@@ -79,3 +87,4 @@ export const DailyAttendancePage = () => {
     </div>
   )
 }
+
