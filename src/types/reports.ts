@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AttendanceStatus,
   EntryMethod,
   ExportStatus,
@@ -169,6 +169,10 @@ export interface CustomReportRow {
   owner: string
   status: 'Aktiv' | 'Qaralama'
   last_used: string
+  data_source?: string
+  selected_columns?: string[]
+  applied_filters?: string[]
+  grouping?: string
 }
 
 export interface TimelineEvent {
@@ -178,3 +182,4 @@ export interface TimelineEvent {
   subtitle: string
   tone: 'blue' | 'green' | 'orange' | 'red'
 }
+

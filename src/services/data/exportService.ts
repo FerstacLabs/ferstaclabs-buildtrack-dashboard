@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx'
+﻿import * as XLSX from 'xlsx'
 import type { ExportValidationRow, PayrollRow } from '../../types/reports'
 import { downloadBlob } from '../../utils/formatters'
 
@@ -55,4 +55,26 @@ export const exportValidationToTxt = (fileName: string, rows: ExportValidationRo
     .join('\n')
 
   downloadBlob(`${fileName}.txt`, new Blob([text], { type: 'text/plain;charset=utf-8' }))
+}
+
+const escapeXml = (value: ExportableValue) => String(value ?? '').replace(/[<>&'"]/g, (char) => {
+  if (char === '<') return '&lt;'
+  if (char === '>') return '&gt;'
+  if (char === '&') return '&amp;'
+  if (char === "'") return '&apos;'
+  return '&quot;'
+})
+
+export const exportRowsTo1CMock = <T extends ExportableRow>(fileName: string, rows: T[]) => {
+  const lines = safeRows(rows)
+    .map((row) => {
+      const fields = Object.entries(row)
+        .map(([key, value]) => `      <Field name="${escapeXml(key)}">${escapeXml(value)}</Field>`)
+        .join('\n')
+      return `    <ReportLine>\n${fields}\n    </ReportLine>`
+    })
+    .join('\n')
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<BuildTrackCustomReport exportDate="${new Date().toISOString()}">\n${lines}\n</BuildTrackCustomReport>`
+
+  downloadBlob(`${fileName}.xml`, new Blob([xml], { type: 'application/xml;charset=utf-8' }))
 }

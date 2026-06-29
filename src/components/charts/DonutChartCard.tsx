@@ -1,4 +1,4 @@
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip } from 'recharts'
+﻿import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip } from 'recharts'
 import type { ChartPoint } from '../../types/reports'
 
 interface DonutChartCardProps {
@@ -15,19 +15,21 @@ export const DonutChartCard = ({ centerLabel, centerValue, data, height = 260, t
   <section className="chart-card donut-card">
     <h2>{title}</h2>
     <div className="donut-wrap">
-      <ResponsiveContainer width="55%" height={height}>
-        <PieChart>
-          <Pie data={data} innerRadius="58%" outerRadius="82%" paddingAngle={1} dataKey="value">
-            {data.map((entry, index) => (
-              <Cell key={entry.name} fill={colors[index % colors.length]} />
-            ))}
-          </Pie>
-          <ChartTooltip />
-        </PieChart>
-      </ResponsiveContainer>
-      <div className="donut-center">
-        <strong>{centerValue}</strong>
-        <span>{centerLabel}</span>
+      <div className="donut-visual" style={{ minHeight: height }}>
+        <ResponsiveContainer width="100%" height={height}>
+          <PieChart>
+            <Pie data={data} innerRadius="58%" outerRadius="82%" paddingAngle={1} dataKey="value">
+              {data.map((entry, index) => (
+                <Cell key={entry.name} fill={colors[index % colors.length]} />
+              ))}
+            </Pie>
+            <ChartTooltip />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="donut-center">
+          <strong>{centerValue}</strong>
+          <span>{centerLabel}</span>
+        </div>
       </div>
       <div className="donut-legend">
         {data.map((item, index) => (
@@ -41,3 +43,4 @@ export const DonutChartCard = ({ centerLabel, centerValue, data, height = 260, t
     </div>
   </section>
 )
+
