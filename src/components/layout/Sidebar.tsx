@@ -1,4 +1,5 @@
-import {
+﻿import {
+  ApiOutlined,
   AuditOutlined,
   BarChartOutlined,
   CalendarOutlined,
@@ -6,11 +7,13 @@ import {
   DashboardOutlined,
   DollarCircleOutlined,
   ExportOutlined,
+  EyeInvisibleOutlined,
   FieldTimeOutlined,
   FileSearchOutlined,
   LineChartOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -33,6 +36,9 @@ const menuItems: SidebarItem[] = [
   { label: 'İş Fazası & Cost Code', path: '/cost-code', icon: <BarChartOutlined /> },
   { label: 'Custom Reports', path: '/custom-reports', icon: <FileSearchOutlined /> },
   { label: '1C / Export', path: '/export', icon: <ExportOutlined /> },
+  { label: 'Dahua Cihazları', path: '/devices', icon: <ApiOutlined /> },
+  { label: 'Canlı Davamiyyət', path: '/attendance-live', icon: <ThunderboltOutlined /> },
+  { label: 'Tanınmayan üzlər', path: '/security-events', icon: <EyeInvisibleOutlined /> },
   { label: 'Ayarlar', path: '/settings', icon: <SettingOutlined /> },
 ]
 
@@ -61,3 +67,5 @@ export const Sidebar = () => (
     </nav>
   </aside>
 )
+
+
