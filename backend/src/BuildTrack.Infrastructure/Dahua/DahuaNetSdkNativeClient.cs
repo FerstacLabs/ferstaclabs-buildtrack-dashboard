@@ -1,0 +1,295 @@
+﻿using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+
+namespace BuildTrack.Infrastructure.Dahua;
+
+internal sealed class DahuaNetSdkNativeClient : IDisposable
+{
+    private const int LoginSpecCapServerConn = 2;
+
+    private readonly ILogger _logger;
+    private readonly IntPtr _libraryHandle;
+    private readonly ClientInitDelegate _clientInit;
+    private readonly ClientCleanupDelegate _clientCleanup;
+    private readonly ClientListenServerDelegate _clientListenServer;
+    private readonly ClientStopListenServerDelegate _clientStopListenServer;
+    private readonly ClientStartServiceDelegate? _clientStartService;
+    private readonly ClientStopServiceDelegate? _clientStopService;
+    private readonly ClientGetLastErrorDelegate? _clientGetLastError;
+    private readonly ClientSetDvrMessageCallbackDelegate? _clientSetDvrMessageCallback;
+    private readonly ClientLoginExDelegate? _clientLoginEx;
+    private readonly ClientLogoutDelegate? _clientLogout;
+    private readonly ClientResponseDevRegDelegate? _clientResponseDevReg;
+    private readonly ClientStartListenExDelegate? _clientStartListenEx;
+    private readonly ClientStopListenDelegate? _clientStopListen;
+    private readonly DisconnectCallback _disconnectCallback;
+    private readonly ReconnectCallback _reconnectCallback;
+    private AlarmMessageCallback? _alarmMessageCallback;
+    private bool _initialized;
+
+    public DahuaNetSdkNativeClient(IntPtr libraryHandle, ILogger logger)
+    {
+        _libraryHandle = libraryHandle;
+        _logger = logger;
+        _clientInit = GetRequiredDelegate<ClientInitDelegate>("CLIENT_Init");
+        _clientCleanup = GetRequiredDelegate<ClientCleanupDelegate>("CLIENT_Cleanup");
+        _clientListenServer = GetRequiredDelegate<ClientListenServerDelegate>("CLIENT_ListenServer");
+        _clientStopListenServer = GetRequiredDelegate<ClientStopListenServerDelegate>("CLIENT_StopListenServer");
+        _clientStartService = TryGetDelegate<ClientStartServiceDelegate>("CLIENT_StartService");
+        _clientStopService = TryGetDelegate<ClientStopServiceDelegate>("CLIENT_StopService");
+        _clientGetLastError = TryGetDelegate<ClientGetLastErrorDelegate>("CLIENT_GetLastError");
+        _clientSetDvrMessageCallback = TryGetDelegate<ClientSetDvrMessageCallbackDelegate>("CLIENT_SetDVRMessCallBack");
+        _clientLoginEx = TryGetDelegate<ClientLoginExDelegate>("CLIENT_LoginEx");
+        _clientLogout = TryGetDelegate<ClientLogoutDelegate>("CLIENT_Logout");
+        _clientResponseDevReg = TryGetDelegate<ClientResponseDevRegDelegate>("CLIENT_ResponseDevReg");
+        _clientStartListenEx = TryGetDelegate<ClientStartListenExDelegate>("CLIENT_StartListenEx");
+        _clientStopListen = TryGetDelegate<ClientStopListenDelegate>("CLIENT_StopListen");
+        _disconnectCallback = OnDisconnect;
+        _reconnectCallback = OnReconnect;
+    }
+
+    public int LastErrorCode => _clientGetLastError?.Invoke() ?? 0;
+
+    public bool HasAlarmSubscriptionExports =>
+        _clientSetDvrMessageCallback is not null
+        && _clientLoginEx is not null
+        && _clientStartListenEx is not null
+        && _clientStopListen is not null;
+
+    public bool Initialize()
+    {
+        _initialized = _clientInit(_disconnectCallback, IntPtr.Zero);
+        if (_initialized)
+        {
+            TrySetAutoReconnect();
+        }
+
+        return _initialized;
+    }
+
+    public IntPtr ListenServer(int port, ServiceCallback callback)
+    {
+        if (!_initialized) return IntPtr.Zero;
+        return _clientListenServer("0.0.0.0", (ushort)port, 1000, callback, IntPtr.Zero);
+    }
+
+    public IntPtr StartService(int port, ServiceCallback callback)
+    {
+        if (!_initialized || _clientStartService is null) return IntPtr.Zero;
+        return _clientStartService((ushort)port, "0.0.0.0", callback, uint.MaxValue, IntPtr.Zero);
+    }
+
+    public bool TryConfigureAlarmCallback(AlarmMessageCallback callback)
+    {
+        _alarmMessageCallback = callback;
+        if (_clientSetDvrMessageCallback is null) return false;
+
+        _clientSetDvrMessageCallback(_alarmMessageCallback, IntPtr.Zero);
+        return true;
+    }
+
+    public bool TryResponseDeviceRegister(string registerDeviceId, string? ip, int port)
+    {
+        if (_clientResponseDevReg is null || string.IsNullOrWhiteSpace(registerDeviceId) || string.IsNullOrWhiteSpace(ip)) return false;
+        return _clientResponseDevReg(registerDeviceId, ip, (ushort)port, true);
+    }
+
+    public IntPtr TryLoginActiveRegister(string registerDeviceId, string username, string password, out int error)
+    {
+        error = 0;
+        if (_clientLoginEx is null || string.IsNullOrWhiteSpace(registerDeviceId)) return IntPtr.Zero;
+
+        var deviceInfo = new NetDeviceInfo { SerialNumber = new byte[48] };
+        var capParam = Marshal.StringToHGlobalAnsi(registerDeviceId);
+        try
+        {
+            return _clientLoginEx(null, 0, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref error);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(capParam);
+        }
+    }
+
+    public bool TryStartListenEx(IntPtr loginHandle)
+    {
+        if (loginHandle == IntPtr.Zero || _clientStartListenEx is null) return false;
+        return _clientStartListenEx(loginHandle);
+    }
+
+    public bool TryStopListen(IntPtr loginHandle)
+    {
+        if (loginHandle == IntPtr.Zero || _clientStopListen is null) return false;
+        return _clientStopListen(loginHandle);
+    }
+
+    public bool TryLogout(IntPtr loginHandle)
+    {
+        if (loginHandle == IntPtr.Zero || _clientLogout is null) return false;
+        return _clientLogout(loginHandle);
+    }
+
+    public void StopListenServer(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return;
+
+        try
+        {
+            _clientStopListenServer(handle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stop Dahua NetSDK listen server handle {Handle}", handle);
+        }
+    }
+
+    public void StopService(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero || _clientStopService is null) return;
+
+        try
+        {
+            _clientStopService(handle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stop Dahua NetSDK StartService handle {Handle}", handle);
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (_initialized)
+            {
+                _clientCleanup();
+                _logger.LogInformation("Dahua NetSDK cleanup complete");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dahua NetSDK cleanup failed");
+        }
+
+        if (_libraryHandle != IntPtr.Zero)
+        {
+            NativeLibrary.Free(_libraryHandle);
+        }
+    }
+
+    private void TrySetAutoReconnect()
+    {
+        try
+        {
+            var setAutoReconnect = TryGetDelegate<ClientSetAutoReconnectDelegate>("CLIENT_SetAutoReconnect");
+            setAutoReconnect?.Invoke(_reconnectCallback, IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dahua NetSDK auto reconnect callback could not be configured");
+        }
+    }
+
+    private TDelegate GetRequiredDelegate<TDelegate>(string exportName) where TDelegate : Delegate
+    {
+        var result = TryGetDelegate<TDelegate>(exportName);
+        if (result is null)
+        {
+            throw new MissingMethodException($"Dahua NetSDK export '{exportName}' was not found in native library.");
+        }
+
+        return result;
+    }
+
+    private TDelegate? TryGetDelegate<TDelegate>(string exportName) where TDelegate : Delegate
+    {
+        return NativeLibrary.TryGetExport(_libraryHandle, exportName, out var export)
+            ? Marshal.GetDelegateForFunctionPointer<TDelegate>(export)
+            : null;
+    }
+
+    private void OnDisconnect(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData) =>
+        _logger.LogWarning("Dahua device disconnected. LoginHandle {LoginHandle}, Remote {RemoteIp}:{RemotePort}", loginId, deviceIp, devicePort);
+
+    private void OnReconnect(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData) =>
+        _logger.LogInformation("Dahua device reconnected. LoginHandle {LoginHandle}, Remote {RemoteIp}:{RemotePort}", loginId, deviceIp, devicePort);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetDeviceInfo
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 48)] public byte[] SerialNumber;
+        public byte AlarmInPortNum;
+        public byte AlarmOutPortNum;
+        public byte DiskNum;
+        public byte DvrType;
+        public byte ChanNum;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate int ServiceCallback(IntPtr listenHandle, string deviceIp, ushort devicePort, int command, IntPtr param, uint paramLength, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate bool AlarmMessageCallback(int command, IntPtr loginHandle, IntPtr payload, uint payloadLength, string deviceIp, int devicePort, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientInitDelegate(DisconnectCallback disconnectCallback, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ClientCleanupDelegate();
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientListenServerDelegate(string ip, ushort port, int timeout, ServiceCallback callback, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientStopListenServerDelegate(IntPtr listenHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientStartServiceDelegate(ushort port, [MarshalAs(UnmanagedType.LPStr)] string? ip, ServiceCallback callback, uint timeout, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientStopServiceDelegate(IntPtr handle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int ClientGetLastErrorDelegate();
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ClientSetAutoReconnectDelegate(ReconnectCallback reconnectCallback, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ClientSetDvrMessageCallbackDelegate(AlarmMessageCallback callback, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientLoginExDelegate(
+        [MarshalAs(UnmanagedType.LPStr)] string? ip,
+        ushort port,
+        [MarshalAs(UnmanagedType.LPStr)] string username,
+        [MarshalAs(UnmanagedType.LPStr)] string password,
+        int specCap,
+        IntPtr capParam,
+        ref NetDeviceInfo deviceInfo,
+        ref int error);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientLogoutDelegate(IntPtr loginHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientResponseDevRegDelegate(
+        [MarshalAs(UnmanagedType.LPStr)] string deviceSerial,
+        [MarshalAs(UnmanagedType.LPStr)] string ip,
+        ushort port,
+        [MarshalAs(UnmanagedType.Bool)] bool accept);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientStartListenExDelegate(IntPtr loginHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientStopListenDelegate(IntPtr loginHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void DisconnectCallback(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ReconnectCallback(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData);
+}
+

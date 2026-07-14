@@ -1,0 +1,273 @@
+﻿# BuildTrack Dahua Backend Foundation
+
+This backend adds a production-oriented foundation for Dahua DHI-ASI6213J-MW access-terminal integration.
+
+Important warning: Active Register requires Dahua NetSDK / vendor protocol. It is not a normal HTTP webhook. Do not deploy the Active Register listener as a Vercel/serverless function. The frontend can stay on Vercel, but the Dahua listener must run as a long-running VPS/container service with raw TCP reachability.
+
+## Architecture
+
+```text
+Dahua DHI-ASI6213J-MW terminal
+  | outbound TCP Active Register, Device ID, port 9500/7000
+  v
+BuildTrack.Worker.Dahua (long-running container)
+  | matches RegisterDeviceId, logs connection, SDK event boundary
+  | inserts normalized events / simulator events
+  v
+PostgreSQL
+  ^
+  | REST + Swagger
+BuildTrack.Api
+  ^
+  | HTTPS/HTTP JSON API
+BuildTrack React frontend
+```
+
+## Projects
+
+```text
+backend/
+  BuildTrack.sln
+  src/BuildTrack.Api                 ASP.NET Core Web API + Swagger
+  src/BuildTrack.Worker.Dahua        Long-running Dahua Active Register listener worker
+  src/BuildTrack.Infrastructure      EF Core, PostgreSQL, Dahua parser, ingestion services
+  src/BuildTrack.Domain              Entities, enums, normalized Dahua model
+  tests/BuildTrack.Tests             CGI parser tests
+  vendor/dahua-netsdk/{win-x64|linux-x64}
+```
+
+## Native Dahua NetSDK files
+
+The worker has a clear SDK boundary:
+
+- `IDahuaActiveRegisterSdk`
+- `IDahuaEventSubscriber`
+- `IDahuaRecordReader`
+- `DahuaNetSdkActiveRegisterService`
+
+Put vendor native SDK binaries here:
+
+```text
+backend/vendor/dahua-netsdk/win-x64/
+backend/vendor/dahua-netsdk/linux-x64/
+```
+
+If native files are missing, the worker still compiles and starts, but prints this warning:
+
+```text
+Active Register TCP listener works, but real NetSDK event decode is disabled because native SDK is missing.
+```
+
+When `libdhnetsdk.so` is present, the worker loads Dahua NetSDK, initializes it, starts SDK Active Register listen servers on the configured ports, and routes decoded successful face/access events into `AttendanceEvent` with source `dahua_netsdk_active_register`. If the SDK cannot be loaded or initialized, the worker stays alive and falls back to the raw TCP connectivity listener/simulator path.
+Header/sample requirement:
+
+```text
+Native binaries are present, but Dahua SDK headers/samples are missing. Exact access-event struct binding cannot be completed safely.
+```
+
+BuildTrack can load `libdhnetsdk.so` and start `CLIENT_ListenServer` with native binaries only. However, real binary access-control alarm payload decoding requires the Dahua SDK header/sample definitions for the exact callback command IDs and struct layouts. Without those files, the worker logs command id, payload size, and raw base64/hex payload, then skips the event instead of guessing a struct and risking bad attendance data.
+
+## Run locally with Docker
+
+From repository root:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+- API: `http://localhost:8080`
+- Swagger: `http://localhost:8080/swagger`
+- PostgreSQL: `localhost:5432`
+- Dahua TCP Active Register: `9500/tcp` and `7000/tcp`
+
+Default environment variables in `docker-compose.yml`:
+
+```text
+POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
+BUILDTRACK_SECRET_KEY=change-this-32-byte-production-secret
+DAHUA_ACTIVE_REGISTER_PORTS=9500,7000
+DAHUA_SIMULATOR_ENABLED=false
+DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK=false
+ASPNETCORE_ENVIRONMENT=Production
+```
+
+## Deploy on a VPS
+
+1. Point your DNS/API domain to the VPS.
+2. Install Docker and Docker Compose.
+3. Copy the repository to the VPS.
+4. Set a strong `BUILDTRACK_SECRET_KEY`.
+5. Add Dahua NetSDK native binaries under `backend/vendor/dahua-netsdk/linux-x64/`, including `libdhnetsdk.so` and its required `lib*.so` dependencies. The worker container sets `LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64`.
+6. Run `docker compose up -d --build`.
+7. Open TCP ports on the VPS firewall:
+   - `8080` or your reverse-proxied API port
+   - `9500/tcp` for Dahua Active Register
+   - `7000/tcp` if using that Dahua/NVR style port
+8. Do not put `9500` or `7000` behind Cloudflare HTTP proxy. These ports need raw TCP reachability.
+
+## Configure Dahua terminal Active Register
+
+On Dahua terminal:
+
+1. Go to `Connection -> Network -> Active Register`.
+2. Enable Active Register.
+3. Server IP: public IP/domain of the BuildTrack backend VPS.
+4. Port: `9500` by default. `7000` is also supported.
+5. Device ID: value from BuildTrack device `RegisterDeviceId`, for example `BT-SITE001-ENTRANCE1`.
+6. Save and reconnect the terminal.
+
+Expected flow:
+
+1. Create site in BuildTrack.
+2. Create device with `mode=ActiveRegister`, model `DHI-ASI6213J-MW`, register port `9500`, and a unique Register Device ID.
+3. Configure the terminal with the same Device ID.
+4. Worker receives outbound TCP connection.
+5. Worker matches device by RegisterDeviceId and marks it online.
+6. NetSDK event callback normalizes successful face/access events into `AttendanceEvent` with source `dahua_netsdk_active_register`; failed/stranger events are logged and skipped for payroll attendance.
+
+## Test with simulator
+
+Without hardware or NetSDK, you can test the database/API/frontend flow:
+
+```bash
+curl -X POST http://localhost:8080/api/sites \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Demo Obyekt","address":"Baku","timeZone":"Asia/Baku"}'
+```
+
+Create a worker and device from Swagger or the frontend Integration / Devices page. Then:
+
+```bash
+curl -X POST http://localhost:8080/api/devices/{deviceId}/simulate-active-register
+curl -X POST http://localhost:8080/api/devices/{deviceId}/simulate-event \
+  -H "Content-Type: application/json" \
+  -d '{"workerExternalId":"1","workerName":"Ilham","status":"1","method":"15","direction":"Entry"}'
+```
+
+`Method=15` is normalized to `Face`. `Status=1` is normalized to `Ok`.
+
+Failed/stranger rules:
+
+- `Status != 1`
+- empty `UserID`
+- empty `CardName`
+
+These records are stored as non-OK events, but must not be counted as payroll attendance.
+
+## Test with real terminal
+
+1. Verify local CGI access if the device is reachable:
+
+```text
+GET /cgi-bin/recordFinder.cgi?action=find&name=AccessControlCardRec&count={currentAdaptiveFetchCount}
+```
+
+2. Confirm response contains fields like:
+
+```text
+records[0].RecNo=...
+records[0].CreateTime=...
+records[0].CardName=Ilham
+records[0].UserID=1
+records[0].Status=1
+records[0].Method=15
+records[0].Type=Entry
+```
+
+3. Configure Active Register to the VPS IP and port `9500`.
+4. Watch `buildtrack-dahua-worker` logs:
+
+```bash
+docker logs -f buildtrack-dahua-worker
+```
+
+## CGI parser and backfill
+
+Active Register is primary. The CGI parser exists for debug/backfill because `recordFinder.cgi` was already confirmed on the test device.
+
+Implemented parser:
+
+```csharp
+DahuaCgiRecordParser.ParseKeyValueResponse(string text)
+```
+
+Backfill should remain optional and separate from Active Register. A future job can read `recordFinder.cgi`, import records with `RecNo > Device.LastRecNo`, and reuse the same ingestion service.
+
+## API endpoints
+
+- `POST /api/sites`
+- `GET /api/sites`
+- `POST /api/workers`
+- `GET /api/workers`
+- `POST /api/devices`
+- `GET /api/devices`
+- `GET /api/devices/{id}`
+- `POST /api/devices/{id}/test-config`
+- `POST /api/devices/{id}/mark-active-register-ready`
+- `GET /api/devices/{id}/logs`
+- `GET /api/attendance-events`
+- `GET /api/sites/{siteId}/attendance-live`
+- `GET /api/health`
+- `GET /api/dahua/listener/status`
+- `POST /api/devices/{id}/simulate-active-register`
+- `POST /api/devices/{id}/simulate-event`
+
+## Security notes
+
+- Device passwords are encrypted at rest with `BUILDTRACK_SECRET_KEY`.
+- Raw passwords are never returned by the API and should not be logged.
+- API auth is intentionally left as a placeholder for the next backend milestone; keep local dev easy for now.
+- In production, restrict API access with authentication, HTTPS, firewall rules, and private DB networking.
+- Dahua Active Register listener ports are raw TCP ports and should be exposed only as needed.
+
+## Single-device fallback
+
+If Dahua Active Register sends binary payloads and RegisterDeviceId cannot be decoded before NetSDK binding is available, set DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK=true only for controlled single-device testing. When enabled and exactly one ActiveRegister device exists on the same listener port, the worker matches that device and logs matched_single_device_fallback. Do not use this in multi-device production.
+
+
+
+
+## Local/demo Dahua CGI polling fallback
+
+This is disabled by default and is not the final cloud architecture. Use it only for local demos or debugging when the Dahua terminal is reachable from the worker network.
+
+```env
+DAHUA_CGI_POLLING_ENABLED=false
+DAHUA_CGI_HOST=192.168.31.174
+DAHUA_CGI_USERNAME=admin
+DAHUA_CGI_PASSWORD=change-me
+DAHUA_CGI_POLL_INTERVAL_SECONDS=3
+DAHUA_CGI_INITIAL_FETCH_COUNT=100
+DAHUA_CGI_MAX_FETCH_COUNT=5000
+DAHUA_CGI_FETCH_GROWTH_FACTOR=2
+DAHUA_CGI_DEBOUNCE_SECONDS=60
+DAHUA_CGI_DEVICE_TIMEZONE=Asia/Baku
+# optional selectors
+DAHUA_CGI_DEVICE_ID=e995cac3-9fe9-48ce-95f8-1e28de191ffc
+DAHUA_CGI_REGISTER_DEVICE_ID=BT-API-TEST-001
+```
+
+When enabled, `BuildTrack.Worker.Dahua` polls adaptively. It starts with `DAHUA_CGI_INITIAL_FETCH_COUNT`, grows by `DAHUA_CGI_FETCH_GROWTH_FACTOR` when the response appears truncated before newer records, and stops at `DAHUA_CGI_MAX_FETCH_COUNT`:
+
+```text
+/cgi-bin/recordFinder.cgi?action=find&name=AccessControlCardRec&count={currentAdaptiveFetchCount}
+```
+
+If max fetch count is reached without seeing records newer than `devices.LastRecNo`, the worker logs a warning that pagination/time-window query or log cleanup may be required.
+
+Only successful records are inserted as attendance:
+
+- `Status=1`
+- non-empty `UserID`
+- non-empty `CardName`
+- `RecNo > devices.LastRecNo`
+- no existing event for the same device, worker and direction inside `DAHUA_CGI_DEBOUNCE_SECONDS`
+
+`CreateTime` values without an explicit offset are interpreted in `DAHUA_CGI_DEVICE_TIMEZONE` and stored as the correct UTC instant in PostgreSQL/API responses.
+
+Inserted events use source `dahua_cgi_polling`. The worker updates `devices.LastRecNo` to the highest processed record number and keeps duplicate protection through `DeviceId + RawRecNo` / business-key checks. Active Register remains the production target; CGI polling is a local/demo fallback only.
+
+
+

@@ -1,0 +1,111 @@
+﻿services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: buildtrack-postgres
+    environment:
+      POSTGRES_DB: buildtrack
+      POSTGRES_USER: buildtrack
+      POSTGRES_PASSWORD: buildtrack
+    ports:
+      - "5432:5432"
+    volumes:
+      - buildtrack-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U buildtrack -d buildtrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  buildtrack-api:
+    build:
+      context: .
+      dockerfile: backend/src/BuildTrack.Api/Dockerfile
+    container_name: buildtrack-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
+      BUILDTRACK_SECRET_KEY: ${BUILDTRACK_SECRET_KEY:-change-this-32-byte-production-secret}
+      DAHUA_ACTIVE_REGISTER_PORTS: 9500,7000
+      DAHUA_SIMULATOR_ENABLED: "false"
+      DAHUA_DEV_SIMULATOR_ACTIONS_ENABLED: "false"
+      SECURITY_SNAPSHOT_STORAGE_PATH: /app/data/security-snapshots
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
+      - ./data/security-snapshots:/app/data/security-snapshots
+
+  buildtrack-dahua-worker:
+    build:
+      context: .
+      dockerfile: backend/src/BuildTrack.Worker.Dahua/Dockerfile
+    container_name: buildtrack-dahua-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
+      BUILDTRACK_SECRET_KEY: ${BUILDTRACK_SECRET_KEY:-change-this-32-byte-production-secret}
+
+      DAHUA_ACTIVE_REGISTER_PORTS: "9500,7000"
+      DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK: "true"
+      DAHUA_ACTIVE_REGISTER_SERVICE_MODE: ListenServer
+
+      DAHUA_CGI_POLLING_ENABLED: "true"
+      DAHUA_CGI_HOST: "192.168.31.174"
+      DAHUA_CGI_USERNAME: "admin"
+      DAHUA_CGI_PASSWORD: ${DAHUA_CGI_PASSWORD:-}
+      DAHUA_CGI_POLL_INTERVAL_SECONDS: "3"
+      DAHUA_CGI_REGISTER_DEVICE_ID: "BT-API-TEST-001"
+      DAHUA_CGI_DEBOUNCE_SECONDS: "10"
+      DAHUA_UNKNOWN_FACE_DEBOUNCE_SECONDS: "30"
+      DAHUA_CGI_DEVICE_TIMEZONE: "Asia/Baku"
+      DAHUA_CGI_INITIAL_FETCH_COUNT: "1200"
+      DAHUA_CGI_MAX_FETCH_COUNT: "5000"
+      DAHUA_CGI_FETCH_GROWTH_FACTOR: "2"
+      DAHUA_CGI_FETCH_LOOKAHEAD: "500"
+
+      DAHUA_ATTENDANCE_MODE: "SingleDeviceToggle"
+      DAHUA_ATTENDANCE_SINGLE_SESSION_PER_DAY: "true"
+      DAHUA_ATTENDANCE_ONE_CAMERA_PRESENCE_MODE: "true"
+      DAHUA_ATTENDANCE_UPDATE_CHECKOUT_TO_LAST_SEEN: "true"
+      DAHUA_ATTENDANCE_MIN_CHECKOUT_AFTER_MINUTES: "1"
+      DAHUA_ATTENDANCE_TIMEZONE: "Asia/Baku"
+      
+      
+
+      # DAHUA_ACTIVE_REGISTER_SERVICE_MODE: StartServiceExperimental
+      # DAHUA_EXPERIMENTAL_START_SERVICE_ENABLED: "true"
+      # DAHUA_EXPERIMENTAL_START_SERVICE_PORT: "7001"
+
+      DAHUA_SIMULATOR_ENABLED: "false"
+      DAHUA_DEV_SIMULATOR_ACTIONS_ENABLED: "false"
+      SECURITY_SNAPSHOT_STORAGE_PATH: /app/data/security-snapshots
+      DAHUA_ATTENDANCE_RECENTLY_SEEN_MINUTES: "15"
+    ports:
+      - "9500:9500/tcp"
+      - "7000:7000/tcp"
+      # - "7001:7001/tcp"
+    volumes:
+      - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
+      - ./data/security-snapshots:/app/data/security-snapshots
+
+volumes:
+  buildtrack-postgres:
+
+
+
+
+
+
+
+
+
+
+
+
