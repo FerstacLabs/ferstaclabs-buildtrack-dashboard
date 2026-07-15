@@ -19,7 +19,16 @@ public sealed class NetSdkRuntimeDiagnostics
     public int? LastServiceCommand { get; set; }
     public string? LastServiceEventType { get; set; }
     public int LastServicePayloadBytes { get; set; }
+    public string? LastServicePayloadFirst256Hex { get; set; }
     public string? LastRegisterDeviceId { get; set; }
+    public int? LastParsedRegisterDeviceIdOffset { get; set; }
+    public string? LastParsedRegisterDeviceId { get; set; }
+    public int? LastParsedSerialOffset { get; set; }
+    public string? LastParsedSerial { get; set; }
+    public string? LastParsedRemoteIp { get; set; }
+    public int? LastParsedRemotePort { get; set; }
+    public string? LastPossibleSessionHandlesJson { get; set; }
+    public string? LastPayloadStructLayout { get; set; }
     public bool ResponseDevRegCalled { get; set; }
     public bool? ResponseDevRegSuccess { get; set; }
     public int? ResponseDevRegErrorSigned { get; set; }
@@ -32,19 +41,22 @@ public sealed class NetSdkRuntimeDiagnostics
     public string? ResponseDevRegCommandSource { get; set; }
     public long? LastServiceCallbackHandle { get; set; }
     public bool LastServiceCallbackHandleNonZero { get; set; }
+    public bool ExperimentalServiceHandleSubscribeEnabled { get; set; }
+    public string? LastExperimentalSubscribeJson { get; set; }
     public bool ActiveRegisterSessionHandleFound { get; set; }
     public bool ActiveRegisterSessionHandleValueNonZero { get; set; }
     public long? ActiveRegisterSessionHandleValue { get; set; }
     public string? ActiveRegisterSessionHandleSource { get; set; }
     public string? ActiveRegisterSessionHandleStrategyResult { get; set; }
-        public string? LoginStrategy { get; set; }
+    public string? LoginStrategy { get; set; }
     public long? LoginHandle { get; set; }
     public bool? LoginSucceeded { get; set; }
     public int? LoginErrorSigned { get; set; }
     public string? LoginErrorHex { get; set; }
     public int? LoginNativeErrorSigned { get; set; }
     public string? LoginNativeErrorHex { get; set; }
-    public bool LoginPossibleMarshallingWarning { get; set; }public bool StartListenExCalled { get; set; }
+    public bool LoginPossibleMarshallingWarning { get; set; }
+    public bool StartListenExCalled { get; set; }
     public bool? StartListenExSuccess { get; set; }
     public int? StartListenExErrorSigned { get; set; }
     public string? StartListenExErrorHex { get; set; }
@@ -53,9 +65,3 @@ public sealed class NetSdkRuntimeDiagnostics
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
-
-
-
-
-
-

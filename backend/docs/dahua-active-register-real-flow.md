@@ -233,3 +233,112 @@ The worker now keeps the original seven raw-register-id strategies first, then a
 - raw and null-terminated `RegisterDeviceId` `pCapParam` variants for high-level login
 
 A diagnostics-only password override is available as `DAHUA_ACTIVE_REGISTER_PASSWORD_OVERRIDE`. It is used only for Active Register login attempts, never logged as a value, and logs only `PasswordSource` plus password length.
+
+## Focused SDK-flow diagnostics phase after 24 failed server-connection login strategies
+
+Real VPS validation with `DAHUA_ACTIVE_REGISTER_PASSWORD_OVERRIDE` confirmed:
+
+- `CLIENT_ListenServer` receives real `DH_DVR_SERIAL_RETURN` / `DH_DVR_SERIAL_RETURN_EX` callbacks from the public Dahua terminal endpoint.
+- `RegisterDeviceId = BT-API-TEST-001` is parsed and matched to the BuildTrack `devices` row.
+- `CLIENT_ResponseDevReg` succeeds with `ErrorHex=0x00000000`.
+- All current `CLIENT_LoginEx`, `CLIENT_LoginEx2`, and `CLIENT_LoginWithHighLevelSecurity` server-connection variants return `LoginHandle=0`, mostly with `0x8000006C`.
+- This rules out DB lookup, Docker networking, firewall reachability, and password decryption as the primary blocker.
+
+The implementation should stop adding blind login permutations. The remaining blocker is the exact Dahua AutoRegister SDK session flow for this terminal/firmware.
+
+### Exact local SDK evidence used in this phase
+
+`backend/vendor/dahua-netsdk/include/dhnetsdk.h:13222-13226` documents the service callback commands:
+
+```cpp
+DH_DVR_SERIAL_RETURN=1,                         // Device send out SN callback char* szDevSerial
+DH_DVR_SERIAL_RETURN_EX, /// Callback together with DH_DVR_SERIAL_RETURN, carrying serial number, redirection and other information, corresponding to NET_CB_SERIAL_RETURN_INFO
+```
+
+`backend/vendor/dahua-netsdk/include/dhnetsdk.h:13229-13235` documents the `DH_DVR_SERIAL_RETURN_EX` payload:
+
+```cpp
+typedef struct tagNET_CB_SERIAL_RETURN_INFO
+{
+    char szDevSerial[64];
+    BOOL bSupportRedirection;
+    char szReserved[1020];
+} NET_CB_SERIAL_RETURN_INFO;
+```
+
+This confirms the current parser layout for command `5`: serial/register ID at offset `0`, redirection flag at offset `64`, and reserved bytes from offset `68`. No login/session handle field is named in this struct.
+
+`backend/vendor/dahua-netsdk/include/dhnetsdk.h:80851-80868` documents the official server-connection login parameter relationship:
+
+```cpp
+// nSpecCap = 2 is login with active registeration, void* pCapParam fill in Actively registered device ID
+CLIENT_LoginEx(... int nSpecCap, void* pCapParam, ...)
+CLIENT_LoginEx2(... EM_LOGIN_SPAC_CAP_TYPE emSpecCap, void* pCapParam, ...)
+```
+
+`backend/vendor/dahua-netsdk/include/dhnetsdk.h:80897-80924` documents `CLIENT_LoginWithHighLevelSecurity`; its `pCapParam` comment explicitly points back to the `CLIENT_LoginEx` relationship.
+
+`backend/vendor/dahua-netsdk/samples/Demo/04.Alarm/dialog.cpp:393` logs in with `CLIENT_LoginWithHighLevelSecurity`, and `backend/vendor/dahua-netsdk/samples/Demo/04.Alarm/dialog.cpp:442` calls `CLIENT_StartListenEx(m_lLoginId)`. This sample demonstrates normal-login alarm subscription, not AutoRegister session acquisition.
+
+`backend/vendor/dahua-netsdk/include/dhnetsdk.h:82154-82160` documents:
+
+```cpp
+CLIENT_ListenServer(char* ip, WORD port, int nTimeout, fServiceCallBack cbListen, LDWORD dwUserData)
+CLIENT_ResponseDevReg(char *devSerial, char* ip, WORD port, BOOL bAccept)
+```
+
+Both functions are confirmed as the Active Register listener/accept path. `CLIENT_ResponseDevReg` returns `BOOL`, not `LLONG`, so it does not itself provide a login handle.
+
+### New raw callback diagnostics
+
+The worker now stores and exposes richer diagnostics for every service callback:
+
+- first 256 bytes as hex (`LastServicePayloadFirst256Hex`, raw-event `PayloadFirstBytesHex`)
+- parsed `RegisterDeviceId`, `Serial`, their offsets, callback remote IP/port
+- parser layout statement for the command (`DH_DVR_SERIAL_RETURN`, `NET_CB_SERIAL_RETURN_INFO`, etc.)
+- heuristic possible-handle candidates scanned from reserved bytes, clearly marked as candidates and not trusted session handles
+
+These fields are available through:
+
+- `GET /api/dahua/active-register/status`
+- `GET /api/dahua/netsdk/diagnostics`
+- `GET /api/dahua/active-register/raw-events?limit=100`
+
+### Controlled experimental subscription flag
+
+A disabled-by-default flag was added:
+
+```text
+DAHUA_ACTIVE_REGISTER_EXPERIMENTAL_SERVICE_HANDLE_SUBSCRIBE=false
+```
+
+When explicitly enabled, the worker may attempt `CLIENT_StartListenEx` on:
+
+- the `fServiceCallBack` `lHandle`
+- any non-zero handle-like candidates found in the `DH_DVR_SERIAL_RETURN_EX` reserved area
+
+Each attempt is logged and persisted as diagnostics only. It does not mark the flow as validated or subscribed unless a real alarm callback later arrives. This preserves the proven conclusion that `fServiceCallBack lHandle` failed as a subscription handle in normal operation (`0x80000004`) while still allowing controlled SDK experiments on a VPS.
+
+### Current conclusion
+
+What is proven working:
+
+- NetSDK native load/init
+- `CLIENT_ListenServer` on VPS ports `7000`/`9500`
+- real public Active Register callback from the Dahua terminal
+- RegisterDeviceId parsing and DB device matching
+- `CLIENT_ResponseDevReg` accept
+- raw callback persistence and diagnostics
+
+What remains blocked:
+
+- the exact SDK-supported way to obtain a real `lLoginID` / session handle after Active Register acceptance for this device/firmware
+- alarm callback delivery for `DH_ALARM_ACCESS_CTL_EVENT = 0x3181`
+
+What should happen next:
+
+- use the enriched payload/offset diagnostics from the real VPS to compare against Dahua's official AutoRegister demo
+- request the official Dahua AutoRegister / RegisterServer sample that shows the post-`CLIENT_ResponseDevReg` session acquisition step
+- avoid adding more blind `LoginEx` permutations until a sample/header comment identifies a different `pCapParam` struct or API flow
+
+CGI polling remains untouched as the working local/demo fallback and continues to feed the shared attendance/security ingestion pipeline.

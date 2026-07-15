@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -32,7 +32,16 @@ public sealed class DahuaNetSdkDiagnostics
     public int? LastServiceCommand { get; set; }
     public string? LastServiceEventType { get; set; }
     public int LastServicePayloadBytes { get; set; }
+    public string? LastServicePayloadFirst256Hex { get; set; }
     public string? LastRegisterDeviceId { get; set; }
+    public int? LastParsedRegisterDeviceIdOffset { get; set; }
+    public string? LastParsedRegisterDeviceId { get; set; }
+    public int? LastParsedSerialOffset { get; set; }
+    public string? LastParsedSerial { get; set; }
+    public string? LastParsedRemoteIp { get; set; }
+    public int? LastParsedRemotePort { get; set; }
+    public string? LastPossibleSessionHandlesJson { get; set; }
+    public string? LastPayloadStructLayout { get; set; }
     public bool ResponseDevRegCalled { get; set; }
     public bool? ResponseDevRegSuccess { get; set; }
     public int? ResponseDevRegErrorSigned { get; set; }
@@ -45,6 +54,8 @@ public sealed class DahuaNetSdkDiagnostics
     public string? ResponseDevRegCommandSource { get; set; }
     public long? LastServiceCallbackHandle { get; set; }
     public bool LastServiceCallbackHandleNonZero { get; set; }
+    public bool ExperimentalServiceHandleSubscribeEnabled { get; set; }
+    public string? LastExperimentalSubscribeJson { get; set; }
     public bool ActiveRegisterSessionHandleFound { get; set; }
     public bool ActiveRegisterSessionHandleValueNonZero { get; set; }
     public long? ActiveRegisterSessionHandleValue { get; set; }
@@ -81,6 +92,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private readonly ConcurrentDictionary<Guid, IntPtr> _loginHandleByDeviceId = new();
     private readonly ConcurrentDictionary<Guid, byte> _subscriptionInProgress = new();
     private readonly ConcurrentDictionary<string, byte> _acceptedRegistrationKeys = new();
+    private readonly ConcurrentDictionary<string, byte> _experimentalSubscribeAttemptKeys = new();
     private readonly object _diagnosticsLock = new();
     private long _diagnosticsPersistVersion;
     private readonly DahuaNetSdkDiagnostics _diagnostics = new()
@@ -127,7 +139,16 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     LastServiceCommand = _diagnostics.LastServiceCommand,
                     LastServiceEventType = _diagnostics.LastServiceEventType,
                     LastServicePayloadBytes = _diagnostics.LastServicePayloadBytes,
+                    LastServicePayloadFirst256Hex = _diagnostics.LastServicePayloadFirst256Hex,
                     LastRegisterDeviceId = _diagnostics.LastRegisterDeviceId,
+                    LastParsedRegisterDeviceIdOffset = _diagnostics.LastParsedRegisterDeviceIdOffset,
+                    LastParsedRegisterDeviceId = _diagnostics.LastParsedRegisterDeviceId,
+                    LastParsedSerialOffset = _diagnostics.LastParsedSerialOffset,
+                    LastParsedSerial = _diagnostics.LastParsedSerial,
+                    LastParsedRemoteIp = _diagnostics.LastParsedRemoteIp,
+                    LastParsedRemotePort = _diagnostics.LastParsedRemotePort,
+                    LastPossibleSessionHandlesJson = _diagnostics.LastPossibleSessionHandlesJson,
+                    LastPayloadStructLayout = _diagnostics.LastPayloadStructLayout,
                     ResponseDevRegCalled = _diagnostics.ResponseDevRegCalled,
                     ResponseDevRegSuccess = _diagnostics.ResponseDevRegSuccess,
                     ResponseDevRegErrorSigned = _diagnostics.ResponseDevRegErrorSigned,
@@ -140,6 +161,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     ResponseDevRegCommandSource = _diagnostics.ResponseDevRegCommandSource,
                     LastServiceCallbackHandle = _diagnostics.LastServiceCallbackHandle,
                     LastServiceCallbackHandleNonZero = _diagnostics.LastServiceCallbackHandleNonZero,
+                    ExperimentalServiceHandleSubscribeEnabled = _diagnostics.ExperimentalServiceHandleSubscribeEnabled,
+                    LastExperimentalSubscribeJson = _diagnostics.LastExperimentalSubscribeJson,
                     ActiveRegisterSessionHandleFound = _diagnostics.ActiveRegisterSessionHandleFound,
                     ActiveRegisterSessionHandleValueNonZero = _diagnostics.ActiveRegisterSessionHandleValueNonZero,
                     ActiveRegisterSessionHandleValue = _diagnostics.ActiveRegisterSessionHandleValue,
@@ -385,13 +408,34 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var payload = CopyPayload(param, paramLength);
         var listenerPort = _listenPortByHandle.GetValueOrDefault(listenHandle, devicePort);
         var eventType = GetCommandName(command);
-        logger.LogInformation("Active Register service callback received. Command={Command}, EventType={EventType}, PayloadBytes={PayloadBytes}", command, eventType, payload.Length);
+        var payloadDiagnostics = DahuaActiveRegisterPayloadParser.Inspect(command, payload, deviceIp, devicePort, listenHandle);
+        logger.LogInformation("Active Register service callback received. Command={Command}, EventType={EventType}, PayloadBytes={PayloadBytes}, First256Hex={First256Hex}", command, eventType, payload.Length, payloadDiagnostics.PayloadFirst256Hex);
         logger.LogInformation("Service callback lHandle={Handle}, Command={Command}, EventType={EventType}", listenHandle.ToInt64(), command, eventType);
+        logger.LogInformation("Active Register payload parse diagnostics. StructLayout={StructLayout}, RegisterIdOffset={RegisterIdOffset}, RegisterId={RegisterId}, SerialOffset={SerialOffset}, Serial={Serial}, Remote={RemoteIp}:{RemotePort}, PossibleHandles={PossibleHandles}",
+            payloadDiagnostics.StructLayout,
+            payloadDiagnostics.RegisterDeviceIdOffset,
+            payloadDiagnostics.RegisterDeviceId,
+            payloadDiagnostics.SerialOffset,
+            payloadDiagnostics.Serial,
+            payloadDiagnostics.RemoteIp,
+            payloadDiagnostics.RemotePort,
+            JsonSerializer.Serialize(payloadDiagnostics.PossibleSessionHandles));
         lock (_diagnosticsLock)
         {
             _diagnostics.LastServiceCommand = command;
             _diagnostics.LastServiceEventType = eventType;
             _diagnostics.LastServicePayloadBytes = payload.Length;
+            _diagnostics.LastServicePayloadFirst256Hex = payloadDiagnostics.PayloadFirst256Hex;
+            _diagnostics.LastRegisterDeviceId = payloadDiagnostics.RegisterDeviceId;
+            _diagnostics.LastParsedRegisterDeviceIdOffset = payloadDiagnostics.RegisterDeviceIdOffset;
+            _diagnostics.LastParsedRegisterDeviceId = payloadDiagnostics.RegisterDeviceId;
+            _diagnostics.LastParsedSerialOffset = payloadDiagnostics.SerialOffset;
+            _diagnostics.LastParsedSerial = payloadDiagnostics.Serial;
+            _diagnostics.LastParsedRemoteIp = payloadDiagnostics.RemoteIp;
+            _diagnostics.LastParsedRemotePort = payloadDiagnostics.RemotePort;
+            _diagnostics.LastPossibleSessionHandlesJson = JsonSerializer.Serialize(payloadDiagnostics.PossibleSessionHandles);
+            _diagnostics.LastPayloadStructLayout = payloadDiagnostics.StructLayout;
+            _diagnostics.ExperimentalServiceHandleSubscribeEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_EXPERIMENTAL_SERVICE_HANDLE_SUBSCRIBE"]);
             _diagnostics.LastServiceCallbackHandle = listenHandle.ToInt64();
             _diagnostics.LastServiceCallbackHandleNonZero = listenHandle != IntPtr.Zero;
         }
@@ -400,7 +444,6 @@ public sealed class DahuaNetSdkActiveRegisterService(
         _ = Task.Run(() => HandleServiceCallbackAsync(deviceIp, devicePort, listenerPort, command, payload, listenHandle));
         return 0;
     }
-
     private bool OnAlarmMessageCallback(int command, IntPtr loginHandle, IntPtr payload, uint payloadLength, string deviceIp, int devicePort, IntPtr userData)
     {
         logger.LogInformation("NetSDK alarm callback received. Command=0x{Command:X}, PayloadBytes={PayloadBytes}", command, payloadLength);
@@ -421,6 +464,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
 
             var registration = DahuaActiveRegisterPayloadParser.Parse(command, payload);
+            var payloadDiagnostics = DahuaActiveRegisterPayloadParser.Inspect(command, payload, remoteIp, remotePort, serviceCallbackHandle);
             var registerDeviceId = registration.RegisterDeviceId;
             var eventType = GetCommandName(command);
             var decodeResult = TryDecodeActiveRegisterPayload(command, payload);
@@ -437,7 +481,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (command == -1)
             {
-                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, CancellationToken.None);
+                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
                 SetStatus("DeviceDisconnected");
                 await connectionLogger.LogAsync(null, registerDeviceId, remoteIp, remotePort, "netsdk_device_disconnected", "Dahua Active Register device disconnected during verification", new { command, registerDeviceId }, CancellationToken.None);
                 return;
@@ -463,7 +507,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (device is null)
             {
-                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, decodeResult.DecodeStatus, decodeResult.DecodedJson, CancellationToken.None);
+                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, decodeResult.DecodeStatus, decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
                 await connectionLogger.LogAsync(null, registerDeviceId, remoteIp, remotePort, "netsdk_unmatched", "Dahua NetSDK Active Register service callback did not match a known device", raw, CancellationToken.None);
                 logger.LogWarning("Dahua NetSDK callback did not match a known device. RegisterDeviceId {RegisterDeviceId}, remote {RemoteIp}:{RemotePort}", registerDeviceId, remoteIp, remotePort);
                 return;
@@ -484,7 +528,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 }
             }
 
-            await PersistActiveRegisterRawEventAsync(db, device.Id, device.RegisterDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, rawDecodeStatus, decodeResult.DecodedJson, CancellationToken.None);
+            await PersistActiveRegisterRawEventAsync(db, device.Id, device.RegisterDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, rawDecodeStatus, decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
 
             device.Status = DeviceStatus.Online;
             device.LastKnownIp = remoteIp;
@@ -566,6 +610,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
 
             SetStatus("RegisterAccepted");
+            await TryExperimentalServiceHandleSubscriptionsAsync(device, payloadDiagnostics, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, CancellationToken.None);
             var passwordProtector = scope.ServiceProvider.GetRequiredService<IPasswordProtector>();
             var plainPassword = passwordProtector.Unprotect(device.EncryptedPassword);
             var subscribed = await EnsureSubscribedAsync(device, registration, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, device.Username, plainPassword, CancellationToken.None);
@@ -581,6 +626,80 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
     }
 
+    private async Task TryExperimentalServiceHandleSubscriptionsAsync(Device device, DahuaActiveRegisterPayloadDiagnostics payloadDiagnostics, IntPtr serviceCallbackHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, CancellationToken cancellationToken)
+    {
+        var enabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_EXPERIMENTAL_SERVICE_HANDLE_SUBSCRIBE"]);
+        lock (_diagnosticsLock) _diagnostics.ExperimentalServiceHandleSubscribeEnabled = enabled;
+        if (!enabled || _nativeClient is null) return;
+
+        var candidates = new List<(string Strategy, long Handle)>();
+        if (serviceCallbackHandle != IntPtr.Zero) candidates.Add(("ServiceCallbackLHandle", serviceCallbackHandle.ToInt64()));
+        foreach (var handle in payloadDiagnostics.PossibleSessionHandles.Where(x => x != 0 && x != serviceCallbackHandle.ToInt64()).Distinct())
+        {
+            candidates.Add(("PayloadCandidateHandle", handle));
+        }
+
+        if (candidates.Count == 0)
+        {
+            var emptyJson = JsonSerializer.Serialize(new { enabled, attempts = Array.Empty<object>(), reason = "No non-zero candidate handle found" });
+            lock (_diagnosticsLock) _diagnostics.LastExperimentalSubscribeJson = emptyJson;
+            return;
+        }
+
+        var attempts = new List<object>();
+        foreach (var candidate in candidates)
+        {
+            var key = $"{device.Id}:{remoteIp}:{remotePort}:{candidate.Strategy}:{candidate.Handle}";
+            if (!_experimentalSubscribeAttemptKeys.TryAdd(key, 0))
+            {
+                attempts.Add(new { candidate.Strategy, candidate.Handle, skipped = true, reason = "AlreadyAttemptedForThisSession" });
+                continue;
+            }
+
+            var handle = new IntPtr(candidate.Handle);
+            logger.LogWarning("Experimental CLIENT_StartListenEx attempt after ResponseDevReg. Strategy={Strategy}, Handle={Handle}. This is diagnostics only; success is not treated as validated until alarm callbacks arrive.", candidate.Strategy, candidate.Handle);
+            var result = _nativeClient.TryStartListenEx(handle);
+            var error = _nativeClient.LastErrorCode;
+            logger.LogWarning("Experimental CLIENT_StartListenEx result. Strategy={Strategy}, Handle={Handle}, Result={Result}, ErrorSigned={ErrorSigned}, ErrorHex={ErrorHex}", candidate.Strategy, candidate.Handle, result, error, ToHex(error));
+
+            if (result)
+            {
+                _deviceIdByLoginHandle[handle] = device.Id;
+            }
+
+            var attempt = new
+            {
+                candidate.Strategy,
+                candidate.Handle,
+                result,
+                errorSigned = error,
+                errorHex = ToHex(error),
+                mappedForAlarmCallback = result,
+                validatedByAlarmCallback = false,
+            };
+            attempts.Add(attempt);
+            await connectionLogger.LogAsync(
+                device.Id,
+                device.RegisterDeviceId,
+                remoteIp,
+                remotePort,
+                "netsdk_experimental_startlistenex_attempt",
+                "Experimental CLIENT_StartListenEx attempt after ResponseDevReg; diagnostics only",
+                attempt,
+                cancellationToken);
+        }
+
+        var json = JsonSerializer.Serialize(new
+        {
+            enabled,
+            remoteIp,
+            remotePort,
+            registerDeviceId = device.RegisterDeviceId,
+            attempts,
+        });
+        lock (_diagnosticsLock) _diagnostics.LastExperimentalSubscribeJson = json;
+        PersistDiagnostics();
+    }
     private async Task<bool> EnsureSubscribedAsync(Device device, DahuaActiveRegisterRegistration registration, IntPtr serviceCallbackHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, string username, string password, CancellationToken cancellationToken)
     {
         if (_nativeClient is null) return false;
@@ -905,6 +1024,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
         byte[] payload,
         string decodeStatus,
         string? decodedJson,
+        DahuaActiveRegisterPayloadDiagnostics? payloadDiagnostics,
         CancellationToken cancellationToken)
     {
         if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_DIAGNOSTICS_ENABLED"], defaultValue: true)) return;
@@ -921,10 +1041,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 CallbackCommand = command,
                 CallbackCommandName = commandName,
                 PayloadBytes = payload.Length,
-                PayloadFirstBytesHex = Convert.ToHexString(payload.Take(128).ToArray()),
+                PayloadFirstBytesHex = Convert.ToHexString(payload.Take(256).ToArray()),
                 PayloadBase64 = payload.Length == 0 ? null : Convert.ToBase64String(payload),
                 DecodeStatus = decodeStatus,
-                DecodedJson = decodedJson,
+                DecodedJson = BuildRawEventDecodedJson(decodedJson, payloadDiagnostics),
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await db.SaveChangesAsync(cancellationToken);
@@ -935,6 +1055,30 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
     }
 
+
+    private static string? BuildRawEventDecodedJson(string? decodedJson, DahuaActiveRegisterPayloadDiagnostics? payloadDiagnostics)
+    {
+        if (decodedJson is null && payloadDiagnostics is null) return null;
+
+        JsonElement? decoded = null;
+        if (!string.IsNullOrWhiteSpace(decodedJson))
+        {
+            try
+            {
+                decoded = JsonSerializer.Deserialize<JsonElement>(decodedJson);
+            }
+            catch (JsonException)
+            {
+                decoded = JsonSerializer.SerializeToElement(new { raw = decodedJson });
+            }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            decoded,
+            payloadDiagnostics,
+        });
+    }
     private ActiveRegisterPayloadDecodeResult TryDecodeActiveRegisterPayload(int command, byte[] payload)
     {
         if (payload.Length == 0) return new ActiveRegisterPayloadDecodeResult("EmptyPayload", null, null);
@@ -1041,7 +1185,16 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.LastServiceCommand = snapshot.LastServiceCommand;
                 entity.LastServiceEventType = snapshot.LastServiceEventType;
                 entity.LastServicePayloadBytes = snapshot.LastServicePayloadBytes;
+                entity.LastServicePayloadFirst256Hex = snapshot.LastServicePayloadFirst256Hex;
                 entity.LastRegisterDeviceId = snapshot.LastRegisterDeviceId;
+                entity.LastParsedRegisterDeviceIdOffset = snapshot.LastParsedRegisterDeviceIdOffset;
+                entity.LastParsedRegisterDeviceId = snapshot.LastParsedRegisterDeviceId;
+                entity.LastParsedSerialOffset = snapshot.LastParsedSerialOffset;
+                entity.LastParsedSerial = snapshot.LastParsedSerial;
+                entity.LastParsedRemoteIp = snapshot.LastParsedRemoteIp;
+                entity.LastParsedRemotePort = snapshot.LastParsedRemotePort;
+                entity.LastPossibleSessionHandlesJson = snapshot.LastPossibleSessionHandlesJson;
+                entity.LastPayloadStructLayout = snapshot.LastPayloadStructLayout;
                 entity.ResponseDevRegCalled = snapshot.ResponseDevRegCalled;
                 entity.ResponseDevRegSuccess = snapshot.ResponseDevRegSuccess;
                 entity.ResponseDevRegErrorSigned = snapshot.ResponseDevRegErrorSigned;
@@ -1054,6 +1207,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.ResponseDevRegCommandSource = snapshot.ResponseDevRegCommandSource;
                 entity.LastServiceCallbackHandle = snapshot.LastServiceCallbackHandle;
                 entity.LastServiceCallbackHandleNonZero = snapshot.LastServiceCallbackHandleNonZero;
+                entity.ExperimentalServiceHandleSubscribeEnabled = snapshot.ExperimentalServiceHandleSubscribeEnabled;
+                entity.LastExperimentalSubscribeJson = snapshot.LastExperimentalSubscribeJson;
                 entity.ActiveRegisterSessionHandleFound = snapshot.ActiveRegisterSessionHandleFound;
                 entity.ActiveRegisterSessionHandleValueNonZero = snapshot.ActiveRegisterSessionHandleValueNonZero;
                 entity.ActiveRegisterSessionHandleValue = snapshot.ActiveRegisterSessionHandleValue;
@@ -1118,9 +1273,87 @@ public sealed record DahuaActiveRegisterRegistration(
     bool SupportsRedirection,
     bool HasSessionHandle,
     IntPtr SessionHandle);
+public sealed record DahuaActiveRegisterPayloadDiagnostics(
+    int Command,
+    string CommandName,
+    int PayloadBytes,
+    string PayloadFirst256Hex,
+    string? RegisterDeviceId,
+    int? RegisterDeviceIdOffset,
+    string? Serial,
+    int? SerialOffset,
+    string? RemoteIp,
+    int RemotePort,
+    long ServiceCallbackHandle,
+    string StructLayout,
+    IReadOnlyList<long> PossibleSessionHandles);
 
 public static class DahuaActiveRegisterPayloadParser
 {
+    public static DahuaActiveRegisterPayloadDiagnostics Inspect(int command, byte[] payload, string? remoteIp, int remotePort, IntPtr serviceCallbackHandle)
+    {
+        var registration = Parse(command, payload);
+        var first256Hex = Convert.ToHexString(payload.Take(256).ToArray());
+        return command switch
+        {
+            1 => new DahuaActiveRegisterPayloadDiagnostics(
+                command,
+                registration.Kind,
+                payload.Length,
+                first256Hex,
+                registration.RegisterDeviceId,
+                registration.RegisterDeviceId is null ? null : 0,
+                registration.Serial,
+                registration.Serial is null ? null : 0,
+                remoteIp,
+                remotePort,
+                serviceCallbackHandle.ToInt64(),
+                "DH_DVR_SERIAL_RETURN: callback payload is char* szDevSerial; parser reads null-terminated ASCII at offset 0.",
+                []),
+            5 => new DahuaActiveRegisterPayloadDiagnostics(
+                command,
+                registration.Kind,
+                payload.Length,
+                first256Hex,
+                registration.RegisterDeviceId,
+                registration.RegisterDeviceId is null ? null : 0,
+                registration.Serial,
+                registration.Serial is null ? null : 0,
+                remoteIp,
+                remotePort,
+                serviceCallbackHandle.ToInt64(),
+                "NET_CB_SERIAL_RETURN_INFO: szDevSerial[64] offset 0, BOOL bSupportRedirection offset 64, szReserved[1020] offset 68, sizeof 1088. Header exposes no login/session handle field.",
+                ScanPossibleHandles(payload, startOffset: 68)),
+            4 => new DahuaActiveRegisterPayloadDiagnostics(
+                command,
+                registration.Kind,
+                payload.Length,
+                first256Hex,
+                registration.RegisterDeviceId,
+                registration.RegisterDeviceId is null ? null : 0,
+                registration.Serial,
+                registration.Serial is null ? null : 0,
+                remoteIp,
+                remotePort,
+                serviceCallbackHandle.ToInt64(),
+                "NET_CB_AUTOREGISTER_PRIMARY_BACKUP_INFO: szDevSerial[64] offset 0, nType offset 64, szReserved[1020] offset 68.",
+                ScanPossibleHandles(payload, startOffset: 68)),
+            _ => new DahuaActiveRegisterPayloadDiagnostics(
+                command,
+                registration.Kind,
+                payload.Length,
+                first256Hex,
+                registration.RegisterDeviceId,
+                null,
+                registration.Serial,
+                null,
+                remoteIp,
+                remotePort,
+                serviceCallbackHandle.ToInt64(),
+                "Unknown service callback command; no SDK struct layout is mapped.",
+                ScanPossibleHandles(payload, startOffset: 0)),
+        };
+    }
     public static DahuaActiveRegisterRegistration Parse(int command, byte[] payload)
     {
         return command switch
@@ -1151,6 +1384,25 @@ public static class DahuaActiveRegisterPayloadParser
         return new DahuaActiveRegisterRegistration("NET_DEV_AUTOREGISTER_PRIMARY_BACKUP", EmptyToNull(serial), EmptyToNull(serial), false, false, IntPtr.Zero);
     }
 
+
+    private static IReadOnlyList<long> ScanPossibleHandles(byte[] payload, int startOffset)
+    {
+        var handles = new List<long>();
+        if (payload.Length < startOffset + 8) return handles;
+
+        var maxOffset = Math.Min(payload.Length - 8, startOffset + 256);
+        for (var offset = Math.Max(0, startOffset); offset <= maxOffset; offset += 4)
+        {
+            var value = BitConverter.ToInt64(payload, offset);
+            if (value > 4096 && value < 0x00007FFFFFFFFFFF && !handles.Contains(value))
+            {
+                handles.Add(value);
+                if (handles.Count >= 4) break;
+            }
+        }
+
+        return handles;
+    }
     private static string? TryParseAsciiRegisterId(byte[] payload)
     {
         if (DahuaSdkAccessEventNormalizer.TryParseAsciiKeyValuePayload(payload, out var sdkEvent)) return sdkEvent.RegisterDeviceId;
@@ -1168,6 +1420,20 @@ public static class DahuaActiveRegisterPayloadParser
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

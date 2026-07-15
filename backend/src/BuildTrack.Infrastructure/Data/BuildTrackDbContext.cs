@@ -141,7 +141,14 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.ActiveRegisterServiceMode).HasMaxLength(80).IsRequired();
             entity.Property(x => x.ExperimentalStartServiceLastDecodeStatus).HasMaxLength(1000);
             entity.Property(x => x.ExperimentalStartServiceErrorHex).HasMaxLength(40);
+                        entity.Property(x => x.LastServicePayloadFirst256Hex).HasMaxLength(512);
             entity.Property(x => x.LastRegisterDeviceId).HasMaxLength(160);
+            entity.Property(x => x.LastParsedRegisterDeviceId).HasMaxLength(160);
+            entity.Property(x => x.LastParsedSerial).HasMaxLength(160);
+            entity.Property(x => x.LastParsedRemoteIp).HasMaxLength(80);
+            entity.Property(x => x.LastPossibleSessionHandlesJson).HasColumnType("jsonb");
+            entity.Property(x => x.LastPayloadStructLayout).HasMaxLength(1000);
+            entity.Property(x => x.LastExperimentalSubscribeJson).HasColumnType("jsonb");
             entity.Property(x => x.ResponseDevRegErrorHex).HasMaxLength(40);
             entity.Property(x => x.ResponseDevRegDevSerial).HasMaxLength(160);
             entity.Property(x => x.ResponseDevRegIp).HasMaxLength(80);
@@ -162,7 +169,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.RegisterDeviceId).HasMaxLength(160);
             entity.Property(x => x.RemoteIp).HasMaxLength(80);
             entity.Property(x => x.CallbackCommandName).HasMaxLength(120);
-            entity.Property(x => x.PayloadFirstBytesHex).HasMaxLength(256);
+            entity.Property(x => x.PayloadFirstBytesHex).HasMaxLength(512);
             entity.Property(x => x.PayloadBase64);
             entity.Property(x => x.DecodeStatus).HasMaxLength(80).IsRequired();
             entity.Property(x => x.DecodedJson).HasColumnType("jsonb");
@@ -184,6 +191,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         });
     }
 }
+
 
 
 

@@ -1,4 +1,4 @@
-﻿services:
+services:
   postgres:
     image: postgres:16-alpine
     container_name: buildtrack-postgres
@@ -58,6 +58,7 @@
       DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED: "true"
       DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK: "true"
       DAHUA_ACTIVE_REGISTER_SERVICE_MODE: ListenServer
+      DAHUA_ACTIVE_REGISTER_EXPERIMENTAL_SERVICE_HANDLE_SUBSCRIBE: "false"
 
       DAHUA_CGI_POLLING_ENABLED: "false"
       DAHUA_CGI_HOST: "192.168.31.174"
@@ -100,6 +101,7 @@
 
 volumes:
   buildtrack-postgres:
+
 
 
 

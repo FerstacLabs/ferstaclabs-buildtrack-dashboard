@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using BuildTrack.Api.Contracts;
 using BuildTrack.Domain.Dahua;
@@ -167,7 +167,7 @@ app.MapPost("/api/devices/{id:guid}/test-config", async (Guid id, BuildTrackDbCo
         device.Mode,
         activeRegisterReady = device.Mode is DeviceMode.ActiveRegister or DeviceMode.Simulator,
         nativeSdkFound = probe.HasNativeSdk,
-        warning = probe.HasNativeSdk ? null : "Active Register TCP listener iР•СџlР™в„ўyir. Dahua NetSDK native fayllarР”В± olmadР”В±Р”СџР”В± Р“СР“В§Р“Сn real face/access event decode hР™в„ўlР™в„ў aktiv deyil. SDK fayllarР”В±nР”В± backend/vendor/dahua-netsdk/{win-x64|linux-x64} altР”В±na yerlР™в„ўР•Сџdirin."
+        warning = probe.HasNativeSdk ? null : "Active Register TCP listener iЕџlЙ™yir. Dahua NetSDK native fayllarД± olmadД±ДџД± ГјГ§Гјn real face/access event decode hЙ™lЙ™ aktiv deyil. SDK fayllarД±nД± backend/vendor/dahua-netsdk/{win-x64|linux-x64} altД±na yerlЙ™Еџdirin."
     });
 });
 
@@ -423,6 +423,7 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
         lastCallbackTime = lastRawEvent?.CreatedAt,
         lastCommand = lastRawEvent?.CallbackCommandName ?? diagnostics?.LastServiceEventType,
         lastPayloadBytes = lastRawEvent?.PayloadBytes ?? diagnostics?.LastServicePayloadBytes ?? 0,
+        lastPayloadFirst256Hex = lastRawEvent?.PayloadFirstBytesHex ?? diagnostics?.LastServicePayloadFirst256Hex,
         rawEventCount,
         decodedEventCount,
         ingestedEventCount,
@@ -448,7 +449,16 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
             diagnostics.LastServiceCommand,
             diagnostics.LastServiceEventType,
             diagnostics.LastServicePayloadBytes,
+            diagnostics.LastServicePayloadFirst256Hex,
             diagnostics.LastRegisterDeviceId,
+            diagnostics.LastParsedRegisterDeviceIdOffset,
+            diagnostics.LastParsedRegisterDeviceId,
+            diagnostics.LastParsedSerialOffset,
+            diagnostics.LastParsedSerial,
+            diagnostics.LastParsedRemoteIp,
+            diagnostics.LastParsedRemotePort,
+            diagnostics.LastPossibleSessionHandlesJson,
+            diagnostics.LastPayloadStructLayout,
             diagnostics.ResponseDevRegCalled,
             diagnostics.ResponseDevRegSuccess,
             diagnostics.ResponseDevRegErrorSigned,
@@ -468,6 +478,8 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
             diagnostics.StartListenExSuccess,
             diagnostics.StartListenExErrorSigned,
             diagnostics.StartListenExErrorHex,
+            diagnostics.ExperimentalServiceHandleSubscribeEnabled,
+            diagnostics.LastExperimentalSubscribeJson,
             diagnostics.LastDecodeError,
         },
         workerDiagnosticsPresent = diagnostics is not null,
@@ -546,7 +558,16 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         lastServiceCommand = persisted.LastServiceCommand,
         lastServiceEventType = persisted.LastServiceEventType,
         lastServicePayloadBytes = persisted.LastServicePayloadBytes,
+        lastServicePayloadFirst256Hex = persisted.LastServicePayloadFirst256Hex,
         lastRegisterDeviceId = persisted.LastRegisterDeviceId,
+        lastParsedRegisterDeviceIdOffset = persisted.LastParsedRegisterDeviceIdOffset,
+        lastParsedRegisterDeviceId = persisted.LastParsedRegisterDeviceId,
+        lastParsedSerialOffset = persisted.LastParsedSerialOffset,
+        lastParsedSerial = persisted.LastParsedSerial,
+        lastParsedRemoteIp = persisted.LastParsedRemoteIp,
+        lastParsedRemotePort = persisted.LastParsedRemotePort,
+        lastPossibleSessionHandlesJson = persisted.LastPossibleSessionHandlesJson,
+        lastPayloadStructLayout = persisted.LastPayloadStructLayout,
         responseDevRegCalled = persisted.ResponseDevRegCalled,
         responseDevRegSuccess = persisted.ResponseDevRegSuccess,
         responseDevRegErrorSigned = persisted.ResponseDevRegErrorSigned,
@@ -568,6 +589,8 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         startListenExSuccess = persisted.StartListenExSuccess,
         startListenExErrorSigned = persisted.StartListenExErrorSigned,
         startListenExErrorHex = persisted.StartListenExErrorHex,
+        experimentalServiceHandleSubscribeEnabled = persisted.ExperimentalServiceHandleSubscribeEnabled,
+        lastExperimentalSubscribeJson = persisted.LastExperimentalSubscribeJson,
         lastAlarmCommand = persisted.LastAlarmCommand,
         lastDecodeError = persisted.LastDecodeError,
         netSdkDecodeStatus = persisted.NetSdkDecodeStatus,
@@ -748,6 +771,9 @@ static async Task EnsureDatabaseWithRetryAsync(IServiceProvider services, ILogge
         }
     }
 }
+
+
+
 
 
 
