@@ -1,4 +1,4 @@
-﻿using BuildTrack.Domain.Entities;
+using BuildTrack.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildTrack.Infrastructure.Data;
@@ -159,6 +159,10 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.LoginErrorHex).HasMaxLength(40);
             entity.Property(x => x.LoginNativeErrorHex).HasMaxLength(40);
             entity.Property(x => x.StartListenExErrorHex).HasMaxLength(40);
+            entity.Property(x => x.LastAlarmCommandName).HasMaxLength(120);
+            entity.Property(x => x.LastAlarmPayloadFirst256Hex).HasMaxLength(512);
+            entity.Property(x => x.LastAlarmDecodeStatus).HasMaxLength(120);
+            entity.Property(x => x.LastDecodedAlarmJson).HasColumnType("jsonb");
             entity.Property(x => x.LastDecodeError).HasMaxLength(1000);
             entity.Property(x => x.NetSdkDecodeStatus).HasMaxLength(80).IsRequired();
         });
@@ -191,6 +195,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         });
     }
 }
+
 
 
 

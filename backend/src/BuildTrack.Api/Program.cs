@@ -480,6 +480,11 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
             diagnostics.StartListenExErrorHex,
             diagnostics.ExperimentalServiceHandleSubscribeEnabled,
             diagnostics.LastExperimentalSubscribeJson,
+            diagnostics.LastAlarmCommand,
+            diagnostics.LastAlarmCommandName,
+            diagnostics.LastAlarmPayloadFirst256Hex,
+            diagnostics.LastAlarmDecodeStatus,
+            diagnostics.LastDecodedAlarmJson,
             diagnostics.LastDecodeError,
         },
         workerDiagnosticsPresent = diagnostics is not null,
@@ -592,6 +597,10 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         experimentalServiceHandleSubscribeEnabled = persisted.ExperimentalServiceHandleSubscribeEnabled,
         lastExperimentalSubscribeJson = persisted.LastExperimentalSubscribeJson,
         lastAlarmCommand = persisted.LastAlarmCommand,
+        lastAlarmCommandName = persisted.LastAlarmCommandName,
+        lastAlarmPayloadFirst256Hex = persisted.LastAlarmPayloadFirst256Hex,
+        lastAlarmDecodeStatus = persisted.LastAlarmDecodeStatus,
+        lastDecodedAlarmJson = persisted.LastDecodedAlarmJson,
         lastDecodeError = persisted.LastDecodeError,
         netSdkDecodeStatus = persisted.NetSdkDecodeStatus,
         updatedAt = persisted.UpdatedAt,
@@ -771,6 +780,7 @@ static async Task EnsureDatabaseWithRetryAsync(IServiceProvider services, ILogge
         }
     }
 }
+
 
 
 

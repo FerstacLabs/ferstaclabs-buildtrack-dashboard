@@ -74,6 +74,10 @@ public sealed class DahuaNetSdkDiagnostics
     public int? StartListenExErrorSigned { get; set; }
     public string? StartListenExErrorHex { get; set; }
     public int? LastAlarmCommand { get; set; }
+    public string? LastAlarmCommandName { get; set; }
+    public string? LastAlarmPayloadFirst256Hex { get; set; }
+    public string? LastAlarmDecodeStatus { get; set; }
+    public string? LastDecodedAlarmJson { get; set; }
     public string? LastDecodeError { get; set; }
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
 }
@@ -181,6 +185,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     StartListenExErrorSigned = _diagnostics.StartListenExErrorSigned,
                     StartListenExErrorHex = _diagnostics.StartListenExErrorHex,
                     LastAlarmCommand = _diagnostics.LastAlarmCommand,
+                    LastAlarmCommandName = _diagnostics.LastAlarmCommandName,
+                    LastAlarmPayloadFirst256Hex = _diagnostics.LastAlarmPayloadFirst256Hex,
+                    LastAlarmDecodeStatus = _diagnostics.LastAlarmDecodeStatus,
+                    LastDecodedAlarmJson = _diagnostics.LastDecodedAlarmJson,
                     LastDecodeError = _diagnostics.LastDecodeError,
                     NetSdkDecodeStatus = _diagnostics.NetSdkDecodeStatus,
                 };
@@ -446,14 +454,20 @@ public sealed class DahuaNetSdkActiveRegisterService(
     }
     private bool OnAlarmMessageCallback(int command, IntPtr loginHandle, IntPtr payload, uint payloadLength, string deviceIp, int devicePort, IntPtr userData)
     {
-        logger.LogInformation("NetSDK alarm callback received. Command=0x{Command:X}, PayloadBytes={PayloadBytes}", command, payloadLength);
-        lock (_diagnosticsLock) _diagnostics.LastAlarmCommand = command;
-        PersistDiagnostics();
         var payloadCopy = CopyPayload(payload, payloadLength);
+        var commandName = DahuaNetSdkAlarmCommandDiagnostics.ResolveCommandName(command);
+        var first256Hex = Convert.ToHexString(payloadCopy.Take(256).ToArray());
+        logger.LogInformation("NetSDK alarm callback received. Command=0x{Command:X}, CommandName={CommandName}, PayloadBytes={PayloadBytes}, First256Hex={First256Hex}", command, commandName, payloadLength, first256Hex);
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.LastAlarmCommand = command;
+            _diagnostics.LastAlarmCommandName = commandName;
+            _diagnostics.LastAlarmPayloadFirst256Hex = first256Hex;
+        }
+        PersistDiagnostics();
         _ = Task.Run(() => HandleAlarmCallbackAsync(command, loginHandle, payloadCopy, deviceIp, devicePort));
         return true;
     }
-
     private async Task HandleServiceCallbackAsync(string? remoteIp, int remotePort, int listenerPort, int command, byte[] payload, IntPtr serviceCallbackHandle)
     {
         try
@@ -934,23 +948,42 @@ public sealed class DahuaNetSdkActiveRegisterService(
             device = await db.Devices.FirstOrDefaultAsync(x => x.Id == mappedDeviceId, CancellationToken.None);
         }
 
+        var alarmDiagnostic = DahuaNetSdkAlarmCommandDiagnostics.Inspect(command, payload);
+        var alarmDiagnosticJson = JsonSerializer.Serialize(alarmDiagnostic);
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.LastAlarmCommand = command;
+            _diagnostics.LastAlarmCommandName = alarmDiagnostic.CommandName;
+            _diagnostics.LastAlarmPayloadFirst256Hex = alarmDiagnostic.PayloadFirst256Hex;
+            _diagnostics.LastAlarmDecodeStatus = alarmDiagnostic.DecodeStatus;
+            _diagnostics.LastDecodedAlarmJson = alarmDiagnosticJson;
+            _diagnostics.LastDecodeError = alarmDiagnostic.FailureReason;
+        }
+        PersistDiagnostics();
+
         var rawPayload = DahuaRawPayloadFormatter.CreateLogPayload(payload, 0, remoteIp, remotePort);
         var raw = new
         {
             command,
             commandHex = $"0x{command:X}",
-            commandName = GetCommandName(command),
+            commandName = alarmDiagnostic.CommandName,
+            structName = alarmDiagnostic.StructName,
+            decodeStatus = alarmDiagnostic.DecodeStatus,
+            decodeFailureReason = alarmDiagnostic.FailureReason,
+            decodedFields = alarmDiagnostic.Fields,
             loginHandle = loginHandle.ToInt64(),
             rawPayload,
         };
 
+        await PersistActiveRegisterRawEventAsync(db, device?.Id, device?.RegisterDeviceId, remoteIp, remotePort, 0, command, alarmDiagnostic.CommandName, payload, alarmDiagnostic.DecodeStatus, alarmDiagnosticJson, null, CancellationToken.None);
+
+        logger.LogInformation("NetSDK alarm diagnostic. Command=0x{Command:X}, CommandName={CommandName}, StructName={StructName}, PayloadBytes={PayloadBytes}, DecodeStatus={DecodeStatus}, Reason={Reason}", command, alarmDiagnostic.CommandName, alarmDiagnostic.StructName, payload.Length, alarmDiagnostic.DecodeStatus, alarmDiagnostic.FailureReason);
+
         if (command != DahuaNetSdkAccessEventDecoder.AccessControlEventCommand)
         {
-            logger.LogDebug("NetSDK alarm callback skipped. Command=0x{Command:X}, PayloadBytes={PayloadBytes}", command, payload.Length);
-            await connectionLogger.LogAsync(device?.Id, device?.RegisterDeviceId, remoteIp, remotePort, "netsdk_event_skipped", "Unknown or unsupported NetSDK alarm command skipped", raw, CancellationToken.None);
+            await connectionLogger.LogAsync(device?.Id, device?.RegisterDeviceId, remoteIp, remotePort, "netsdk_event_skipped", "NetSDK alarm command is not an access-control attendance event", raw, CancellationToken.None);
             return;
         }
-
         var handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
         try
         {
@@ -1227,6 +1260,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.StartListenExErrorSigned = snapshot.StartListenExErrorSigned;
                 entity.StartListenExErrorHex = snapshot.StartListenExErrorHex;
                 entity.LastAlarmCommand = snapshot.LastAlarmCommand;
+                entity.LastAlarmCommandName = snapshot.LastAlarmCommandName;
+                entity.LastAlarmPayloadFirst256Hex = snapshot.LastAlarmPayloadFirst256Hex;
+                entity.LastAlarmDecodeStatus = snapshot.LastAlarmDecodeStatus;
+                entity.LastDecodedAlarmJson = snapshot.LastDecodedAlarmJson;
                 entity.LastDecodeError = snapshot.LastDecodeError;
                 entity.NetSdkDecodeStatus = snapshot.NetSdkDecodeStatus;
                 entity.UpdatedAt = DateTimeOffset.UtcNow;
@@ -1239,17 +1276,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
         });
     }
-    private static string GetCommandName(int command) => command switch
-    {
-        -1 => "DH_DVR_DISCONNECT",
-        1 => "DH_DVR_SERIAL_RETURN",
-        2 => "NET_DEV_AUTOREGISTER_RETURN",
-        3 => "NET_DEV_NOTIFY_IP_RETURN",
-        4 => "NET_DEV_AUTOREGISTER_PRIMARY_BACKUP",
-        5 => "DH_DVR_SERIAL_RETURN_EX",
-        DahuaNetSdkAccessEventDecoder.AccessControlEventCommand => "DH_ALARM_ACCESS_CTL_EVENT",
-        _ => $"UnknownCommand_{command}"
-    };
+    private static string GetCommandName(int command) => DahuaNetSdkAlarmCommandDiagnostics.ResolveCommandName(command);
 
     private static string ToHex(int value) => $"0x{unchecked((uint)value):X8}";
 
@@ -1420,6 +1447,9 @@ public static class DahuaActiveRegisterPayloadParser
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+
+
 
 
 

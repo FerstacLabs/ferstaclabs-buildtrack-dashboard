@@ -1,4 +1,4 @@
-﻿namespace BuildTrack.Domain.Entities;
+namespace BuildTrack.Domain.Entities;
 
 public sealed class NetSdkRuntimeDiagnostics
 {
@@ -61,7 +61,13 @@ public sealed class NetSdkRuntimeDiagnostics
     public int? StartListenExErrorSigned { get; set; }
     public string? StartListenExErrorHex { get; set; }
     public int? LastAlarmCommand { get; set; }
+    public string? LastAlarmCommandName { get; set; }
+    public string? LastAlarmPayloadFirst256Hex { get; set; }
+    public string? LastAlarmDecodeStatus { get; set; }
+    public string? LastDecodedAlarmJson { get; set; }
     public string? LastDecodeError { get; set; }
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+

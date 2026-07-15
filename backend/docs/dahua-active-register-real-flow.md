@@ -342,3 +342,32 @@ What should happen next:
 - avoid adding more blind `LoginEx` permutations until a sample/header comment identifies a different `pCapParam` struct or API flow
 
 CGI polling remains untouched as the working local/demo fallback and continues to feed the shared attendance/security ingestion pipeline.
+
+## Active Register alarm command identification after successful subscription
+
+Real VPS testing later confirmed the missing session step: `LoginExRemoteEndpoint` succeeds after `CLIENT_ResponseDevReg`, returns a non-zero login handle, and `CLIENT_StartListenEx(loginHandle)` succeeds. This preserves the production Active Register architecture and does not use local IP / CGI polling.
+
+After subscription, the worker received NetSDK alarm callbacks, but the observed commands were not the access-control attendance event `DH_ALARM_ACCESS_CTL_EVENT = 0x3181`:
+
+| Command | SDK constant | Header evidence | Struct | Meaning |
+| --- | --- | --- | --- | --- |
+| `0x21A9` | `DH_ALARM_AP_CONNECT` | `backend/vendor/dahua-netsdk/include/dhnetsdk.h:1505` | `NET_ALARM_AP_CONNECT_INFO` (`dhnetsdk.h:7768-7777`) | Connection hotspot / Wi-Fi AP connect alarm, not attendance |
+| `0x3173` | `DH_ALARM_CHASSISINTRUDED` | `dhnetsdk.h:1578` | `ALARM_CHASSISINTRUDED_INFO` (`dhnetsdk.h:8470-8482`) | Chassis intrusion/tamper alarm |
+| `0x3169` | `DH_ALARM_NET_ABORT` | `dhnetsdk.h:1574` | `ALARM_NETABORT_INFO` (`dhnetsdk.h:8192-8200`) | Network fault alarm |
+| `0x300C` | `DH_START_LISTEN_FINISH_EVENT` | `dhnetsdk.h:1538` | `START_LISTEN_FINISH_RESULT_INFO` (`dhnetsdk.h:15906-15910`) | Start-listen async completion notification |
+| `0x3491` | `DH_ALARM_SIP_REGISTER_RESULT` | `dhnetsdk.h:1981` | `ALARM_SIP_REGISTER_RESULT_INFO` (`dhnetsdk.h:45025-45034`) | SIP register status event |
+
+The actual attendance command is still documented as:
+
+- `DH_ALARM_ACCESS_CTL_EVENT = 0x3181` at `dhnetsdk.h:1586`
+- struct `ALARM_ACCESS_CTL_EVENT_INFO` at `dhnetsdk.h:11635-11770`
+
+Implementation update:
+
+- all alarm callbacks are now saved to `dahua_active_register_raw_events` with command hex/name, first 256 bytes of payload, decoded JSON, and decode status
+- `/api/dahua/active-register/status` and `/api/dahua/netsdk/diagnostics` expose last alarm command/name/payload/decode status/decoded JSON
+- known non-attendance alarms above are decoded as diagnostics only and do not create attendance/security business records
+- `0x21A9` is decoded as `NET_ALARM_AP_CONNECT_INFO`; it has channel/action/time/MAC/IP fields and no user/person/access result fields
+- the existing `0x3181` access-control decoder and shared ingestion pipeline remain unchanged and will create attendance/security events when that real access command arrives
+
+Next runtime step: after face recognition, verify whether the terminal emits `0x3181`, `0x3186`, `0x3435`, or another access/person command. If it emits a different person-recognition command, use the raw-event payload and SDK header struct for that command as the next decoder target.
