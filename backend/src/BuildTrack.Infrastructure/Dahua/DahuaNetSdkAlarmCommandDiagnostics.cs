@@ -21,6 +21,9 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
     public const int AlarmChassisIntruded = 0x3173;
     public const int StartListenFinish = 0x300C;
     public const int AlarmSipRegisterResult = 0x3491;
+    public const int AlarmAccessControlStatus = 0x3185;
+    public const int EventMotionDetect = 0x218F;
+    public const int AlarmScreenSaver = 0x3475;
     public const int AlarmAccessSnap = 0x3186;
     public const int AlarmFaceRecognition = 0x3435;
 
@@ -31,6 +34,9 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
         AlarmChassisIntruded => "DH_ALARM_CHASSISINTRUDED",
         StartListenFinish => "DH_START_LISTEN_FINISH_EVENT",
         AlarmSipRegisterResult => "DH_ALARM_SIP_REGISTER_RESULT",
+        AlarmAccessControlStatus => "DH_ALARM_ACCESS_CTL_STATUS",
+        EventMotionDetect => "DH_EVENT_MOTIONDETECT",
+        AlarmScreenSaver => "DH_ALARM_SCREENSAVER",
         DahuaNetSdkAccessEventDecoder.AccessControlEventCommand => "DH_ALARM_ACCESS_CTL_EVENT",
         AlarmAccessSnap => "DH_ALARM_ACCESS_SNAP",
         AlarmFaceRecognition => "DH_ALARM_FACE_RECOGNITION",
@@ -60,6 +66,9 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
                 AlarmChassisIntruded => DecodeStruct<AlarmChassisIntrudedInfo>(command, commandName, "ALARM_CHASSISINTRUDED_INFO", payload, first256Hex, DecodeChassisIntruded),
                 StartListenFinish => DecodeStruct<StartListenFinishResultInfo>(command, commandName, "START_LISTEN_FINISH_RESULT_INFO", payload, first256Hex, DecodeStartListenFinish),
                 AlarmSipRegisterResult => DecodeStruct<AlarmSipRegisterResultInfo>(command, commandName, "ALARM_SIP_REGISTER_RESULT_INFO", payload, first256Hex, DecodeSipRegisterResult),
+                AlarmAccessControlStatus => DecodeStruct<AlarmAccessControlStatusInfo>(command, commandName, "ALARM_ACCESS_CTL_STATUS_INFO", payload, first256Hex, DecodeAccessControlStatus),
+                EventMotionDetect => DecodeStruct<AlarmMotionDetectInfo>(command, commandName, "ALARM_MOTIONDETECT_INFO", payload, first256Hex, DecodeMotionDetect),
+                AlarmScreenSaver => DecodeStruct<AlarmScreenSaverInfo>(command, commandName, "ALARM_SCREENSAVER_INFO", payload, first256Hex, DecodeScreenSaver),
                 DahuaNetSdkAccessEventDecoder.AccessControlEventCommand => new DahuaNetSdkAlarmCommandDiagnostic(command, $"0x{command:X}", commandName, "ALARM_ACCESS_CTL_EVENT_INFO", payload.Length, first256Hex, "AccessControlCommand", null, new Dictionary<string, string?>
                 {
                     ["note"] = "Access-control command; decoded by DahuaNetSdkAccessEventDecoder."
@@ -103,6 +112,9 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
         "DH_ALARM_CHASSISINTRUDED" => "Chassis tamper alarm; not an access-control attendance event.",
         "DH_START_LISTEN_FINISH_EVENT" => "Start-listen completion notification; not an access-control attendance event.",
         "DH_ALARM_SIP_REGISTER_RESULT" => "SIP registration status alarm; not an access-control attendance event.",
+        "DH_ALARM_ACCESS_CTL_STATUS" => "Access-control door/status event; it contains no worker/person recognition fields.",
+        "DH_EVENT_MOTIONDETECT" => "Video motion detection event; it contains no worker/person recognition fields.",
+        "DH_ALARM_SCREENSAVER" => "Screen saver status event; not an access-control attendance event.",
         _ => "Known NetSDK alarm is diagnostic-only for BuildTrack attendance."
     };
 
@@ -161,6 +173,61 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
         ["sipOnline"] = info.StuUserInfo.BOnline.ToString(),
         ["sipDevType"] = DahuaNetSdkAccessEventDecoder.DecodeSdkString(info.StuUserInfo.SzDevType),
         ["sipUserAgent"] = DahuaNetSdkAccessEventDecoder.DecodeSdkString(info.StuUserInfo.SzUserAgent),
+    };
+
+
+    private static IReadOnlyDictionary<string, string?> DecodeAccessControlStatus(AlarmAccessControlStatusInfo info)
+    {
+        var eventTime = info.BRealUtc && info.RealUtc.IsValid ? FormatTime(info.RealUtc) : info.StuTime.ToDateTimeOffset().ToString("O");
+        return new Dictionary<string, string?>
+        {
+            ["dwSize"] = info.DwSize.ToString(),
+            ["door"] = info.NDoor.ToString(),
+            ["time"] = eventTime,
+            ["statusRaw"] = info.EmStatus.ToString(),
+            ["statusName"] = info.EmStatus switch
+            {
+                1 => "Open",
+                2 => "Close",
+                3 => "Abnormal",
+                4 => "FakeLocked",
+                5 => "CloseAlways",
+                6 => "OpenAlways",
+                7 => "Normal",
+                _ => "Unknown",
+            },
+            ["serialNumber"] = DahuaNetSdkAccessEventDecoder.DecodeSdkString(info.SzSerialNumber),
+            ["realUtcUsed"] = info.BRealUtc.ToString(),
+            ["realUtc"] = FormatTime(info.RealUtc),
+            ["note"] = "Access-control status event only; no UserID/CardName/open method fields are present in SDK struct.",
+        };
+    }
+
+    private static IReadOnlyDictionary<string, string?> DecodeMotionDetect(AlarmMotionDetectInfo info) => new Dictionary<string, string?>
+    {
+        ["dwSize"] = info.DwSize.ToString(),
+        ["channelId"] = info.NChannelId.ToString(),
+        ["pts"] = info.Pts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["utc"] = FormatTime(info.Utc),
+        ["eventId"] = info.NEventId.ToString(),
+        ["eventAction"] = info.NEventAction.ToString(),
+        ["regionNum"] = info.NRegionNum.ToString(),
+        ["smartMotionEnabled"] = info.BSmartMotionEnable.ToString(),
+        ["detectTypeNum"] = info.NDetectTypeNum.ToString(),
+        ["firstDetectType"] = info.EmDetectType is { Length: > 0 } ? info.EmDetectType[0].ToString() : null,
+        ["firstRegionId"] = info.StuRegion is { Length: > 0 } ? info.StuRegion[0].NRegionId.ToString() : null,
+        ["firstRegionName"] = info.StuRegion is { Length: > 0 } ? DahuaNetSdkAccessEventDecoder.DecodeSdkString(info.StuRegion[0].SzRegionName) : null,
+        ["eventInfoRealUtcValid"] = info.StuEventInfoEx.BRealUtc.ToString(),
+        ["eventInfoRealUtc"] = FormatTime(info.StuEventInfoEx.StuRealUtc),
+        ["note"] = "Video motion event only; no UserID/CardName/open method fields are present in SDK struct.",
+    };
+
+    private static IReadOnlyDictionary<string, string?> DecodeScreenSaver(AlarmScreenSaverInfo info) => new Dictionary<string, string?>
+    {
+        ["action"] = info.NAction.ToString(),
+        ["statusRaw"] = info.EmStatus.ToString(),
+        ["closePage"] = info.BClosePage.ToString(),
+        ["screenOff"] = info.BScreenOff.ToString(),
     };
 
     [StructLayout(LayoutKind.Sequential)]
@@ -241,6 +308,83 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 508)] public byte[] ByReserved;
     }
 
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AlarmAccessControlStatusInfo
+    {
+        public uint DwSize;
+        public int NDoor;
+        public DahuaNetSdkAccessEventDecoder.NetTime StuTime;
+        public int EmStatus;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 256)] public byte[] SzSerialNumber;
+        [MarshalAs(UnmanagedType.Bool)] public bool BRealUtc;
+        public DahuaNetSdkAccessEventDecoder.NetTimeEx RealUtc;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NetMotionDetectRegionInfo
+    {
+        public uint NRegionId;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)] public byte[] SzRegionName;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 508)] public byte[] BReserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NetGpsStatusInfo
+    {
+        public DahuaNetSdkAccessEventDecoder.NetTime RevTime;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 50)] public byte[] DvrSerial;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)] public byte[] ByReserved1;
+        public double Longitude;
+        public double Latitude;
+        public double Height;
+        public double Angle;
+        public double Speed;
+        public ushort StarCount;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)] public byte[] ByReserved2;
+        public int AntennaState;
+        public int OrientationState;
+        public int WorkState;
+        public int NAlarmCount;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 128)] public int[] NAlarmState;
+        public byte BOffline;
+        public byte BSNR;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)] public byte[] ByReserved3;
+        public int EmDateSource;
+        public int NSignalStrength;
+        public float FHdop;
+        public float FPdop;
+        public int NMileage;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 96)] public byte[] ByReserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AlarmMotionDetectInfo
+    {
+        public uint DwSize;
+        public int NChannelId;
+        public double Pts;
+        public DahuaNetSdkAccessEventDecoder.NetTimeEx Utc;
+        public int NEventId;
+        public int NEventAction;
+        public uint NRegionNum;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public NetMotionDetectRegionInfo[] StuRegion;
+        [MarshalAs(UnmanagedType.Bool)] public bool BSmartMotionEnable;
+        public uint NDetectTypeNum;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public int[] EmDetectType;
+        public NetEventInfoExtend StuEventInfoEx;
+        public NetGpsStatusInfo StuGpsStatusInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AlarmScreenSaverInfo
+    {
+        public int NAction;
+        public int EmStatus;
+        [MarshalAs(UnmanagedType.Bool)] public bool BClosePage;
+        [MarshalAs(UnmanagedType.Bool)] public bool BScreenOff;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 128)] public byte[] BReserved;
+    }
     [StructLayout(LayoutKind.Sequential)]
     public struct NetSipRegisterUserInfo
     {
@@ -267,5 +411,3 @@ public static class DahuaNetSdkAlarmCommandDiagnostics
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1024)] public byte[] SzReserved;
     }
 }
-
-

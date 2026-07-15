@@ -1,4 +1,4 @@
-﻿# Dahua Active Register Real Flow Investigation
+# Dahua Active Register Real Flow Investigation
 
 Date: 2026-07-14
 
@@ -371,3 +371,27 @@ Implementation update:
 - the existing `0x3181` access-control decoder and shared ingestion pipeline remain unchanged and will create attendance/security events when that real access command arrives
 
 Next runtime step: after face recognition, verify whether the terminal emits `0x3181`, `0x3186`, `0x3435`, or another access/person command. If it emits a different person-recognition command, use the raw-event payload and SDK header struct for that command as the next decoder target.
+
+## Additional production alarm commands from VPS payload samples
+
+Follow-up VPS samples produced three more alarm commands around face/access testing. These were resolved against the local Dahua SDK header and added to BuildTrack alarm diagnostics:
+
+| Command | SDK constant | Header evidence | Struct | Runtime payload size | Attendance decision |
+| --- | --- | --- | --- | --- | --- |
+| `0x3185` / `12677` | `DH_ALARM_ACCESS_CTL_STATUS` | `backend/vendor/dahua-netsdk/include/dhnetsdk.h:1590` | `ALARM_ACCESS_CTL_STATUS_INFO` (`dhnetsdk.h:8918-8927`) | `332` | diagnostic-only |
+| `0x218F` / `8591` | `DH_EVENT_MOTIONDETECT` | `dhnetsdk.h:1480` | `ALARM_MOTIONDETECT_INFO` (`dhnetsdk.h:56574-56591`) | `20472` | diagnostic-only |
+| `0x3475` / `13429` | `DH_ALARM_SCREENSAVER` | `dhnetsdk.h:1952` | `ALARM_SCREENSAVER_INFO` (`dhnetsdk.h:45920-45927`) | `144` | diagnostic-only |
+
+`0x3185` looks access-related because it is an access-control status event. The SDK struct confirms it contains door number, time, status, serial number, and UTC fields only. It does not contain `UserID`, `CardName`, open method, recognition result, or snapshot/person fields, so it cannot be used as an attendance record.
+
+`0x218F` is a large video motion-detection event. The payload size matches `ALARM_MOTIONDETECT_INFO` because the struct includes 32 motion regions, event extension data, detect types, and GPS status. It does not contain worker/person recognition fields.
+
+`0x3475` is a screen-saver status event and is unrelated to attendance.
+
+Implementation update:
+
+- command-name mappings were added for `0x3185`, `0x218F`, and `0x3475`
+- struct decoders were added for `ALARM_ACCESS_CTL_STATUS_INFO`, `ALARM_MOTIONDETECT_INFO`, and `ALARM_SCREENSAVER_INFO`
+- decoded fields are stored in raw diagnostics JSON for operator/vendor review
+- none of these commands route to attendance/session/security ingestion
+- the working Active Register login and subscription path remains unchanged
