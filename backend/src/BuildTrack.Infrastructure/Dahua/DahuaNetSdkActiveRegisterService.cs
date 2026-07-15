@@ -2,6 +2,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Security;
@@ -27,7 +28,8 @@ public sealed class DahuaNetSdkDiagnostics
     public int ExperimentalStartServiceLastPayloadBytes { get; set; }
     public string? ExperimentalStartServiceLastDecodeStatus { get; set; }
     public int? ExperimentalStartServiceErrorSigned { get; set; }
-    public string? ExperimentalStartServiceErrorHex { get; set; }    public int? LastServiceCommand { get; set; }
+    public string? ExperimentalStartServiceErrorHex { get; set; }
+    public int? LastServiceCommand { get; set; }
     public string? LastServiceEventType { get; set; }
     public int LastServicePayloadBytes { get; set; }
     public string? LastRegisterDeviceId { get; set; }
@@ -48,6 +50,14 @@ public sealed class DahuaNetSdkDiagnostics
     public long? ActiveRegisterSessionHandleValue { get; set; }
     public string? ActiveRegisterSessionHandleSource { get; set; }
     public string? ActiveRegisterSessionHandleStrategyResult { get; set; }
+    public string? LoginStrategy { get; set; }
+    public long? LoginHandle { get; set; }
+    public bool? LoginSucceeded { get; set; }
+    public int? LoginErrorSigned { get; set; }
+    public string? LoginErrorHex { get; set; }
+    public int? LoginNativeErrorSigned { get; set; }
+    public string? LoginNativeErrorHex { get; set; }
+    public bool LoginPossibleMarshallingWarning { get; set; }
     public bool StartListenExCalled { get; set; }
     public bool? StartListenExSuccess { get; set; }
     public int? StartListenExErrorSigned { get; set; }
@@ -135,6 +145,14 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     ActiveRegisterSessionHandleValue = _diagnostics.ActiveRegisterSessionHandleValue,
                     ActiveRegisterSessionHandleSource = _diagnostics.ActiveRegisterSessionHandleSource,
                     ActiveRegisterSessionHandleStrategyResult = _diagnostics.ActiveRegisterSessionHandleStrategyResult,
+                    LoginStrategy = _diagnostics.LoginStrategy,
+                    LoginHandle = _diagnostics.LoginHandle,
+                    LoginSucceeded = _diagnostics.LoginSucceeded,
+                    LoginErrorSigned = _diagnostics.LoginErrorSigned,
+                    LoginErrorHex = _diagnostics.LoginErrorHex,
+                    LoginNativeErrorSigned = _diagnostics.LoginNativeErrorSigned,
+                    LoginNativeErrorHex = _diagnostics.LoginNativeErrorHex,
+                    LoginPossibleMarshallingWarning = _diagnostics.LoginPossibleMarshallingWarning,
                     StartListenExCalled = _diagnostics.StartListenExCalled,
                     StartListenExSuccess = _diagnostics.StartListenExSuccess,
                     StartListenExErrorSigned = _diagnostics.StartListenExErrorSigned,
@@ -400,9 +418,12 @@ public sealed class DahuaNetSdkActiveRegisterService(
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
             var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
+            var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
 
             var registration = DahuaActiveRegisterPayloadParser.Parse(command, payload);
             var registerDeviceId = registration.RegisterDeviceId;
+            var eventType = GetCommandName(command);
+            var decodeResult = TryDecodeActiveRegisterPayload(command, payload);
             lock (_diagnosticsLock) _diagnostics.LastRegisterDeviceId = registerDeviceId;
             PersistDiagnostics();
             if (command == 5)
@@ -416,6 +437,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (command == -1)
             {
+                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, CancellationToken.None);
                 SetStatus("DeviceDisconnected");
                 await connectionLogger.LogAsync(null, registerDeviceId, remoteIp, remotePort, "netsdk_device_disconnected", "Dahua Active Register device disconnected during verification", new { command, registerDeviceId }, CancellationToken.None);
                 return;
@@ -441,10 +463,28 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (device is null)
             {
+                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, decodeResult.DecodeStatus, decodeResult.DecodedJson, CancellationToken.None);
                 await connectionLogger.LogAsync(null, registerDeviceId, remoteIp, remotePort, "netsdk_unmatched", "Dahua NetSDK Active Register service callback did not match a known device", raw, CancellationToken.None);
                 logger.LogWarning("Dahua NetSDK callback did not match a known device. RegisterDeviceId {RegisterDeviceId}, remote {RemoteIp}:{RemotePort}", registerDeviceId, remoteIp, remotePort);
                 return;
             }
+
+            var rawDecodeStatus = decodeResult.DecodeStatus;
+            if (decodeResult.Record is not null)
+            {
+                if (IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
+                {
+                    await pipeline.IngestAsync(device.Id, decodeResult.Record, DahuaEventSource.ActiveRegister, CancellationToken.None);
+                    rawDecodeStatus = "Ingested";
+                }
+                else
+                {
+                    rawDecodeStatus = "DecodedIngestionDisabled";
+                    logger.LogWarning("Active Register callback decoded as DahuaAccessRecord, but ingestion is disabled. Set DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED=true to ingest it.");
+                }
+            }
+
+            await PersistActiveRegisterRawEventAsync(db, device.Id, device.RegisterDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, rawDecodeStatus, decodeResult.DecodedJson, CancellationToken.None);
 
             device.Status = DeviceStatus.Online;
             device.LastKnownIp = remoteIp;
@@ -521,11 +561,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
                         commandSource = registration.Kind,
                     },
                     CancellationToken.None);
+                _acceptedRegistrationKeys.TryRemove(registrationKey, out _);
                 return;
             }
 
             SetStatus("RegisterAccepted");
-            await EnsureSubscribedAsync(device, registration, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, CancellationToken.None);
+            var passwordProtector = scope.ServiceProvider.GetRequiredService<IPasswordProtector>();
+            var plainPassword = passwordProtector.Unprotect(device.EncryptedPassword);
+            var subscribed = await EnsureSubscribedAsync(device, registration, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, device.Username, plainPassword, CancellationToken.None);
+            if (DahuaActiveRegisterLoginDiagnostics.ShouldReleaseRegistrationKeyAfterSubscription(subscribed))
+            {
+                _acceptedRegistrationKeys.TryRemove(registrationKey, out _);
+            }
         }
         catch (Exception ex)
         {
@@ -534,19 +581,19 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
     }
 
-    private async Task EnsureSubscribedAsync(Device device, DahuaActiveRegisterRegistration registration, IntPtr serviceCallbackHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, CancellationToken cancellationToken)
+    private async Task<bool> EnsureSubscribedAsync(Device device, DahuaActiveRegisterRegistration registration, IntPtr serviceCallbackHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, string username, string password, CancellationToken cancellationToken)
     {
-        if (_nativeClient is null) return;
+        if (_nativeClient is null) return false;
         if (_loginHandleByDeviceId.TryGetValue(device.Id, out var existingHandle) && existingHandle != IntPtr.Zero)
         {
             logger.LogDebug("Dahua access event subscription already exists for device {DeviceId}", device.Id);
-            return;
+            return true;
         }
 
         if (!_subscriptionInProgress.TryAdd(device.Id, 0))
         {
             logger.LogDebug("Dahua access event subscription already in progress for device {DeviceId}", device.Id);
-            return;
+            return false;
         }
 
         try
@@ -557,6 +604,114 @@ public sealed class DahuaNetSdkActiveRegisterService(
             {
                 loginHandle = registration.SessionHandle;
                 handleSource = "RegistrationPayload";
+            }
+            else if (IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
+            {
+                var attempts = _nativeClient.TryLoginActiveRegisterStrategies(device.RegisterDeviceId, username, password);
+                DahuaActiveRegisterLoginAttempt? successfulAttempt = null;
+                foreach (var attempt in attempts)
+                {
+                    lock (_diagnosticsLock)
+                    {
+                        _diagnostics.LoginStrategy = attempt.Strategy;
+                        _diagnostics.LoginHandle = attempt.LoginHandle;
+                        _diagnostics.LoginSucceeded = attempt.Succeeded;
+                        _diagnostics.LoginErrorSigned = attempt.LastErrorAfterCall;
+                        _diagnostics.LoginErrorHex = ToHex(attempt.LastErrorAfterCall);
+                        _diagnostics.LoginNativeErrorSigned = attempt.NativeErrorPointer;
+                        _diagnostics.LoginNativeErrorHex = ToHex(attempt.NativeErrorPointer);
+                        _diagnostics.LoginPossibleMarshallingWarning = attempt.PossibleMarshallingWarning;
+                        _diagnostics.ActiveRegisterSessionHandleSource = attempt.Strategy;
+                        _diagnostics.ActiveRegisterSessionHandleStrategyResult = attempt.Succeeded
+                            ? DahuaNetSdkSubscriptionDiagnostics.StrategyResultSucceeded
+                            : DahuaNetSdkSubscriptionDiagnostics.StrategyResultFailed;
+                    }
+                    PersistDiagnostics();
+
+                    logger.LogInformation(
+                        "Dahua Active Register server-connection login attempt. Strategy={Strategy}, RegisterDeviceId={RegisterDeviceId}, UsernamePresent={UsernamePresent}, PasswordPresent={PasswordPresent}, IpArgument={IpArgument}, PortArgument={PortArgument}, SpecCap={SpecCap}, CapParamLength={CapParamLength}, LoginHandle={LoginHandle}, NativeErrorPointer={NativeErrorPointer}, NativeErrorHex={NativeErrorHex}, LastError={LastError}, LastErrorHex={LastErrorHex}, UsesLoginEx2={UsesLoginEx2}",
+                        attempt.Strategy,
+                        attempt.RegisterDeviceId,
+                        attempt.UsernamePresent,
+                        attempt.PasswordPresent,
+                        string.IsNullOrEmpty(attempt.IpArgument) ? "<empty>" : attempt.IpArgument,
+                        attempt.PortArgument,
+                        attempt.SpecCap,
+                        attempt.CapParamStringLength,
+                        attempt.LoginHandle,
+                        attempt.NativeErrorPointer,
+                        ToHex(attempt.NativeErrorPointer),
+                        attempt.LastErrorAfterCall,
+                        ToHex(attempt.LastErrorAfterCall),
+                        attempt.UsesLoginEx2);
+
+                    if (attempt.PossibleMarshallingWarning)
+                    {
+                        logger.LogWarning("Dahua Active Register login returned zero handle with zero SDK errors. This can indicate wrong P/Invoke signature or marshaling. Strategy={Strategy}", attempt.Strategy);
+                    }
+
+                    if (attempt.Succeeded)
+                    {
+                        successfulAttempt = attempt;
+                        break;
+                    }
+                }
+
+                if (successfulAttempt is null)
+                {
+                    var lastAttempt = attempts.LastOrDefault();
+                    var lastError = lastAttempt?.LastErrorAfterCall ?? 0;
+                    var nativeError = lastAttempt?.NativeErrorPointer ?? 0;
+                    lock (_diagnosticsLock)
+                    {
+                        _diagnostics.ActiveRegisterSessionHandleFound = false;
+                        _diagnostics.ActiveRegisterSessionHandleValueNonZero = false;
+                        _diagnostics.ActiveRegisterSessionHandleValue = serviceCallbackHandle != IntPtr.Zero ? serviceCallbackHandle.ToInt64() : null;
+                        _diagnostics.ActiveRegisterSessionHandleSource = lastAttempt?.Strategy ?? "LoginExServerConn";
+                        _diagnostics.ActiveRegisterSessionHandleStrategyResult = DahuaNetSdkSubscriptionDiagnostics.StrategyResultFailed;
+                        _diagnostics.StartListenExCalled = false;
+                        _diagnostics.StartListenExSuccess = false;
+                        _diagnostics.StartListenExErrorSigned = lastError;
+                        _diagnostics.StartListenExErrorHex = ToHex(lastError);
+                        _diagnostics.LastDecodeError = $"CLIENT_LoginEx/CLIENT_LoginEx2 active-register server connection login failed. LastStrategy={lastAttempt?.Strategy ?? "None"}, ErrorSigned={lastError}, ErrorHex={ToHex(lastError)}, NativeErrorSigned={nativeError}, NativeErrorHex={ToHex(nativeError)}";
+                    }
+                    SetStatus("ServerConnLoginFailed");
+                    await connectionLogger.LogAsync(
+                        device.Id,
+                        device.RegisterDeviceId,
+                        remoteIp,
+                        remotePort,
+                        "netsdk_server_conn_login_failed",
+                        "CLIENT_LoginEx/CLIENT_LoginEx2 active-register server connection login failed",
+                        new
+                        {
+                            attempts = attempts.Select(x => new
+                            {
+                                x.Strategy,
+                                x.RegisterDeviceId,
+                                x.UsernamePresent,
+                                x.PasswordPresent,
+                                x.IpArgument,
+                                x.PortArgument,
+                                x.SpecCap,
+                                x.CapParamStringLength,
+                                x.LoginHandle,
+                                x.NativeErrorPointer,
+                                nativeErrorHex = ToHex(x.NativeErrorPointer),
+                                x.LastErrorAfterCall,
+                                lastErrorHex = ToHex(x.LastErrorAfterCall),
+                                x.UsesLoginEx2,
+                                x.PossibleMarshallingWarning,
+                            })
+                        },
+                        cancellationToken);
+                    logger.LogError("Dahua active-register server connection login failed after {AttemptCount} strategies. LastErrorSigned={ErrorSigned}, LastErrorHex={ErrorHex}, NativeErrorSigned={NativeErrorSigned}, NativeErrorHex={NativeErrorHex}", attempts.Count, lastError, ToHex(lastError), nativeError, ToHex(nativeError));
+                    return false;
+                }
+
+                loginHandle = new IntPtr(successfulAttempt.LoginHandle);
+                handleSource = successfulAttempt.Strategy;
+                logger.LogInformation("Dahua Active Register server-connection login succeeded. Strategy={Strategy}, RegisterDeviceId={RegisterDeviceId}, LoginHandle={LoginHandle}", successfulAttempt.Strategy, device.RegisterDeviceId, loginHandle.ToInt64());
             }
             else
             {
@@ -574,7 +729,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     _diagnostics.StartListenExErrorSigned = serviceCallbackHandle != IntPtr.Zero ? unchecked((int)0x80000004) : null;
                     _diagnostics.StartListenExErrorHex = serviceCallbackHandle != IntPtr.Zero ? "0x80000004" : null;
                     _diagnostics.LastDecodeError = serviceCallbackHandle != IntPtr.Zero
-                        ? "ServiceCallbackLHandle strategy was tested with CLIENT_StartListenEx and failed with 0x80000004; not retrying for this Active Register session."
+                        ? "ServiceCallbackLHandle strategy was tested with CLIENT_StartListenEx and failed with 0x80000004; not retrying for this Active Register session. Enable DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED=true to test LoginEx/CLIENT_LoginEx2 server-connection login."
                         : "Active Register session handle not found; service callback lHandle is zero.";
                 }
                 SetStatus("SessionHandleMissing");
@@ -583,7 +738,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     : "Active Register session handle not found; cannot call CLIENT_StartListenEx because service callback lHandle is zero.";
                 await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_session_handle_missing", message, new { serviceCallbackHandle = serviceCallbackHandle.ToInt64(), strategyResult = _diagnostics.ActiveRegisterSessionHandleStrategyResult }, cancellationToken);
                 logger.LogWarning("{Message}", message);
-                return;
+                return false;
             }
 
             lock (_diagnosticsLock)
@@ -600,8 +755,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
 
             SetStatus("Subscribing");
-            var strategy = handleSource == "ServiceCallbackLHandle" ? "ActiveRegisterCallbackHandle" : handleSource;
-            logger.LogInformation("Starting Dahua access event subscription. Strategy={Strategy}, Handle={Handle}", strategy, loginHandle.ToInt64());
+            logger.LogInformation("Starting Dahua access event subscription. Strategy={Strategy}, Handle={Handle}", handleSource, loginHandle.ToInt64());
             logger.LogInformation("CLIENT_StartListenEx called");
             var startListenResult = _nativeClient.TryStartListenEx(loginHandle);
             var startListenError = _nativeClient.LastErrorCode;
@@ -617,7 +771,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 var message = $"Dahua access event subscription failed. ErrorSigned={startListenError}, ErrorHex={ToHex(startListenError)}";
                 await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_subscription_failed", message, new { errorSigned = startListenError, errorHex = ToHex(startListenError), handle = loginHandle.ToInt64(), handleSource }, cancellationToken);
                 logger.LogError("{Message}", message);
-                return;
+                return false;
             }
 
             _deviceIdByLoginHandle[loginHandle] = device.Id;
@@ -633,18 +787,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
             SetStatus("Subscribed");
             await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_subscribed", "Subscribed to Dahua access events", new { loginHandle = loginHandle.ToInt64(), handleSource }, cancellationToken);
             logger.LogInformation("Subscribed to Dahua access events");
+            return true;
         }
         finally
         {
             _subscriptionInProgress.TryRemove(device.Id, out _);
         }
-    }
-    private async Task HandleAlarmCallbackAsync(int command, IntPtr loginHandle, byte[] payload, string? remoteIp, int remotePort)
+    }    private async Task HandleAlarmCallbackAsync(int command, IntPtr loginHandle, byte[] payload, string? remoteIp, int remotePort)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
         var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
-        var ingestion = scope.ServiceProvider.GetRequiredService<IAttendanceIngestionService>();
+        var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
 
         Device? device = null;
         if (_deviceIdByLoginHandle.TryGetValue(loginHandle, out var mappedDeviceId))
@@ -707,12 +861,16 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
 
             logger.LogInformation("Real Dahua face/access event received");
-            var inserted = await ingestion.IngestDahuaRecordAsync(device.Id, record, remoteIp, remotePort, CancellationToken.None, source: "dahua_netsdk_active_register", requireSuccessfulAttendance: true);
-
-            if (inserted is not null)
+            var ingestionEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]);
+            if (!ingestionEnabled)
             {
-                logger.LogInformation("Attendance event inserted from Dahua NetSDK");
+                await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_ingestion_disabled", "Decoded Dahua access event skipped because Active Register ingestion is disabled", raw, CancellationToken.None);
+                logger.LogWarning("Decoded Dahua access event skipped because DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED is false");
+                return;
             }
+
+            await pipeline.IngestAsync(device.Id, record, DahuaEventSource.ActiveRegister, CancellationToken.None);
+            logger.LogInformation("Attendance event submitted to shared pipeline from Dahua NetSDK");
         }
         catch (Exception ex)
         {
@@ -725,6 +883,95 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
     }
 
+
+    private async Task PersistActiveRegisterRawEventAsync(
+        BuildTrackDbContext db,
+        Guid? deviceId,
+        string? registerDeviceId,
+        string? remoteIp,
+        int? remotePort,
+        int listenerPort,
+        int command,
+        string? commandName,
+        byte[] payload,
+        string decodeStatus,
+        string? decodedJson,
+        CancellationToken cancellationToken)
+    {
+        if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_DIAGNOSTICS_ENABLED"], defaultValue: true)) return;
+
+        try
+        {
+            db.DahuaActiveRegisterRawEvents.Add(new DahuaActiveRegisterRawEvent
+            {
+                DeviceId = deviceId,
+                RegisterDeviceId = registerDeviceId,
+                RemoteIp = remoteIp,
+                RemotePort = remotePort,
+                ListenerPort = listenerPort,
+                CallbackCommand = command,
+                CallbackCommandName = commandName,
+                PayloadBytes = payload.Length,
+                PayloadFirstBytesHex = Convert.ToHexString(payload.Take(128).ToArray()),
+                PayloadBase64 = payload.Length == 0 ? null : Convert.ToBase64String(payload),
+                DecodeStatus = decodeStatus,
+                DecodedJson = decodedJson,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist Dahua Active Register raw callback diagnostic. Listener continues running.");
+        }
+    }
+
+    private ActiveRegisterPayloadDecodeResult TryDecodeActiveRegisterPayload(int command, byte[] payload)
+    {
+        if (payload.Length == 0) return new ActiveRegisterPayloadDecodeResult("EmptyPayload", null, null);
+
+        if (command == DahuaNetSdkAccessEventDecoder.AccessControlEventCommand)
+        {
+            var handle = GCHandle.Alloc(payload, GCHandleType.Pinned);
+            try
+            {
+                var decoded = DahuaNetSdkAccessEventDecoder.TryDecodeAccessControlEvent(handle.AddrOfPinnedObject(), (uint)payload.Length, out var sdkEvent, out var skipReason);
+                if (DahuaSdkAccessEventNormalizer.TryNormalize(sdkEvent, out var record))
+                {
+                    var json = JsonSerializer.Serialize(new { sdkEvent, skipReason, decoded });
+                    return new ActiveRegisterPayloadDecodeResult(decoded ? "DecodedAccessControlEvent" : "DecodedAccessControlEventSkipped", record, json);
+                }
+
+                return new ActiveRegisterPayloadDecodeResult("DecodeFailed", null, JsonSerializer.Serialize(new { skipReason }));
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        if (DahuaSdkAccessEventNormalizer.TryParseAsciiKeyValuePayload(payload, out var asciiEvent)
+            && (!string.IsNullOrWhiteSpace(asciiEvent.UserId)
+                || !string.IsNullOrWhiteSpace(asciiEvent.CardName)
+                || !string.IsNullOrWhiteSpace(asciiEvent.Status)
+                || !string.IsNullOrWhiteSpace(asciiEvent.Method)))
+        {
+            DahuaSdkAccessEventNormalizer.TryNormalize(asciiEvent, out var record);
+            return new ActiveRegisterPayloadDecodeResult("DecodedAsciiAccessRecord", record, JsonSerializer.Serialize(asciiEvent));
+        }
+
+        return new ActiveRegisterPayloadDecodeResult("ServiceCallbackOnly", null, null);
+    }
+
+    private static bool IsEnabled(string? value, bool defaultValue = false)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return defaultValue;
+        return value.Equals("true", StringComparison.OrdinalIgnoreCase)
+               || value.Equals("1", StringComparison.OrdinalIgnoreCase)
+               || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record ActiveRegisterPayloadDecodeResult(string DecodeStatus, DahuaAccessRecord? Record, string? DecodedJson);
     private async Task<Device?> MatchDeviceAsync(BuildTrackDbContext db, string? registerDeviceId, int listenerPort, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(registerDeviceId))
@@ -803,6 +1050,14 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.ActiveRegisterSessionHandleValue = snapshot.ActiveRegisterSessionHandleValue;
                 entity.ActiveRegisterSessionHandleSource = snapshot.ActiveRegisterSessionHandleSource;
                 entity.ActiveRegisterSessionHandleStrategyResult = snapshot.ActiveRegisterSessionHandleStrategyResult;
+                entity.LoginStrategy = snapshot.LoginStrategy;
+                entity.LoginHandle = snapshot.LoginHandle;
+                entity.LoginSucceeded = snapshot.LoginSucceeded;
+                entity.LoginErrorSigned = snapshot.LoginErrorSigned;
+                entity.LoginErrorHex = snapshot.LoginErrorHex;
+                entity.LoginNativeErrorSigned = snapshot.LoginNativeErrorSigned;
+                entity.LoginNativeErrorHex = snapshot.LoginNativeErrorHex;
+                entity.LoginPossibleMarshallingWarning = snapshot.LoginPossibleMarshallingWarning;
                 entity.StartListenExCalled = snapshot.StartListenExCalled;
                 entity.StartListenExSuccess = snapshot.StartListenExSuccess;
                 entity.StartListenExErrorSigned = snapshot.StartListenExErrorSigned;
@@ -904,6 +1159,19 @@ public static class DahuaActiveRegisterPayloadParser
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

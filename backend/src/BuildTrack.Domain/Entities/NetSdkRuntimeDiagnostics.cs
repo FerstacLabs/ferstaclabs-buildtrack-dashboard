@@ -15,7 +15,8 @@ public sealed class NetSdkRuntimeDiagnostics
     public int ExperimentalStartServiceLastPayloadBytes { get; set; }
     public string? ExperimentalStartServiceLastDecodeStatus { get; set; }
     public int? ExperimentalStartServiceErrorSigned { get; set; }
-    public string? ExperimentalStartServiceErrorHex { get; set; }    public int? LastServiceCommand { get; set; }
+    public string? ExperimentalStartServiceErrorHex { get; set; }
+    public int? LastServiceCommand { get; set; }
     public string? LastServiceEventType { get; set; }
     public int LastServicePayloadBytes { get; set; }
     public string? LastRegisterDeviceId { get; set; }
@@ -36,7 +37,14 @@ public sealed class NetSdkRuntimeDiagnostics
     public long? ActiveRegisterSessionHandleValue { get; set; }
     public string? ActiveRegisterSessionHandleSource { get; set; }
     public string? ActiveRegisterSessionHandleStrategyResult { get; set; }
-    public bool StartListenExCalled { get; set; }
+        public string? LoginStrategy { get; set; }
+    public long? LoginHandle { get; set; }
+    public bool? LoginSucceeded { get; set; }
+    public int? LoginErrorSigned { get; set; }
+    public string? LoginErrorHex { get; set; }
+    public int? LoginNativeErrorSigned { get; set; }
+    public string? LoginNativeErrorHex { get; set; }
+    public bool LoginPossibleMarshallingWarning { get; set; }public bool StartListenExCalled { get; set; }
     public bool? StartListenExSuccess { get; set; }
     public int? StartListenExErrorSigned { get; set; }
     public string? StartListenExErrorHex { get; set; }
@@ -45,6 +53,9 @@ public sealed class NetSdkRuntimeDiagnostics
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+
+
 
 
 

@@ -13,6 +13,7 @@ import {
   type DeviceMode,
   type DeviceStatus,
   type ListenerStatus,
+  type ActiveRegisterStatus,
 } from '../../services/api/buildTrackBackendApi'
 
 type DeviceFormValues = {
@@ -65,6 +66,7 @@ export const DevicesPage = () => {
   const [devices, setDevices] = useState<BackendDevice[]>([])
   const [connectionLogByDeviceId, setConnectionLogByDeviceId] = useState<Record<string, DeviceConnectionLog | undefined>>({})
   const [listenerStatus, setListenerStatus] = useState<ListenerStatus | null>(null)
+  const [activeRegisterStatus, setActiveRegisterStatus] = useState<ActiveRegisterStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -72,14 +74,16 @@ export const DevicesPage = () => {
     setLoading(true)
     setError('')
     try {
-      const [siteRows, deviceRows, status] = await Promise.all([
+      const [siteRows, deviceRows, status, activeStatus] = await Promise.all([
         buildTrackBackendApi.getSites(),
         buildTrackBackendApi.getDevices(),
         buildTrackBackendApi.getListenerStatus(),
+        buildTrackBackendApi.getActiveRegisterStatus(),
       ])
       setSites(siteRows)
       setDevices(deviceRows)
       setListenerStatus(status)
+      setActiveRegisterStatus(activeStatus)
       if (siteRows[0] && !form.getFieldValue('siteId')) form.setFieldValue('siteId', siteRows[0].id)
 
       const logResults = await Promise.allSettled(deviceRows.map(async (device) => [device.id, (await buildTrackBackendApi.getDeviceLogs(device.id))[0]] as const))
@@ -277,16 +281,23 @@ export const DevicesPage = () => {
           </ol>
         </aside>
         <aside className="panel-card instruction-panel">
-          <h2>Listener statusu</h2>
+          <h2>Active Register diagnostics</h2>
           <div className="summary-metric"><span>API</span><strong>{buildTrackBackendApi.baseUrl}</strong></div>
-          <div className="summary-metric"><span>TCP portlar</span><strong>{listenerStatus?.ports?.join(', ') ?? '9500, 7000'}</strong></div>
-          <div className="summary-metric"><span>Real NetSDK</span><strong>{listenerStatus?.realSdkAvailable ? 'Aktiv' : 'Decode aktiv deyil'}</strong></div>
-          <div className="summary-metric"><span>Decode statusu</span><strong>{listenerStatus?.decodeStatus ?? 'Unknown'}</strong></div>
+          <div className="summary-metric"><span>TCP portlar</span><strong>{activeRegisterStatus?.ports?.join(', ') ?? listenerStatus?.ports?.join(', ') ?? '7000, 9500'}</strong></div>
+          <div className="summary-metric"><span>Listener</span><strong>{activeRegisterStatus?.listenerActive ? 'Aktiv' : activeRegisterStatus?.enabled ? 'Gözləyir' : 'Söndürülüb'}</strong></div>
+          <div className="summary-metric"><span>Son callback</span><strong>{formatDateTime(activeRegisterStatus?.lastCallbackTime)}</strong></div>
+          <div className="summary-metric"><span>Son command</span><strong>{activeRegisterStatus?.lastCommand ?? '-'}</strong></div>
+          <div className="summary-metric"><span>Payload bytes</span><strong>{activeRegisterStatus?.lastPayloadBytes ?? 0}</strong></div>
+          <div className="summary-metric"><span>Raw / decoded / ingested</span><strong>{activeRegisterStatus ? `${activeRegisterStatus.rawEventCount} / ${activeRegisterStatus.decodedEventCount} / ${activeRegisterStatus.ingestedEventCount}` : '-'}</strong></div>
+          <div className="summary-metric"><span>Ingestion</span><strong>{activeRegisterStatus?.ingestionEnabled ? 'Aktiv' : 'Diagnostics only'}</strong></div>
+          {!activeRegisterStatus?.ingestionEnabled && <Alert type="warning" showIcon message="Active Register ingestion söndürülüb" description="Callback-lər raw diagnostics kimi saxlanır. Attendance/security yaratmaq üçün backend-də DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED=true edin." />}
         </aside>
       </section>
     </div>
   )
 }
+
+
 
 
 

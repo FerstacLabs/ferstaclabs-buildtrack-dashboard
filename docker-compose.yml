@@ -52,11 +52,14 @@
       POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
       BUILDTRACK_SECRET_KEY: ${BUILDTRACK_SECRET_KEY:-change-this-32-byte-production-secret}
 
-      DAHUA_ACTIVE_REGISTER_PORTS: "9500,7000"
+      DAHUA_ACTIVE_REGISTER_ENABLED: "true"
+      DAHUA_ACTIVE_REGISTER_PORTS: "7000,9500"
+      DAHUA_ACTIVE_REGISTER_DIAGNOSTICS_ENABLED: "true"
+      DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED: "true"
       DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK: "true"
       DAHUA_ACTIVE_REGISTER_SERVICE_MODE: ListenServer
 
-      DAHUA_CGI_POLLING_ENABLED: "true"
+      DAHUA_CGI_POLLING_ENABLED: "false"
       DAHUA_CGI_HOST: "192.168.31.174"
       DAHUA_CGI_USERNAME: "admin"
       DAHUA_CGI_PASSWORD: ${DAHUA_CGI_PASSWORD:-}
@@ -97,6 +100,7 @@
 
 volumes:
   buildtrack-postgres:
+
 
 
 

@@ -18,6 +18,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private readonly ClientGetLastErrorDelegate? _clientGetLastError;
     private readonly ClientSetDvrMessageCallbackDelegate? _clientSetDvrMessageCallback;
     private readonly ClientLoginExDelegate? _clientLoginEx;
+    private readonly ClientLoginEx2Delegate? _clientLoginEx2;
     private readonly ClientLogoutDelegate? _clientLogout;
     private readonly ClientResponseDevRegDelegate? _clientResponseDevReg;
     private readonly ClientStartListenExDelegate? _clientStartListenEx;
@@ -40,6 +41,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         _clientGetLastError = TryGetDelegate<ClientGetLastErrorDelegate>("CLIENT_GetLastError");
         _clientSetDvrMessageCallback = TryGetDelegate<ClientSetDvrMessageCallbackDelegate>("CLIENT_SetDVRMessCallBack");
         _clientLoginEx = TryGetDelegate<ClientLoginExDelegate>("CLIENT_LoginEx");
+        _clientLoginEx2 = TryGetDelegate<ClientLoginEx2Delegate>("CLIENT_LoginEx2");
         _clientLogout = TryGetDelegate<ClientLogoutDelegate>("CLIENT_Logout");
         _clientResponseDevReg = TryGetDelegate<ClientResponseDevRegDelegate>("CLIENT_ResponseDevReg");
         _clientStartListenEx = TryGetDelegate<ClientStartListenExDelegate>("CLIENT_StartListenEx");
@@ -52,7 +54,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     public bool HasAlarmSubscriptionExports =>
         _clientSetDvrMessageCallback is not null
-        && _clientLoginEx is not null
+        && (_clientLoginEx is not null || _clientLoginEx2 is not null)
         && _clientStartListenEx is not null
         && _clientStopListen is not null;
 
@@ -94,16 +96,57 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         return _clientResponseDevReg(registerDeviceId, ip, (ushort)port, true);
     }
 
-    public IntPtr TryLoginActiveRegister(string registerDeviceId, string username, string password, out int error)
+    public IReadOnlyList<DahuaActiveRegisterLoginAttempt> TryLoginActiveRegisterStrategies(string registerDeviceId, string username, string password)
     {
-        error = 0;
-        if (_clientLoginEx is null || string.IsNullOrWhiteSpace(registerDeviceId)) return IntPtr.Zero;
+        var attempts = new List<DahuaActiveRegisterLoginAttempt>();
+        if (string.IsNullOrWhiteSpace(registerDeviceId)) return attempts;
 
-        var deviceInfo = new NetDeviceInfo { SerialNumber = new byte[48] };
+        if (_clientLoginEx is not null)
+        {
+            attempts.Add(TryLoginEx("LoginExEmptyIp", string.Empty, registerDeviceId, username, password));
+            if (attempts[^1].Succeeded) return attempts;
+            attempts.Add(TryLoginEx("LoginExRegisterIdAsIp", registerDeviceId, registerDeviceId, username, password));
+            if (attempts[^1].Succeeded) return attempts;
+        }
+
+        if (_clientLoginEx2 is not null)
+        {
+            attempts.Add(TryLoginEx2("LoginEx2EmptyIp", string.Empty, registerDeviceId, username, password));
+            if (attempts[^1].Succeeded) return attempts;
+        }
+
+        return attempts;
+    }
+
+    private DahuaActiveRegisterLoginAttempt TryLoginEx(string strategy, string ipArgument, string registerDeviceId, string username, string password)
+    {
+        var errorPointer = 0;
+        var handle = IntPtr.Zero;
         var capParam = Marshal.StringToHGlobalAnsi(registerDeviceId);
+        var deviceInfo = new NetDeviceInfo { SerialNumber = new byte[48] };
         try
         {
-            return _clientLoginEx(null, 0, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref error);
+            handle = _clientLoginEx!(ipArgument, 0, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref errorPointer);
+            var lastError = LastErrorCode;
+            return DahuaActiveRegisterLoginAttempt.Create(strategy, ipArgument, 0, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError, usesLoginEx2: false);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(capParam);
+        }
+    }
+
+    private DahuaActiveRegisterLoginAttempt TryLoginEx2(string strategy, string ipArgument, string registerDeviceId, string username, string password)
+    {
+        var errorPointer = 0;
+        var handle = IntPtr.Zero;
+        var capParam = Marshal.StringToHGlobalAnsi(registerDeviceId);
+        var deviceInfo = new NetDeviceInfoEx { SerialNumber = new byte[48], Reserved = new byte[4], Reserved2 = new byte[8] };
+        try
+        {
+            handle = _clientLoginEx2!(ipArgument, 0, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref errorPointer);
+            var lastError = LastErrorCode;
+            return DahuaActiveRegisterLoginAttempt.Create(strategy, ipArgument, 0, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError, usesLoginEx2: true);
         }
         finally
         {
@@ -226,6 +269,26 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         public byte ChanNum;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetDeviceInfoEx
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 48)] public byte[] SerialNumber;
+        public int AlarmInPortNum;
+        public int AlarmOutPortNum;
+        public int DiskNum;
+        public int DvrType;
+        public int ChanNum;
+        public byte LimitLoginTime;
+        public byte LeftLogTimes;
+        public ushort ReservedAlignment;
+        public int LockLeftTime;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] Reserved;
+        public int NTlsPort;
+        public int KeyFrameEncrypt;
+        public int Algorithm;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)] public byte[] Reserved2;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate int ServiceCallback(IntPtr listenHandle, string deviceIp, ushort devicePort, int command, IntPtr param, uint paramLength, IntPtr userData);
 
@@ -269,6 +332,16 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         IntPtr capParam,
         ref NetDeviceInfo deviceInfo,
         ref int error);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientLoginEx2Delegate(
+        [MarshalAs(UnmanagedType.LPStr)] string? ip,
+        ushort port,
+        [MarshalAs(UnmanagedType.LPStr)] string username,
+        [MarshalAs(UnmanagedType.LPStr)] string password,
+        int specCap,
+        IntPtr capParam,
+        ref NetDeviceInfoEx deviceInfo,
+        ref int error);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientLogoutDelegate(IntPtr loginHandle);
@@ -292,4 +365,57 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void ReconnectCallback(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData);
 }
+
+
+
+
+internal sealed record DahuaActiveRegisterLoginAttempt(
+    string Strategy,
+    string IpArgument,
+    int PortArgument,
+    int SpecCap,
+    string RegisterDeviceId,
+    bool UsernamePresent,
+    bool PasswordPresent,
+    int CapParamStringLength,
+    long LoginHandle,
+    int NativeErrorPointer,
+    int LastErrorAfterCall,
+    bool UsesLoginEx2,
+    bool PossibleMarshallingWarning)
+{
+    public bool Succeeded => LoginHandle != 0;
+
+    public static DahuaActiveRegisterLoginAttempt Create(
+        string strategy,
+        string ipArgument,
+        int portArgument,
+        int specCap,
+        string registerDeviceId,
+        string? username,
+        string? password,
+        IntPtr loginHandle,
+        int nativeErrorPointer,
+        int lastErrorAfterCall,
+        bool usesLoginEx2)
+    {
+        var handleValue = loginHandle.ToInt64();
+        var possibleMarshallingWarning = DahuaActiveRegisterLoginDiagnostics.IsPossibleMarshallingWarning(handleValue, nativeErrorPointer, lastErrorAfterCall);
+        return new DahuaActiveRegisterLoginAttempt(
+            strategy,
+            ipArgument,
+            portArgument,
+            specCap,
+            registerDeviceId,
+            !string.IsNullOrWhiteSpace(username),
+            !string.IsNullOrEmpty(password),
+            registerDeviceId.Length,
+            handleValue,
+            nativeErrorPointer,
+            lastErrorAfterCall,
+            usesLoginEx2,
+            possibleMarshallingWarning);
+    }
+}
+
 

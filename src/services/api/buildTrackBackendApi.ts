@@ -134,6 +134,38 @@ export interface SecurityEventRow {
   rawRecNo?: number
 }
 
+
+export interface ActiveRegisterStatus {
+  enabled: boolean
+  listenerActive: boolean
+  ports: number[]
+  lastCallbackTime?: string
+  lastCommand?: string
+  lastPayloadBytes: number
+  rawEventCount: number
+  decodedEventCount: number
+  ingestedEventCount: number
+  ingestionEnabled: boolean
+  diagnosticsEnabled: boolean
+  decodeStatus?: string
+  warning?: string
+}
+
+export interface ActiveRegisterRawEventRow {
+  id: string
+  deviceId?: string
+  registerDeviceId?: string
+  remoteIp?: string
+  remotePort?: number
+  listenerPort: number
+  callbackCommand: number
+  callbackCommandName?: string
+  payloadBytes: number
+  payloadFirstBytesHex?: string
+  decodeStatus: string
+  decodedJson?: string
+  createdAt: string
+}
 export interface ListenerStatus {
   ports: number[]
   defaultPorts: number[]
@@ -141,7 +173,24 @@ export interface ListenerStatus {
   simulatorEnabled: boolean
   decodeStatus?: string
   warning?: string
-}
+  apiConfig?: {
+    enabled: boolean
+    ingestionEnabled: boolean
+    ports: number[]
+  }
+  workerDiagnosticsPresent?: boolean
+  workerListenerActive?: boolean
+  lastDecodeStatus?: string
+  lastLoginStrategy?: string
+  lastLoginSucceeded?: boolean
+  lastLoginErrorSigned?: number
+  lastLoginErrorHex?: string
+  lastLoginNativeErrorSigned?: number
+  lastLoginNativeErrorHex?: string
+  loginPossibleMarshallingWarning?: boolean
+  startListenExSucceeded?: boolean
+  startListenExErrorHex?: string
+  worker?: Record<string, unknown>}
 
 export class BackendApiError extends Error {
   readonly url: string
@@ -243,4 +292,8 @@ export const buildTrackBackendApi = {
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   securitySnapshotUrl: (snapshotUrl: string) => `${API_BASE}${snapshotUrl}`,
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
+  getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),
+  getActiveRegisterRawEvents: async (limit = 100) => unwrapArray<ActiveRegisterRawEventRow>(await request<unknown>(`/api/dahua/active-register/raw-events?limit=${limit}`)),
 }
+
+

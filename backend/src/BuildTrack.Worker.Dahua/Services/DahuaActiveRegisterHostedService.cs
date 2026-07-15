@@ -19,6 +19,12 @@ public sealed class DahuaActiveRegisterHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_ENABLED"]))
+        {
+            logger.LogInformation("Dahua Active Register worker is disabled. CGI polling can continue separately; set DAHUA_ACTIVE_REGISTER_ENABLED=true to enable NetSDK/TCP listener.");
+            return;
+        }
+
         var ports = ParsePorts(configuration["DAHUA_ACTIVE_REGISTER_PORTS"]);
         _singleDeviceFallbackEnabled = DahuaActiveRegisterFallbackMatcher.IsSingleDeviceFallbackEnabled(configuration["DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK"]);
         logger.LogInformation("Single-device fallback enabled: {Enabled}", _singleDeviceFallbackEnabled);
@@ -201,7 +207,12 @@ public sealed class DahuaActiveRegisterHostedService(
         return null;
     }
 
-    private static int[] ParsePorts(string? raw) => (string.IsNullOrWhiteSpace(raw) ? "9500,7000" : raw)
+    private static bool IsEnabled(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+
+    private static int[] ParsePorts(string? raw) => (string.IsNullOrWhiteSpace(raw) ? "7000,9500" : raw)
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Select(value => int.TryParse(value, out var port) ? port : 0)
         .Where(port => port > 0)
@@ -209,6 +220,9 @@ public sealed class DahuaActiveRegisterHostedService(
         .DefaultIfEmpty(9500)
         .ToArray();
 }
+
+
+
 
 
 
