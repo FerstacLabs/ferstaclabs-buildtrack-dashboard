@@ -607,7 +607,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
             else if (IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
             {
-                var attempts = _nativeClient.TryLoginActiveRegisterStrategies(device.RegisterDeviceId, remoteIp, remotePort, username, password);
+                var passwordOverride = configuration["DAHUA_ACTIVE_REGISTER_PASSWORD_OVERRIDE"];
+                var loginPassword = string.IsNullOrEmpty(passwordOverride) ? password : passwordOverride;
+                var passwordSource = string.IsNullOrEmpty(passwordOverride) ? "DatabaseEncrypted" : "EnvironmentOverride";
+                var attempts = _nativeClient.TryLoginActiveRegisterStrategies(device.RegisterDeviceId, remoteIp, remotePort, username, loginPassword);
                 DahuaActiveRegisterLoginAttempt? successfulAttempt = null;
                 foreach (var attempt in attempts)
                 {
@@ -629,21 +632,23 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     PersistDiagnostics();
 
                     logger.LogInformation(
-                        "Dahua Active Register server-connection login attempt. Strategy={Strategy}, RegisterDeviceId={RegisterDeviceId}, UsernamePresent={UsernamePresent}, PasswordPresent={PasswordPresent}, IpArgument={IpArgument}, PortArgument={PortArgument}, SpecCap={SpecCap}, CapParamLength={CapParamLength}, LoginHandle={LoginHandle}, NativeErrorPointer={NativeErrorPointer}, NativeErrorHex={NativeErrorHex}, LastError={LastError}, LastErrorHex={LastErrorHex}, UsesLoginEx2={UsesLoginEx2}",
+                        "Dahua Active Register server-connection login attempt. Strategy={Strategy}, LoginApi={LoginApi}, RegisterDeviceId={RegisterDeviceId}, UsernamePresent={UsernamePresent}, PasswordSource={PasswordSource}, PasswordLength={PasswordLength}, IpArgument={IpArgument}, PortArgument={PortArgument}, SpecCap={SpecCap}, CapParamKind={CapParamKind}, CapParamLength={CapParamLength}, LoginHandle={LoginHandle}, NativeErrorPointer={NativeErrorPointer}, NativeErrorHex={NativeErrorHex}, LastError={LastError}, LastErrorHex={LastErrorHex}",
                         attempt.Strategy,
+                        attempt.LoginApi,
                         attempt.RegisterDeviceId,
                         attempt.UsernamePresent,
-                        attempt.PasswordPresent,
+                        passwordSource,
+                        attempt.PasswordLength,
                         string.IsNullOrEmpty(attempt.IpArgument) ? "<empty>" : attempt.IpArgument,
                         attempt.PortArgument,
                         attempt.SpecCap,
+                        attempt.CapParamKind,
                         attempt.CapParamStringLength,
                         attempt.LoginHandle,
                         attempt.NativeErrorPointer,
                         ToHex(attempt.NativeErrorPointer),
                         attempt.LastErrorAfterCall,
-                        ToHex(attempt.LastErrorAfterCall),
-                        attempt.UsesLoginEx2);
+                        ToHex(attempt.LastErrorAfterCall));
 
                     if (attempt.PossibleMarshallingWarning)
                     {
@@ -673,7 +678,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                         _diagnostics.StartListenExSuccess = false;
                         _diagnostics.StartListenExErrorSigned = lastError;
                         _diagnostics.StartListenExErrorHex = ToHex(lastError);
-                        _diagnostics.LastDecodeError = $"CLIENT_LoginEx/CLIENT_LoginEx2 active-register server connection login failed. LastStrategy={lastAttempt?.Strategy ?? "None"}, ErrorSigned={lastError}, ErrorHex={ToHex(lastError)}, NativeErrorSigned={nativeError}, NativeErrorHex={ToHex(nativeError)}";
+                        _diagnostics.LastDecodeError = $"CLIENT_LoginEx/CLIENT_LoginEx2/CLIENT_LoginWithHighLevelSecurity active-register server connection login failed. LastStrategy={lastAttempt?.Strategy ?? "None"}, ErrorSigned={lastError}, ErrorHex={ToHex(lastError)}, NativeErrorSigned={nativeError}, NativeErrorHex={ToHex(nativeError)}";
                     }
                     SetStatus("ServerConnLoginFailed");
                     await connectionLogger.LogAsync(
@@ -682,25 +687,27 @@ public sealed class DahuaNetSdkActiveRegisterService(
                         remoteIp,
                         remotePort,
                         "netsdk_server_conn_login_failed",
-                        "CLIENT_LoginEx/CLIENT_LoginEx2 active-register server connection login failed",
+                        "CLIENT_LoginEx/CLIENT_LoginEx2/CLIENT_LoginWithHighLevelSecurity active-register server connection login failed",
                         new
                         {
                             attempts = attempts.Select(x => new
                             {
                                 x.Strategy,
+                                x.LoginApi,
                                 x.RegisterDeviceId,
                                 x.UsernamePresent,
-                                x.PasswordPresent,
+                                passwordSource,
+                                x.PasswordLength,
                                 x.IpArgument,
                                 x.PortArgument,
                                 x.SpecCap,
+                                x.CapParamKind,
                                 x.CapParamStringLength,
                                 x.LoginHandle,
                                 x.NativeErrorPointer,
                                 nativeErrorHex = ToHex(x.NativeErrorPointer),
                                 x.LastErrorAfterCall,
                                 lastErrorHex = ToHex(x.LastErrorAfterCall),
-                                x.UsesLoginEx2,
                                 x.PossibleMarshallingWarning,
                             })
                         },
@@ -1161,6 +1168,9 @@ public static class DahuaActiveRegisterPayloadParser
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+
+
 
 
 

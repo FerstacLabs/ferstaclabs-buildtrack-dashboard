@@ -213,3 +213,23 @@ The worker now also tries remote callback endpoint variants after `CLIENT_Respon
 - `LoginEx2DeviceIdWithRemotePort`: same with `CLIENT_LoginEx2`.
 
 This is still not a local/LAN fallback. It only uses the remote endpoint supplied by the real Active Register callback.
+
+## High-level login diagnostics phase
+
+After real VPS testing, the original seven `CLIENT_LoginEx` / `CLIENT_LoginEx2` Active Register server-connection strategies still returned a zero login handle. The SDK exposes `CLIENT_LoginWithHighLevelSecurity` with:
+
+- `NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY.dwSize = sizeof(NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY)`
+- fixed ANSI fields `szIP[64]`, `szUserName[64]`, `szPassword[64]`
+- `emSpecCap = EM_LOGIN_SPEC_CAP_SERVER_CONN` (`2`)
+- `pCapParam` documented the same way as `CLIENT_LoginEx`: active-register device ID
+- `NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY.nError` as the native login error output
+
+No bundled sample shows Active Register with a different `pCapParam` struct. Samples use high-level login for normal TCP login with `EM_LOGIN_SPEC_CAP_TCP`.
+
+The worker now keeps the original seven raw-register-id strategies first, then adds:
+
+- null-terminated `RegisterDeviceId` variants for existing `CLIENT_LoginEx` / `CLIENT_LoginEx2` strategies
+- high-level login variants for empty IP, register-id-as-IP, remote callback IP, remote endpoint IP:port, and register-id with remote source port
+- raw and null-terminated `RegisterDeviceId` `pCapParam` variants for high-level login
+
+A diagnostics-only password override is available as `DAHUA_ACTIVE_REGISTER_PASSWORD_OVERRIDE`. It is used only for Active Register login attempts, never logged as a value, and logs only `PasswordSource` plus password length.

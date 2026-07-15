@@ -19,6 +19,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private readonly ClientSetDvrMessageCallbackDelegate? _clientSetDvrMessageCallback;
     private readonly ClientLoginExDelegate? _clientLoginEx;
     private readonly ClientLoginEx2Delegate? _clientLoginEx2;
+    private readonly ClientLoginWithHighLevelSecurityDelegate? _clientLoginWithHighLevelSecurity;
     private readonly ClientLogoutDelegate? _clientLogout;
     private readonly ClientResponseDevRegDelegate? _clientResponseDevReg;
     private readonly ClientStartListenExDelegate? _clientStartListenEx;
@@ -42,6 +43,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         _clientSetDvrMessageCallback = TryGetDelegate<ClientSetDvrMessageCallbackDelegate>("CLIENT_SetDVRMessCallBack");
         _clientLoginEx = TryGetDelegate<ClientLoginExDelegate>("CLIENT_LoginEx");
         _clientLoginEx2 = TryGetDelegate<ClientLoginEx2Delegate>("CLIENT_LoginEx2");
+        _clientLoginWithHighLevelSecurity = TryGetDelegate<ClientLoginWithHighLevelSecurityDelegate>("CLIENT_LoginWithHighLevelSecurity");
         _clientLogout = TryGetDelegate<ClientLogoutDelegate>("CLIENT_Logout");
         _clientResponseDevReg = TryGetDelegate<ClientResponseDevRegDelegate>("CLIENT_ResponseDevReg");
         _clientStartListenEx = TryGetDelegate<ClientStartListenExDelegate>("CLIENT_StartListenEx");
@@ -54,7 +56,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     public bool HasAlarmSubscriptionExports =>
         _clientSetDvrMessageCallback is not null
-        && (_clientLoginEx is not null || _clientLoginEx2 is not null)
+        && (_clientLoginEx is not null || _clientLoginEx2 is not null || _clientLoginWithHighLevelSecurity is not null)
         && _clientStartListenEx is not null
         && _clientStopListen is not null;
 
@@ -106,13 +108,18 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             remoteIp,
             remotePort,
             hasLoginEx: _clientLoginEx is not null,
-            hasLoginEx2: _clientLoginEx2 is not null);
+            hasLoginEx2: _clientLoginEx2 is not null,
+            hasHighLevelLogin: _clientLoginWithHighLevelSecurity is not null);
 
         foreach (var strategy in strategies)
         {
-            var attempt = strategy.UsesLoginEx2
-                ? TryLoginEx2(strategy.Name, strategy.IpArgument, strategy.PortArgument, registerDeviceId, username, password)
-                : TryLoginEx(strategy.Name, strategy.IpArgument, strategy.PortArgument, registerDeviceId, username, password);
+            var attempt = strategy.LoginApi switch
+            {
+                DahuaActiveRegisterLoginStrategyPlan.ApiLoginEx2 => TryLoginEx2(strategy, registerDeviceId, username, password),
+                DahuaActiveRegisterLoginStrategyPlan.ApiHighLevel => TryLoginHighLevel(strategy, registerDeviceId, username, password),
+                _ => TryLoginEx(strategy, registerDeviceId, username, password),
+            };
+
             attempts.Add(attempt);
             if (attempt.Succeeded) return attempts;
         }
@@ -120,39 +127,54 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         return attempts;
     }
 
-    private DahuaActiveRegisterLoginAttempt TryLoginEx(string strategy, string ipArgument, int portArgument, string registerDeviceId, string username, string password)
+    private DahuaActiveRegisterLoginAttempt TryLoginEx(DahuaActiveRegisterLoginStrategy strategy, string registerDeviceId, string username, string password)
     {
         var errorPointer = 0;
-        var handle = IntPtr.Zero;
-        var capParam = Marshal.StringToHGlobalAnsi(registerDeviceId);
+        var capParamAllocation = CreateCapParam(registerDeviceId, strategy.CapParamKind);
         var deviceInfo = new NetDeviceInfo { SerialNumber = new byte[48] };
         try
         {
-            handle = _clientLoginEx!(ipArgument, (ushort)portArgument, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref errorPointer);
+            var handle = _clientLoginEx!(strategy.IpArgument, (ushort)strategy.PortArgument, username, password, LoginSpecCapServerConn, capParamAllocation.Pointer, ref deviceInfo, ref errorPointer);
             var lastError = LastErrorCode;
-            return DahuaActiveRegisterLoginAttempt.Create(strategy, ipArgument, portArgument, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError, usesLoginEx2: false);
+            return DahuaActiveRegisterLoginAttempt.Create(strategy, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError);
         }
         finally
         {
-            Marshal.FreeHGlobal(capParam);
+            capParamAllocation.Dispose();
         }
     }
 
-    private DahuaActiveRegisterLoginAttempt TryLoginEx2(string strategy, string ipArgument, int portArgument, string registerDeviceId, string username, string password)
+    private DahuaActiveRegisterLoginAttempt TryLoginEx2(DahuaActiveRegisterLoginStrategy strategy, string registerDeviceId, string username, string password)
     {
         var errorPointer = 0;
-        var handle = IntPtr.Zero;
-        var capParam = Marshal.StringToHGlobalAnsi(registerDeviceId);
-        var deviceInfo = new NetDeviceInfoEx { SerialNumber = new byte[48], Reserved = new byte[4], Reserved2 = new byte[8] };
+        var capParamAllocation = CreateCapParam(registerDeviceId, strategy.CapParamKind);
+        var deviceInfo = NetDeviceInfoEx.Create();
         try
         {
-            handle = _clientLoginEx2!(ipArgument, (ushort)portArgument, username, password, LoginSpecCapServerConn, capParam, ref deviceInfo, ref errorPointer);
+            var handle = _clientLoginEx2!(strategy.IpArgument, (ushort)strategy.PortArgument, username, password, LoginSpecCapServerConn, capParamAllocation.Pointer, ref deviceInfo, ref errorPointer);
             var lastError = LastErrorCode;
-            return DahuaActiveRegisterLoginAttempt.Create(strategy, ipArgument, portArgument, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError, usesLoginEx2: true);
+            return DahuaActiveRegisterLoginAttempt.Create(strategy, LoginSpecCapServerConn, registerDeviceId, username, password, handle, errorPointer, lastError);
         }
         finally
         {
-            Marshal.FreeHGlobal(capParam);
+            capParamAllocation.Dispose();
+        }
+    }
+
+    private DahuaActiveRegisterLoginAttempt TryLoginHighLevel(DahuaActiveRegisterLoginStrategy strategy, string registerDeviceId, string username, string password)
+    {
+        var capParamAllocation = CreateCapParam(registerDeviceId, strategy.CapParamKind);
+        var input = NetInLoginWithHighLevelSecurity.Create(strategy.IpArgument, strategy.PortArgument, username, password, LoginSpecCapServerConn, capParamAllocation.Pointer);
+        var output = NetOutLoginWithHighLevelSecurity.Create();
+        try
+        {
+            var handle = _clientLoginWithHighLevelSecurity!(ref input, ref output);
+            var lastError = LastErrorCode;
+            return DahuaActiveRegisterLoginAttempt.Create(strategy, LoginSpecCapServerConn, registerDeviceId, username, password, handle, output.Error, lastError);
+        }
+        finally
+        {
+            capParamAllocation.Dispose();
         }
     }
 
@@ -289,6 +311,93 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         public int KeyFrameEncrypt;
         public int Algorithm;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)] public byte[] Reserved2;
+
+        public static NetDeviceInfoEx Create() => new()
+        {
+            SerialNumber = new byte[48],
+            Reserved = new byte[4],
+            Reserved2 = new byte[8],
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+    private struct NetInLoginWithHighLevelSecurity
+    {
+        public uint Size;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string Ip;
+        public int Port;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string UserName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string Password;
+        public int SpecCap;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] Reserved;
+        public IntPtr CapParam;
+        public int TlsCap;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string LocalIp;
+        public int ClientType;
+
+        public static NetInLoginWithHighLevelSecurity Create(string ip, int port, string username, string password, int specCap, IntPtr capParam) => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetInLoginWithHighLevelSecurity>(),
+            Ip = Truncate(ip, 63),
+            Port = port,
+            UserName = Truncate(username, 63),
+            Password = Truncate(password, 63),
+            SpecCap = specCap,
+            Reserved = new byte[4],
+            CapParam = capParam,
+            TlsCap = 0,
+            LocalIp = string.Empty,
+            ClientType = 0,
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetOutLoginWithHighLevelSecurity
+    {
+        public uint Size;
+        public NetDeviceInfoEx DeviceInfo;
+        public int Error;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 132)] public byte[] Reserved;
+
+        public static NetOutLoginWithHighLevelSecurity Create() => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetOutLoginWithHighLevelSecurity>(),
+            DeviceInfo = NetDeviceInfoEx.Create(),
+            Reserved = new byte[132],
+        };
+    }
+
+    private sealed class CapParamAllocation : IDisposable
+    {
+        public IntPtr Pointer { get; init; }
+        public int Length { get; init; }
+
+        public void Dispose()
+        {
+            if (Pointer != IntPtr.Zero) Marshal.FreeHGlobal(Pointer);
+        }
+    }
+
+    private static CapParamAllocation CreateCapParam(string registerDeviceId, string capParamKind)
+    {
+        if (capParamKind == DahuaActiveRegisterLoginStrategyPlan.CapNull)
+        {
+            return new CapParamAllocation { Pointer = IntPtr.Zero, Length = 0 };
+        }
+
+        var bytes = System.Text.Encoding.ASCII.GetBytes(registerDeviceId);
+        var includeNull = capParamKind == DahuaActiveRegisterLoginStrategyPlan.CapNullTerminatedRegisterId;
+        var length = bytes.Length + (includeNull ? 1 : 0);
+        var pointer = Marshal.AllocHGlobal(length);
+        Marshal.Copy(bytes, 0, pointer, bytes.Length);
+        if (includeNull) Marshal.WriteByte(pointer, bytes.Length, 0);
+        return new CapParamAllocation { Pointer = pointer, Length = length };
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -334,6 +443,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         IntPtr capParam,
         ref NetDeviceInfo deviceInfo,
         ref int error);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr ClientLoginEx2Delegate(
         [MarshalAs(UnmanagedType.LPStr)] string? ip,
@@ -344,6 +454,11 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         IntPtr capParam,
         ref NetDeviceInfoEx deviceInfo,
         ref int error);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientLoginWithHighLevelSecurityDelegate(
+        ref NetInLoginWithHighLevelSecurity input,
+        ref NetOutLoginWithHighLevelSecurity output);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientLogoutDelegate(IntPtr loginHandle);
@@ -368,17 +483,17 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private delegate void ReconnectCallback(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData);
 }
 
-
-
-
 internal sealed record DahuaActiveRegisterLoginAttempt(
     string Strategy,
+    string LoginApi,
     string IpArgument,
     int PortArgument,
     int SpecCap,
+    string CapParamKind,
     string RegisterDeviceId,
     bool UsernamePresent,
     bool PasswordPresent,
+    int PasswordLength,
     int CapParamStringLength,
     long LoginHandle,
     int NativeErrorPointer,
@@ -389,37 +504,33 @@ internal sealed record DahuaActiveRegisterLoginAttempt(
     public bool Succeeded => LoginHandle != 0;
 
     public static DahuaActiveRegisterLoginAttempt Create(
-        string strategy,
-        string ipArgument,
-        int portArgument,
+        DahuaActiveRegisterLoginStrategy strategy,
         int specCap,
         string registerDeviceId,
         string? username,
         string? password,
         IntPtr loginHandle,
         int nativeErrorPointer,
-        int lastErrorAfterCall,
-        bool usesLoginEx2)
+        int lastErrorAfterCall)
     {
         var handleValue = loginHandle.ToInt64();
         var possibleMarshallingWarning = DahuaActiveRegisterLoginDiagnostics.IsPossibleMarshallingWarning(handleValue, nativeErrorPointer, lastErrorAfterCall);
         return new DahuaActiveRegisterLoginAttempt(
-            strategy,
-            ipArgument,
-            portArgument,
+            strategy.Name,
+            strategy.LoginApi,
+            strategy.IpArgument,
+            strategy.PortArgument,
             specCap,
+            strategy.CapParamKind,
             registerDeviceId,
             !string.IsNullOrWhiteSpace(username),
             !string.IsNullOrEmpty(password),
-            registerDeviceId.Length,
+            password?.Length ?? 0,
+            strategy.CapParamKind == DahuaActiveRegisterLoginStrategyPlan.CapNull ? 0 : registerDeviceId.Length + (strategy.CapParamKind == DahuaActiveRegisterLoginStrategyPlan.CapNullTerminatedRegisterId ? 1 : 0),
             handleValue,
             nativeErrorPointer,
             lastErrorAfterCall,
-            usesLoginEx2,
+            strategy.UsesLoginEx2,
             possibleMarshallingWarning);
     }
 }
-
-
-
-
