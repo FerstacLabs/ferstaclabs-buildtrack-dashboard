@@ -193,3 +193,23 @@ Implemented a guarded `LoginExServerConn` strategy:
 ## Remaining TODO
 
 If `LoginExServerConn` fails on the real device, request the official Dahua AutoRegister demo/sample or vendor confirmation for this exact model/firmware. The missing sample should demonstrate how to obtain `lLoginID` after `CLIENT_ResponseDevReg` without direct local IP login.
+
+## Remote endpoint LoginEx strategy expansion
+
+Real VPS validation showed `CLIENT_ResponseDevReg` can succeed for `DH_DVR_SERIAL_RETURN_EX`, while `CLIENT_LoginEx` / `CLIENT_LoginEx2` with `EM_LOGIN_SPEC_CAP_SERVER_CONN` still returned a zero login handle and `0x8000006C` for the original empty-IP / register-id strategies.
+
+Relevant SDK header findings remain unchanged:
+
+- `CLIENT_LoginEx(const char *pchDVRIP, WORD wDVRPort, const char *pchUserName, const char *pchPassword, int nSpecCap, void* pCapParam, LPNET_DEVICEINFO lpDeviceInfo, int *error = 0)`.
+- `CLIENT_LoginEx2(const char *pchDVRIP, WORD wDVRPort, const char *pchUserName, const char *pchPassword, EM_LOGIN_SPAC_CAP_TYPE emSpecCap, void* pCapParam, LPNET_DEVICEINFO_Ex lpDeviceInfo, int *error = 0)`.
+- Header comment: `nSpecCap = 2 is login with active registeration, void* pCapParam fill in Actively registered device ID`.
+- No SDK header/sample in the current package shows a different active-register `pCapParam` struct for this flow.
+
+The worker now also tries remote callback endpoint variants after `CLIENT_ResponseDevReg` succeeds:
+
+- `LoginExRemoteEndpoint`: `ip = callback remote IP`, `port = callback remote source port`, `pCapParam = RegisterDeviceId`.
+- `LoginEx2RemoteEndpoint`: same with `CLIENT_LoginEx2`.
+- `LoginExDeviceIdWithRemotePort`: `ip = RegisterDeviceId`, `port = callback remote source port`, `pCapParam = RegisterDeviceId`.
+- `LoginEx2DeviceIdWithRemotePort`: same with `CLIENT_LoginEx2`.
+
+This is still not a local/LAN fallback. It only uses the remote endpoint supplied by the real Active Register callback.

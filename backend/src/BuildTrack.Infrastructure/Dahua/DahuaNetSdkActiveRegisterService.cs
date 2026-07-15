@@ -607,7 +607,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             }
             else if (IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
             {
-                var attempts = _nativeClient.TryLoginActiveRegisterStrategies(device.RegisterDeviceId, username, password);
+                var attempts = _nativeClient.TryLoginActiveRegisterStrategies(device.RegisterDeviceId, remoteIp, remotePort, username, password);
                 DahuaActiveRegisterLoginAttempt? successfulAttempt = null;
                 foreach (var attempt in attempts)
                 {
@@ -793,7 +793,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
         {
             _subscriptionInProgress.TryRemove(device.Id, out _);
         }
-    }    private async Task HandleAlarmCallbackAsync(int command, IntPtr loginHandle, byte[] payload, string? remoteIp, int remotePort)
+    }
+
+    private async Task HandleAlarmCallbackAsync(int command, IntPtr loginHandle, byte[] payload, string? remoteIp, int remotePort)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
@@ -1159,6 +1161,8 @@ public static class DahuaActiveRegisterPayloadParser
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
+
+
 
 
 
