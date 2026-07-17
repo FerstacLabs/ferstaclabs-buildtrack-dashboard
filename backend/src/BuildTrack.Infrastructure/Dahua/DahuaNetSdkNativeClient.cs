@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
+using BuildTrack.Domain.Dahua;
 using Microsoft.Extensions.Logging;
 
 namespace BuildTrack.Infrastructure.Dahua;
@@ -24,6 +25,9 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private readonly ClientResponseDevRegDelegate? _clientResponseDevReg;
     private readonly ClientStartListenExDelegate? _clientStartListenEx;
     private readonly ClientStopListenDelegate? _clientStopListen;
+    private readonly ClientFindRecordDelegate? _clientFindRecord;
+    private readonly ClientFindNextRecordDelegate? _clientFindNextRecord;
+    private readonly ClientFindRecordCloseDelegate? _clientFindRecordClose;
     private readonly DisconnectCallback _disconnectCallback;
     private readonly ReconnectCallback _reconnectCallback;
     private AlarmMessageCallback? _alarmMessageCallback;
@@ -48,6 +52,9 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         _clientResponseDevReg = TryGetDelegate<ClientResponseDevRegDelegate>("CLIENT_ResponseDevReg");
         _clientStartListenEx = TryGetDelegate<ClientStartListenExDelegate>("CLIENT_StartListenEx");
         _clientStopListen = TryGetDelegate<ClientStopListenDelegate>("CLIENT_StopListen");
+        _clientFindRecord = TryGetDelegate<ClientFindRecordDelegate>("CLIENT_FindRecord");
+        _clientFindNextRecord = TryGetDelegate<ClientFindNextRecordDelegate>("CLIENT_FindNextRecord");
+        _clientFindRecordClose = TryGetDelegate<ClientFindRecordCloseDelegate>("CLIENT_FindRecordClose");
         _disconnectCallback = OnDisconnect;
         _reconnectCallback = OnReconnect;
     }
@@ -59,6 +66,8 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         && (_clientLoginEx is not null || _clientLoginEx2 is not null || _clientLoginWithHighLevelSecurity is not null)
         && _clientStartListenEx is not null
         && _clientStopListen is not null;
+
+    public bool HasRecordQueryExports => _clientFindRecord is not null && _clientFindNextRecord is not null && _clientFindRecordClose is not null;
 
     public bool Initialize()
     {
@@ -196,6 +205,102 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         return _clientLogout(loginHandle);
     }
 
+    public bool TryQueryAccessControlCardRecords(IntPtr loginHandle, int maxRecords, TimeZoneInfo deviceTimeZone, out IReadOnlyList<DahuaAccessRecord> records, out string? error)
+    {
+        var result = TryQueryAccessControlCardRecords(loginHandle, 0, maxRecords, deviceTimeZone);
+        records = result.Records;
+        error = result.Error;
+        return result.Success;
+    }
+    public DahuaNetSdkRecordQueryResult TryQueryAccessControlCardRecords(IntPtr loginHandle, long lastRecNo, int maxRecords, TimeZoneInfo deviceTimeZone)
+    {
+        if (loginHandle == IntPtr.Zero)
+        {
+            return DahuaNetSdkRecordQueryResult.Failure("Login handle is zero", LastErrorCode);
+        }
+
+        if (!HasRecordQueryExports)
+        {
+            return DahuaNetSdkRecordQueryResult.Failure("CLIENT_FindRecord/CLIENT_FindNextRecord/CLIENT_FindRecordClose exports are unavailable", LastErrorCode);
+        }
+
+        var records = new List<DahuaAccessRecord>();
+        var diagnostics = new List<Dictionary<string, string?>>();
+        var condition = FindRecordAccessCtlCardRecConditionEx.Create();
+        var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FindRecordAccessCtlCardRecConditionEx>());
+        var recordBuffer = Marshal.AllocHGlobal(DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes);
+        IntPtr findHandle = IntPtr.Zero;
+
+        try
+        {
+            Marshal.StructureToPtr(condition, conditionPtr, false);
+            var input = NetInFindRecordParam.Create(DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx, conditionPtr);
+            var output = NetOutFindRecordParam.Create();
+            var findResult = _clientFindRecord!(loginHandle, ref input, ref output, 3000);
+            var findError = LastErrorCode;
+            if (!findResult || output.FindHandle == IntPtr.Zero)
+            {
+                return DahuaNetSdkRecordQueryResult.Failure($"CLIENT_FindRecord failed. Result={findResult}, Handle={output.FindHandle.ToInt64()}", findError);
+            }
+
+            findHandle = output.FindHandle;
+            var attempts = 0;
+            while (attempts < Math.Max(1, maxRecords))
+            {
+                attempts++;
+                var zero = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+                Marshal.Copy(zero, 0, recordBuffer, zero.Length);
+
+                var nextInput = NetInFindNextRecordParam.Create(findHandle, 1);
+                var nextOutput = NetOutFindNextRecordParam.Create(recordBuffer, 1);
+                var nextResult = _clientFindNextRecord!(ref nextInput, ref nextOutput, 3000);
+                var nextError = LastErrorCode;
+                if (!nextResult)
+                {
+                    return new DahuaNetSdkRecordQueryResult(false, $"CLIENT_FindNextRecord failed after {attempts} attempts", nextError, records, diagnostics, attempts, records.Count);
+                }
+
+                if (nextOutput.ReturnRecordNum <= 0) break;
+
+                var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+                Marshal.Copy(recordBuffer, payload, 0, payload.Length);
+                if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError))
+                {
+                    diagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
+                    if (record.RecNo is not null && record.RecNo > lastRecNo)
+                    {
+                        records.Add(record);
+                    }
+                }
+                else
+                {
+                    diagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["ParseError"] = parseError,
+                        ["PayloadFirstBytesHex"] = Convert.ToHexString(payload.Take(128).ToArray()),
+                    });
+                }
+            }
+
+            return new DahuaNetSdkRecordQueryResult(true, null, 0, records, diagnostics, attempts, records.Count);
+        }
+        catch (Exception ex)
+        {
+            return DahuaNetSdkRecordQueryResult.Failure(ex.Message, LastErrorCode);
+        }
+        finally
+        {
+            if (findHandle != IntPtr.Zero)
+            {
+                try { _clientFindRecordClose!(findHandle); } catch { }
+            }
+
+            Marshal.FreeHGlobal(conditionPtr);
+            Marshal.FreeHGlobal(recordBuffer);
+        }
+    }
+
+
     public void StopListenServer(IntPtr handle)
     {
         if (handle == IntPtr.Zero) return;
@@ -282,6 +387,100 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private void OnReconnect(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData) =>
         _logger.LogInformation("Dahua device reconnected. LoginHandle {LoginHandle}, Remote {RemoteIp}:{RemotePort}", loginId, deviceIp, devicePort);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FindRecordAccessCtlCardRecOrder
+    {
+        public int Field;
+        public int OrderType;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)] public byte[] Reserved;
+
+        public static FindRecordAccessCtlCardRecOrder Empty() => new() { Reserved = new byte[64] };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FindRecordAccessCtlCardRecConditionEx
+    {
+        public uint Size;
+        [MarshalAs(UnmanagedType.Bool)] public bool CardNoEnabled;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] CardNo;
+        [MarshalAs(UnmanagedType.Bool)] public bool TimeEnabled;
+        public DahuaNetSdkAccessEventDecoder.NetTime StartTime;
+        public DahuaNetSdkAccessEventDecoder.NetTime EndTime;
+        public int OrderCount;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)] public FindRecordAccessCtlCardRecOrder[] Orders;
+        [MarshalAs(UnmanagedType.Bool)] public bool RealUtcTimeEnabled;
+        public uint StartRealUtcTime;
+        public uint EndRealUtcTime;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 40)] public byte[] Reserved;
+
+        public static FindRecordAccessCtlCardRecConditionEx Create() => new()
+        {
+            Size = (uint)Marshal.SizeOf<FindRecordAccessCtlCardRecConditionEx>(),
+            CardNo = new byte[32],
+            TimeEnabled = false,
+            OrderCount = 0,
+            Orders = Enumerable.Range(0, 6).Select(_ => FindRecordAccessCtlCardRecOrder.Empty()).ToArray(),
+            Reserved = new byte[40],
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetInFindRecordParam
+    {
+        public uint Size;
+        public int Type;
+        public IntPtr QueryCondition;
+
+        public static NetInFindRecordParam Create(int type, IntPtr queryCondition) => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetInFindRecordParam>(),
+            Type = type,
+            QueryCondition = queryCondition,
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetOutFindRecordParam
+    {
+        public uint Size;
+        public IntPtr FindHandle;
+
+        public static NetOutFindRecordParam Create() => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetOutFindRecordParam>(),
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetInFindNextRecordParam
+    {
+        public uint Size;
+        public IntPtr FindHandle;
+        public int FileCount;
+
+        public static NetInFindNextRecordParam Create(IntPtr findHandle, int fileCount) => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetInFindNextRecordParam>(),
+            FindHandle = findHandle,
+            FileCount = fileCount,
+        };
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NetOutFindNextRecordParam
+    {
+        public uint Size;
+        public IntPtr RecordList;
+        public int MaxRecordNum;
+        public int ReturnRecordNum;
+
+        public static NetOutFindNextRecordParam Create(IntPtr recordList, int maxRecordNum) => new()
+        {
+            Size = (uint)Marshal.SizeOf<NetOutFindNextRecordParam>(),
+            RecordList = recordList,
+            MaxRecordNum = maxRecordNum,
+        };
+    }
     [StructLayout(LayoutKind.Sequential)]
     private struct NetDeviceInfo
     {
@@ -475,6 +674,15 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientStopListenDelegate(IntPtr loginHandle);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientFindRecordDelegate(IntPtr loginHandle, ref NetInFindRecordParam input, ref NetOutFindRecordParam output, int waitTime);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientFindNextRecordDelegate(ref NetInFindNextRecordParam input, ref NetOutFindNextRecordParam output, int waitTime);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientFindRecordCloseDelegate(IntPtr findHandle);
+
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void DisconnectCallback(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData);
@@ -533,4 +741,16 @@ internal sealed record DahuaActiveRegisterLoginAttempt(
             strategy.UsesLoginEx2,
             possibleMarshallingWarning);
     }
+}
+
+internal sealed record DahuaNetSdkRecordQueryResult(
+    bool Success,
+    string? Error,
+    int ErrorCode,
+    IReadOnlyList<DahuaAccessRecord> Records,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>> Diagnostics,
+    int Attempts,
+    int CandidateCount)
+{
+    public static DahuaNetSdkRecordQueryResult Failure(string error, int errorCode) => new(false, error, errorCode, [], [], 0, 0);
 }

@@ -1,4 +1,4 @@
-using BuildTrack.Domain.Entities;
+﻿using BuildTrack.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildTrack.Infrastructure.Data;
@@ -163,6 +163,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.LastAlarmPayloadFirst256Hex).HasMaxLength(512);
             entity.Property(x => x.LastAlarmDecodeStatus).HasMaxLength(120);
             entity.Property(x => x.LastDecodedAlarmJson).HasColumnType("jsonb");
+            entity.Property(x => x.LastRecordQueryError).HasMaxLength(1000);
             entity.Property(x => x.LastDecodeError).HasMaxLength(1000);
             entity.Property(x => x.NetSdkDecodeStatus).HasMaxLength(80).IsRequired();
         });

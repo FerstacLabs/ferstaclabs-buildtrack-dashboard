@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using BuildTrack.Api.Contracts;
 using BuildTrack.Domain.Dahua;
@@ -167,7 +167,7 @@ app.MapPost("/api/devices/{id:guid}/test-config", async (Guid id, BuildTrackDbCo
         device.Mode,
         activeRegisterReady = device.Mode is DeviceMode.ActiveRegister or DeviceMode.Simulator,
         nativeSdkFound = probe.HasNativeSdk,
-        warning = probe.HasNativeSdk ? null : "Active Register TCP listener iЕџlЙ™yir. Dahua NetSDK native fayllarД± olmadД±ДџД± ГјГ§Гјn real face/access event decode hЙ™lЙ™ aktiv deyil. SDK fayllarД±nД± backend/vendor/dahua-netsdk/{win-x64|linux-x64} altД±na yerlЙ™Еџdirin."
+        warning = probe.HasNativeSdk ? null : "Active Register TCP listener iР•СџlР™в„ўyir. Dahua NetSDK native fayllarР”В± olmadР”В±Р”СџР”В± Р“СР“В§Р“Сn real face/access event decode hР™в„ўlР™в„ў aktiv deyil. SDK fayllarР”В±nР”В± backend/vendor/dahua-netsdk/{win-x64|linux-x64} altР”В±na yerlР™в„ўР•Сџdirin."
     });
 });
 
@@ -485,6 +485,12 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
             diagnostics.LastAlarmPayloadFirst256Hex,
             diagnostics.LastAlarmDecodeStatus,
             diagnostics.LastDecodedAlarmJson,
+            diagnostics.NetSdkRecordQueryEnabled,
+            diagnostics.LastRecordQueryAt,
+            diagnostics.LastRecordQuerySuccess,
+            diagnostics.LastRecordQueryError,
+            diagnostics.LastRecordQueryCount,
+            diagnostics.LastRecordQueryLastRecNo,
             diagnostics.LastDecodeError,
         },
         workerDiagnosticsPresent = diagnostics is not null,
@@ -499,6 +505,12 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
         loginPossibleMarshallingWarning = diagnostics?.LoginPossibleMarshallingWarning ?? false,
         startListenExSucceeded = diagnostics?.StartListenExSuccess,
         startListenExErrorHex = diagnostics?.StartListenExErrorHex,
+        netsdkRecordQueryEnabled = diagnostics?.NetSdkRecordQueryEnabled ?? IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_ENABLED"]),
+        lastRecordQueryAt = diagnostics?.LastRecordQueryAt,
+        lastRecordQuerySuccess = diagnostics?.LastRecordQuerySuccess,
+        lastRecordQueryError = diagnostics?.LastRecordQueryError,
+        lastRecordQueryCount = diagnostics?.LastRecordQueryCount ?? 0,
+        lastRecordQueryLastRecNo = diagnostics?.LastRecordQueryLastRecNo,
     });
 });
 app.MapGet("/api/dahua/active-register/raw-events", async (int? limit, BuildTrackDbContext db, CancellationToken ct) =>
@@ -601,6 +613,12 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         lastAlarmPayloadFirst256Hex = persisted.LastAlarmPayloadFirst256Hex,
         lastAlarmDecodeStatus = persisted.LastAlarmDecodeStatus,
         lastDecodedAlarmJson = persisted.LastDecodedAlarmJson,
+        netsdkRecordQueryEnabled = persisted.NetSdkRecordQueryEnabled,
+        lastRecordQueryAt = persisted.LastRecordQueryAt,
+        lastRecordQuerySuccess = persisted.LastRecordQuerySuccess,
+        lastRecordQueryError = persisted.LastRecordQueryError,
+        lastRecordQueryCount = persisted.LastRecordQueryCount,
+        lastRecordQueryLastRecNo = persisted.LastRecordQueryLastRecNo,
         lastDecodeError = persisted.LastDecodeError,
         netSdkDecodeStatus = persisted.NetSdkDecodeStatus,
         updatedAt = persisted.UpdatedAt,

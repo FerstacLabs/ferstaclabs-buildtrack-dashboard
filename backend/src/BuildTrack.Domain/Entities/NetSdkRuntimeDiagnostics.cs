@@ -1,4 +1,4 @@
-namespace BuildTrack.Domain.Entities;
+﻿namespace BuildTrack.Domain.Entities;
 
 public sealed class NetSdkRuntimeDiagnostics
 {
@@ -65,6 +65,12 @@ public sealed class NetSdkRuntimeDiagnostics
     public string? LastAlarmPayloadFirst256Hex { get; set; }
     public string? LastAlarmDecodeStatus { get; set; }
     public string? LastDecodedAlarmJson { get; set; }
+    public bool NetSdkRecordQueryEnabled { get; set; }
+    public DateTimeOffset? LastRecordQueryAt { get; set; }
+    public bool? LastRecordQuerySuccess { get; set; }
+    public string? LastRecordQueryError { get; set; }
+    public int LastRecordQueryCount { get; set; }
+    public long? LastRecordQueryLastRecNo { get; set; }
     public string? LastDecodeError { get; set; }
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -78,6 +78,12 @@ public sealed class DahuaNetSdkDiagnostics
     public string? LastAlarmPayloadFirst256Hex { get; set; }
     public string? LastAlarmDecodeStatus { get; set; }
     public string? LastDecodedAlarmJson { get; set; }
+    public bool NetSdkRecordQueryEnabled { get; set; }
+    public DateTimeOffset? LastRecordQueryAt { get; set; }
+    public bool? LastRecordQuerySuccess { get; set; }
+    public string? LastRecordQueryError { get; set; }
+    public int LastRecordQueryCount { get; set; }
+    public long? LastRecordQueryLastRecNo { get; set; }
     public string? LastDecodeError { get; set; }
     public string NetSdkDecodeStatus { get; set; } = "MissingSdk";
 }
@@ -97,6 +103,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private readonly ConcurrentDictionary<Guid, byte> _subscriptionInProgress = new();
     private readonly ConcurrentDictionary<string, byte> _acceptedRegistrationKeys = new();
     private readonly ConcurrentDictionary<string, byte> _experimentalSubscribeAttemptKeys = new();
+    private readonly ConcurrentDictionary<Guid, byte> _recordQueryLoops = new();
+    private readonly CancellationTokenSource _recordQueryCancellation = new();
     private readonly object _diagnosticsLock = new();
     private long _diagnosticsPersistVersion;
     private readonly DahuaNetSdkDiagnostics _diagnostics = new()
@@ -189,6 +197,12 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     LastAlarmPayloadFirst256Hex = _diagnostics.LastAlarmPayloadFirst256Hex,
                     LastAlarmDecodeStatus = _diagnostics.LastAlarmDecodeStatus,
                     LastDecodedAlarmJson = _diagnostics.LastDecodedAlarmJson,
+                    NetSdkRecordQueryEnabled = _diagnostics.NetSdkRecordQueryEnabled,
+                    LastRecordQueryAt = _diagnostics.LastRecordQueryAt,
+                    LastRecordQuerySuccess = _diagnostics.LastRecordQuerySuccess,
+                    LastRecordQueryError = _diagnostics.LastRecordQueryError,
+                    LastRecordQueryCount = _diagnostics.LastRecordQueryCount,
+                    LastRecordQueryLastRecNo = _diagnostics.LastRecordQueryLastRecNo,
                     LastDecodeError = _diagnostics.LastDecodeError,
                     NetSdkDecodeStatus = _diagnostics.NetSdkDecodeStatus,
                 };
@@ -366,6 +380,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
     public void Dispose()
     {
         if (_disposed) return;
+        _recordQueryCancellation.Cancel();
         _disposed = true;
 
         if (_nativeClient is not null)
@@ -916,6 +931,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             _deviceIdByLoginHandle[loginHandle] = device.Id;
             _loginHandleByDeviceId[device.Id] = loginHandle;
+            StartRecordQueryLoopIfEnabled(device.Id, loginHandle);
             lock (_diagnosticsLock)
             {
                 _diagnostics.StartListenExSuccess = true;
@@ -1045,6 +1061,151 @@ public sealed class DahuaNetSdkActiveRegisterService(
     }
 
 
+
+    private void StartRecordQueryLoopIfEnabled(Guid deviceId, IntPtr loginHandle)
+    {
+        var enabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_ENABLED"]);
+        lock (_diagnosticsLock) _diagnostics.NetSdkRecordQueryEnabled = enabled;
+        PersistDiagnostics();
+
+        if (!enabled || _nativeClient is null || loginHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!_recordQueryLoops.TryAdd(deviceId, 0))
+        {
+            logger.LogDebug("Dahua NetSDK record query loop already running for device {DeviceId}", deviceId);
+            return;
+        }
+
+        var intervalSeconds = ParsePositiveInt(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_INTERVAL_SECONDS"], 30);
+        var maxRecords = ParsePositiveInt(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_MAX_RECORDS"], 20);
+        var deviceTimeZone = ResolveTimeZone(configuration["DAHUA_ATTENDANCE_TIMEZONE"] ?? "Asia/Baku");
+        var cancellationToken = _recordQueryCancellation.Token;
+        logger.LogInformation("Dahua NetSDK Active Register record-query fallback enabled. Device {DeviceId}, IntervalSeconds {IntervalSeconds}, MaxRecords {MaxRecords}, TimeZone {TimeZone}", deviceId, intervalSeconds, maxRecords, deviceTimeZone.Id);
+
+        _ = Task.Run(() => RunRecordQueryLoopAsync(deviceId, loginHandle, intervalSeconds, maxRecords, deviceTimeZone, cancellationToken), CancellationToken.None);
+    }
+
+    private async Task RunRecordQueryLoopAsync(Guid deviceId, IntPtr loginHandle, int intervalSeconds, int maxRecords, TimeZoneInfo deviceTimeZone, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await QueryAccessControlRecordsOnceAsync(deviceId, loginHandle, maxRecords, deviceTimeZone, cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Dahua NetSDK record query loop stopped unexpectedly for device {DeviceId}", deviceId);
+        }
+        finally
+        {
+            _recordQueryLoops.TryRemove(deviceId, out _);
+        }
+    }
+
+    private async Task QueryAccessControlRecordsOnceAsync(Guid deviceId, IntPtr loginHandle, int maxRecords, TimeZoneInfo deviceTimeZone, CancellationToken cancellationToken)
+    {
+        if (_nativeClient is null) return;
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
+        var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
+        var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken);
+        if (device is null)
+        {
+            logger.LogWarning("Dahua NetSDK record query skipped because device {DeviceId} no longer exists", deviceId);
+            return;
+        }
+
+        var cursor = Math.Max(0, device.LastRecNo ?? 0);
+        var queriedAt = DateTimeOffset.UtcNow;
+        var result = _nativeClient.TryQueryAccessControlCardRecords(loginHandle, cursor, maxRecords, deviceTimeZone);
+        var records = result.Records
+            .Where(x => x.RecNo is not null && x.RecNo > cursor)
+            .OrderBy(x => x.RecNo)
+            .ToList();
+        var maxProcessedRecNo = cursor;
+        var ingested = 0;
+
+        if (result.Success)
+        {
+            foreach (var record in records)
+            {
+                await pipeline.IngestAsync(device.Id, record, DahuaEventSource.ActiveRegister, cancellationToken);
+                ingested++;
+                if (record.RecNo is not null && record.RecNo.Value > maxProcessedRecNo) maxProcessedRecNo = record.RecNo.Value;
+                logger.LogInformation("Submitted NetSDK record-query event to shared ingestion pipeline. Device {DeviceId}, WorkerExternalId {WorkerExternalId}, CardName {CardName}, Status {Status}, Method {Method}, RecNo {RecNo}, EventTime {EventTime}", device.Id, record.UserId, record.CardName, record.StatusRaw, record.MethodRaw, record.RecNo, record.CreateTime);
+            }
+
+            if (maxProcessedRecNo > cursor)
+            {
+                device.LastRecNo = maxProcessedRecNo;
+                device.LastSeenAt = DateTimeOffset.UtcNow;
+                device.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        var decodedJson = JsonSerializer.Serialize(new
+        {
+            source = DahuaEventSourceExtensions.ActiveRegisterSource,
+            queryType = "NET_RECORD_ACCESSCTLCARDREC_EX",
+            result.Success,
+            result.Error,
+            result.ErrorCode,
+            cursor,
+            result.Attempts,
+            returnedRecords = result.Records.Count,
+            candidateRecords = records.Count,
+            ingested,
+            lastRecNo = maxProcessedRecNo,
+            records = result.Records.Take(10).Select(x => x.RawFields),
+        });
+
+        await PersistActiveRegisterRawEventAsync(
+            db,
+            device.Id,
+            device.RegisterDeviceId,
+            device.LastKnownIp,
+            null,
+            0,
+            DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx,
+            "NETSDK_RECORD_QUERY_ACCESSCTLCARDREC_EX",
+            [],
+            result.Success ? "RecordQuerySucceeded" : "RecordQueryFailed",
+            decodedJson,
+            null,
+            cancellationToken);
+
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.NetSdkRecordQueryEnabled = true;
+            _diagnostics.LastRecordQueryAt = queriedAt;
+            _diagnostics.LastRecordQuerySuccess = result.Success;
+            _diagnostics.LastRecordQueryError = result.Error;
+            _diagnostics.LastRecordQueryCount = result.Records.Count;
+            _diagnostics.LastRecordQueryLastRecNo = maxProcessedRecNo;
+        }
+        PersistDiagnostics();
+
+        if (result.Success)
+        {
+            logger.LogInformation("Dahua NetSDK record query completed. Device {DeviceId}, Cursor {Cursor}, Returned {Returned}, Candidates {Candidates}, Ingested {Ingested}, LastRecNo {LastRecNo}", device.Id, cursor, result.Records.Count, records.Count, ingested, maxProcessedRecNo);
+        }
+        else
+        {
+            logger.LogWarning("Dahua NetSDK record query failed. Device {DeviceId}, Cursor {Cursor}, Error {Error}, ErrorCode {ErrorCode}", device.Id, cursor, result.Error, result.ErrorCode);
+        }
+    }
     private async Task PersistActiveRegisterRawEventAsync(
         BuildTrackDbContext db,
         Guid? deviceId,
@@ -1157,6 +1318,25 @@ public sealed class DahuaNetSdkActiveRegisterService(
                || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static int ParsePositiveInt(string? value, int defaultValue) =>
+        int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
+
+    private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (TimeZoneNotFoundException) when (timeZoneId.Equals("Asia/Baku", StringComparison.OrdinalIgnoreCase))
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Azerbaijan Standard Time");
+        }
+        catch (InvalidTimeZoneException) when (timeZoneId.Equals("Asia/Baku", StringComparison.OrdinalIgnoreCase))
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Azerbaijan Standard Time");
+        }
+    }
+
     private sealed record ActiveRegisterPayloadDecodeResult(string DecodeStatus, DahuaAccessRecord? Record, string? DecodedJson);
     private async Task<Device?> MatchDeviceAsync(BuildTrackDbContext db, string? registerDeviceId, int listenerPort, CancellationToken cancellationToken)
     {
@@ -1264,6 +1444,12 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.LastAlarmPayloadFirst256Hex = snapshot.LastAlarmPayloadFirst256Hex;
                 entity.LastAlarmDecodeStatus = snapshot.LastAlarmDecodeStatus;
                 entity.LastDecodedAlarmJson = snapshot.LastDecodedAlarmJson;
+                entity.NetSdkRecordQueryEnabled = snapshot.NetSdkRecordQueryEnabled;
+                entity.LastRecordQueryAt = snapshot.LastRecordQueryAt;
+                entity.LastRecordQuerySuccess = snapshot.LastRecordQuerySuccess;
+                entity.LastRecordQueryError = snapshot.LastRecordQueryError;
+                entity.LastRecordQueryCount = snapshot.LastRecordQueryCount;
+                entity.LastRecordQueryLastRecNo = snapshot.LastRecordQueryLastRecNo;
                 entity.LastDecodeError = snapshot.LastDecodeError;
                 entity.NetSdkDecodeStatus = snapshot.NetSdkDecodeStatus;
                 entity.UpdatedAt = DateTimeOffset.UtcNow;
