@@ -119,7 +119,8 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
         var strategy = DahuaNetSdkRecordQueryStrategy.Ex(
             "B_EX_NoCondition",
             "None",
-            []);
+            [],
+            batchSize: 20);
         var attempt = DahuaNetSdkRecordQueryAttempt.Create(
             strategy,
             findRecordReturnBool: true,
@@ -129,8 +130,16 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
             findNextNativeErrorSigned: 0,
             findNextCalls: 1,
             nativeReturnedRecords: 1,
+            suspiciousEmptyBufferCount: 0,
+            zeroBufferRecords: 0,
             outParamRetRecordNum: 0,
             outputBufferFirst256Hex: "ABCD",
+            outputBufferFirst1024BeforeHex: "",
+            outputBufferFirst1024AfterHex: "ABCD",
+            findNextInputBytesHex: "0102",
+            findNextOutputBeforeBytesHex: "0304",
+            findNextOutputAfterBytesHex: "0506",
+            recordBufferLength: DahuaNetSdkRecordQueryMapper.RecordStructBytes * 20,
             mappedRecords: [],
             validMappedRecords: [],
             mappedRecordDiagnostics: [],
@@ -143,7 +152,69 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
         Assert.Contains("FindNextReturnBool", json);
         Assert.Contains("OutParamRetRecordNum", json);
         Assert.Contains("OutputBufferFirst256Hex", json);
+        Assert.Contains("SuspiciousEmptyBufferCount", json);
     }
+
+    [Fact]
+    public void RecordQueryLayoutDiagnostics_PlacesRecordListAndReturnCountInOutFindNextStruct()
+    {
+        var layouts = DahuaNetSdkNativeClient.GetRecordQueryLayoutDiagnostics();
+        var outNext = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(layouts["NET_OUT_FIND_NEXT_RECORD_PARAM"]);
+        var offsets = Assert.IsAssignableFrom<Dictionary<string, int>>(outNext["Offsets"]);
+
+        Assert.Equal(24, outNext["Size"]);
+        Assert.Equal(8, offsets["RecordList"]);
+        Assert.Equal(16, offsets["MaxRecordNum"]);
+        Assert.Equal(20, offsets["ReturnRecordNum"]);
+    }
+
+    [Fact]
+    public void SuspiciousEmptyBufferAttempt_DoesNotCountAsNativeReturnedRecord()
+    {
+        var strategy = DahuaNetSdkRecordQueryStrategy.Ex(
+            "B_EX_NoCondition_Batch1",
+            "None",
+            [],
+            batchSize: 1);
+        var attempt = DahuaNetSdkRecordQueryAttempt.Create(
+            strategy,
+            findRecordReturnBool: true,
+            findRecordReturnHandle: new IntPtr(123),
+            findRecordNativeErrorSigned: 0,
+            findNextReturnBool: true,
+            findNextNativeErrorSigned: 0,
+            findNextCalls: 1,
+            nativeReturnedRecords: 0,
+            suspiciousEmptyBufferCount: 1,
+            zeroBufferRecords: 1,
+            outParamRetRecordNum: 1,
+            outputBufferFirst256Hex: new string('0', 512),
+            outputBufferFirst1024BeforeHex: new string('0', 2048),
+            outputBufferFirst1024AfterHex: new string('0', 2048),
+            findNextInputBytesHex: "0102",
+            findNextOutputBeforeBytesHex: "0304",
+            findNextOutputAfterBytesHex: "0506",
+            recordBufferLength: DahuaNetSdkRecordQueryMapper.RecordStructBytes,
+            mappedRecords: [],
+            validMappedRecords: [],
+            mappedRecordDiagnostics: [],
+            invalidMappedRecordDiagnostics:
+            [
+                new Dictionary<string, string?>
+                {
+                    ["reason"] = "SuspiciousEmptyBuffer",
+                    ["nRetRecordNum"] = "1",
+                }
+            ],
+            error: null);
+
+        Assert.Equal(0, attempt.NativeReturnedRecords);
+        Assert.Equal(1, attempt.SuspiciousEmptyBufferCount);
+        Assert.Equal(1, attempt.ZeroBufferRecords);
+        Assert.Empty(attempt.MappedRecords);
+        Assert.Empty(attempt.ValidMappedRecords);
+    }
+
     private static byte[] CreatePayload(int recNo, string userId, string cardName, bool status, int method, int direction, string url, int errorCode = 0)
     {
         var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];

@@ -69,6 +69,31 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     public bool HasRecordQueryExports => _clientFindRecord is not null && _clientFindNextRecord is not null && _clientFindRecordClose is not null;
 
+    public static IReadOnlyDictionary<string, object> GetRecordQueryLayoutDiagnostics() => new Dictionary<string, object>
+    {
+        ["NET_IN_FIND_RECORD_PARAM"] = DescribeStruct<NetInFindRecordParam>([
+            nameof(NetInFindRecordParam.Size),
+            nameof(NetInFindRecordParam.Type),
+            nameof(NetInFindRecordParam.QueryCondition),
+        ]),
+        ["NET_OUT_FIND_RECORD_PARAM"] = DescribeStruct<NetOutFindRecordParam>([
+            nameof(NetOutFindRecordParam.Size),
+            nameof(NetOutFindRecordParam.FindHandle),
+        ]),
+        ["NET_IN_FIND_NEXT_RECORD_PARAM"] = DescribeStruct<NetInFindNextRecordParam>([
+            nameof(NetInFindNextRecordParam.Size),
+            nameof(NetInFindNextRecordParam.FindHandle),
+            nameof(NetInFindNextRecordParam.FileCount),
+        ]),
+        ["NET_OUT_FIND_NEXT_RECORD_PARAM"] = DescribeStruct<NetOutFindNextRecordParam>([
+            nameof(NetOutFindNextRecordParam.Size),
+            nameof(NetOutFindNextRecordParam.RecordList),
+            nameof(NetOutFindNextRecordParam.MaxRecordNum),
+            nameof(NetOutFindNextRecordParam.ReturnRecordNum),
+        ]),
+        ["HeaderNotes"] = "dhnetsdk.h: pRecordList and nRetRecordNum are fields of NET_OUT_FIND_NEXT_RECORD_PARAM; NET_IN_FIND_NEXT_RECORD_PARAM contains dwSize, lFindeHandle, nFileCount.",
+    };
+
     public bool Initialize()
     {
         _initialized = _clientInit(_disconnectCallback, IntPtr.Zero);
@@ -259,7 +284,10 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     private DahuaNetSdkRecordQueryAttempt ExecuteRecordQueryStrategy(IntPtr loginHandle, DahuaNetSdkRecordQueryStrategy strategy, int maxRecords, TimeZoneInfo deviceTimeZone)
     {
-        var recordBuffer = Marshal.AllocHGlobal(DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes);
+        var batchSize = Math.Clamp(strategy.BatchSize, 1, 50);
+        var recordSize = DahuaNetSdkRecordQueryMapper.RecordStructBytes;
+        var recordBufferLength = recordSize * batchSize;
+        var recordBuffer = Marshal.AllocHGlobal(recordBufferLength);
         var conditionPtr = IntPtr.Zero;
         IntPtr findHandle = IntPtr.Zero;
         var mappedRecords = new List<DahuaAccessRecord>();
@@ -267,12 +295,19 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         var validMappedRecords = new List<DahuaAccessRecord>();
         var invalidMappedDiagnostics = new List<IReadOnlyDictionary<string, string?>>();
         var outputBufferFirst256Hex = string.Empty;
+        var outputBufferFirst1024BeforeHex = string.Empty;
+        var outputBufferFirst1024AfterHex = string.Empty;
+        var findNextInputBytesHex = string.Empty;
+        var findNextOutputBeforeBytesHex = string.Empty;
+        var findNextOutputAfterBytesHex = string.Empty;
         var findRecordResult = false;
         var findRecordError = 0;
         var findNextResult = false;
         var findNextError = 0;
         var lastReturnRecordNum = 0;
         var nativeReturnedRecords = 0;
+        var suspiciousEmptyBufferCount = 0;
+        var zeroBufferRecords = 0;
         var findNextCalls = 0;
         string? error = null;
 
@@ -293,25 +328,32 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             if (!findRecordResult || findHandle == IntPtr.Zero)
             {
                 error = $"CLIENT_FindRecord failed. Result={findRecordResult}, Handle={findHandle.ToInt64()}";
-                return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
+                return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, suspiciousEmptyBufferCount, zeroBufferRecords, lastReturnRecordNum, outputBufferFirst256Hex, outputBufferFirst1024BeforeHex, outputBufferFirst1024AfterHex, findNextInputBytesHex, findNextOutputBeforeBytesHex, findNextOutputAfterBytesHex, recordBufferLength, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
             }
 
-            while (findNextCalls < maxRecords)
+            var maxFindNextCalls = Math.Max(1, (int)Math.Ceiling((double)Math.Max(1, maxRecords) / batchSize));
+            while (findNextCalls < maxFindNextCalls)
             {
                 findNextCalls++;
-                var zero = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+                var zero = new byte[recordBufferLength];
                 Marshal.Copy(zero, 0, recordBuffer, zero.Length);
+                var beforePayload = new byte[recordBufferLength];
+                Marshal.Copy(recordBuffer, beforePayload, 0, beforePayload.Length);
+                outputBufferFirst1024BeforeHex = Convert.ToHexString(beforePayload.AsSpan(0, Math.Min(1024, beforePayload.Length)));
 
-                var nextInput = NetInFindNextRecordParam.Create(findHandle, 1);
-                var nextOutput = NetOutFindNextRecordParam.Create(recordBuffer, 1);
+                var nextInput = NetInFindNextRecordParam.Create(findHandle, batchSize);
+                var nextOutput = NetOutFindNextRecordParam.Create(recordBuffer, batchSize);
+                findNextInputBytesHex = StructToHex(nextInput);
+                findNextOutputBeforeBytesHex = StructToHex(nextOutput);
                 findNextResult = _clientFindNextRecord!(ref nextInput, ref nextOutput, 3000);
+                findNextOutputAfterBytesHex = StructToHex(nextOutput);
                 findNextError = LastErrorCode;
                 lastReturnRecordNum = nextOutput.ReturnRecordNum;
-                nativeReturnedRecords += Math.Max(0, nextOutput.ReturnRecordNum);
 
-                var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+                var payload = new byte[recordBufferLength];
                 Marshal.Copy(recordBuffer, payload, 0, payload.Length);
                 outputBufferFirst256Hex = Convert.ToHexString(payload.AsSpan(0, Math.Min(256, payload.Length)));
+                outputBufferFirst1024AfterHex = Convert.ToHexString(payload.AsSpan(0, Math.Min(1024, payload.Length)));
 
                 if (!findNextResult)
                 {
@@ -321,10 +363,30 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
                 if (nextOutput.ReturnRecordNum <= 0) break;
 
-                var recordsToMap = Math.Min(nextOutput.ReturnRecordNum, 1);
+                var recordsToMap = Math.Min(nextOutput.ReturnRecordNum, batchSize);
                 for (var rawIndex = 0; rawIndex < recordsToMap; rawIndex++)
                 {
-                    if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError, strategy.RecordTypeName))
+                    var recordSlice = payload.AsSpan(rawIndex * recordSize, recordSize).ToArray();
+                    var recordFirstBytesHex = Convert.ToHexString(recordSlice.AsSpan(0, Math.Min(256, recordSlice.Length)));
+                    if (IsAllZero(recordSlice))
+                    {
+                        zeroBufferRecords++;
+                        suspiciousEmptyBufferCount++;
+                        invalidMappedDiagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["rawIndex"] = rawIndex.ToString(),
+                            ["reason"] = "SuspiciousEmptyBuffer: CLIENT_FindNextRecord returned nRetRecordNum > 0 but the corresponding output record buffer is all zeros",
+                            ["recordSize"] = recordSize.ToString(),
+                            ["bufferLength"] = recordBufferLength.ToString(),
+                            ["nMaxRecordNum"] = batchSize.ToString(),
+                            ["nRetRecordNum"] = nextOutput.ReturnRecordNum.ToString(),
+                            ["PayloadFirstBytesHex"] = recordFirstBytesHex,
+                        });
+                        continue;
+                    }
+
+                    nativeReturnedRecords++;
+                    if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(recordSlice, deviceTimeZone, out var record, out var parseError, strategy.RecordTypeName))
                     {
                         mappedRecords.Add(record);
                         mappedDiagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
@@ -344,22 +406,22 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
                         {
                             ["rawIndex"] = rawIndex.ToString(),
                             ["reason"] = parseError,
-                            ["recordSize"] = DahuaNetSdkRecordQueryMapper.RecordStructBytes.ToString(),
-                            ["bufferLength"] = DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes.ToString(),
-                            ["nMaxRecordNum"] = "1",
+                            ["recordSize"] = recordSize.ToString(),
+                            ["bufferLength"] = recordBufferLength.ToString(),
+                            ["nMaxRecordNum"] = batchSize.ToString(),
                             ["nRetRecordNum"] = nextOutput.ReturnRecordNum.ToString(),
-                            ["PayloadFirstBytesHex"] = outputBufferFirst256Hex,
+                            ["PayloadFirstBytesHex"] = recordFirstBytesHex,
                         });
                     }
                 }
             }
 
-            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, suspiciousEmptyBufferCount, zeroBufferRecords, lastReturnRecordNum, outputBufferFirst256Hex, outputBufferFirst1024BeforeHex, outputBufferFirst1024AfterHex, findNextInputBytesHex, findNextOutputBeforeBytesHex, findNextOutputAfterBytesHex, recordBufferLength, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
         }
         catch (Exception ex)
         {
             error = ex.Message;
-            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, LastErrorCode, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, LastErrorCode, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, suspiciousEmptyBufferCount, zeroBufferRecords, lastReturnRecordNum, outputBufferFirst256Hex, outputBufferFirst1024BeforeHex, outputBufferFirst1024AfterHex, findNextInputBytesHex, findNextOutputBeforeBytesHex, findNextOutputAfterBytesHex, recordBufferLength, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
         }
         finally
         {
@@ -395,6 +457,14 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         };
     }
 
+    private static bool IsAllZero(byte[] bytes) => bytes.All(value => value == 0);
+
+    private static string StructToHex<T>(T value) where T : struct
+    {
+        var bytes = SerializeCondition(value);
+        return Convert.ToHexString(bytes);
+    }
+
     private static IReadOnlyList<DahuaNetSdkRecordQueryStrategy> BuildRecordQueryStrategies(TimeZoneInfo deviceTimeZone, bool diagnosticMode)
     {
         var now = DateTimeOffset.UtcNow;
@@ -405,34 +475,34 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         var broadStartUtc = now.AddDays(-7);
         var broadEndUtc = now.AddMinutes(5);
 
-        var currentEx = DahuaNetSdkRecordQueryStrategy.Ex(
-            "A_EX_DefaultCondition",
-            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
-            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.Create()));
-        var nullEx = DahuaNetSdkRecordQueryStrategy.Ex(
-            "B_EX_NoCondition",
-            "None",
-            []);
-        var todayEx = DahuaNetSdkRecordQueryStrategy.Ex(
-            "C_EX_TodayTimeRange",
-            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
-            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(todayStartUtc, todayEndUtc, deviceTimeZone)));
-        var broadEx = DahuaNetSdkRecordQueryStrategy.Ex(
-            "D_EX_Last7DaysTimeRange",
-            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
-            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(broadStartUtc, broadEndUtc, deviceTimeZone)));
-        var legacyToday = DahuaNetSdkRecordQueryStrategy.Legacy(
-            "E_Legacy_TodayTimeRange",
-            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION",
-            SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(todayStartUtc, todayEndUtc, deviceTimeZone)));
-        var legacyBroad = DahuaNetSdkRecordQueryStrategy.Legacy(
-            "F_Legacy_Last7DaysTimeRange",
-            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION",
-            SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(broadStartUtc, broadEndUtc, deviceTimeZone)));
+        var currentExCondition = SerializeCondition(FindRecordAccessCtlCardRecConditionEx.Create());
+        var todayExCondition = SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(todayStartUtc, todayEndUtc, deviceTimeZone));
+        var broadExCondition = SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(broadStartUtc, broadEndUtc, deviceTimeZone));
+        var legacyTodayCondition = SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(todayStartUtc, todayEndUtc, deviceTimeZone));
+        var legacyBroadCondition = SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(broadStartUtc, broadEndUtc, deviceTimeZone));
 
-        return diagnosticMode
-            ? [nullEx, currentEx, todayEx, broadEx, legacyToday, legacyBroad]
-            : [currentEx, nullEx, todayEx, broadEx, legacyToday, legacyBroad];
+        var orderedBaseStrategies = diagnosticMode
+            ? new (string Prefix, Func<int, DahuaNetSdkRecordQueryStrategy> Build)[]
+            {
+                ("B_EX_NoCondition", batch => DahuaNetSdkRecordQueryStrategy.Ex($"B_EX_NoCondition_Batch{batch}", "None", [], batch)),
+                ("A_EX_DefaultCondition", batch => DahuaNetSdkRecordQueryStrategy.Ex($"A_EX_DefaultCondition_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", currentExCondition, batch)),
+                ("C_EX_TodayTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Ex($"C_EX_TodayTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", todayExCondition, batch)),
+                ("D_EX_Last7DaysTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Ex($"D_EX_Last7DaysTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", broadExCondition, batch)),
+                ("E_Legacy_TodayTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Legacy($"E_Legacy_TodayTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION", legacyTodayCondition, batch)),
+                ("F_Legacy_Last7DaysTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Legacy($"F_Legacy_Last7DaysTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION", legacyBroadCondition, batch)),
+            }
+            : new (string Prefix, Func<int, DahuaNetSdkRecordQueryStrategy> Build)[]
+            {
+                ("A_EX_DefaultCondition", batch => DahuaNetSdkRecordQueryStrategy.Ex($"A_EX_DefaultCondition_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", currentExCondition, batch)),
+                ("B_EX_NoCondition", batch => DahuaNetSdkRecordQueryStrategy.Ex($"B_EX_NoCondition_Batch{batch}", "None", [], batch)),
+                ("C_EX_TodayTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Ex($"C_EX_TodayTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", todayExCondition, batch)),
+                ("D_EX_Last7DaysTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Ex($"D_EX_Last7DaysTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX", broadExCondition, batch)),
+                ("E_Legacy_TodayTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Legacy($"E_Legacy_TodayTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION", legacyTodayCondition, batch)),
+                ("F_Legacy_Last7DaysTimeRange", batch => DahuaNetSdkRecordQueryStrategy.Legacy($"F_Legacy_Last7DaysTimeRange_Batch{batch}", "FIND_RECORD_ACCESSCTLCARDREC_CONDITION", legacyBroadCondition, batch)),
+            };
+
+        var batchSizes = new[] { 1, 20, 50 };
+        return orderedBaseStrategies.SelectMany(strategy => batchSizes.Select(strategy.Build)).ToList();
     }
 
     private static byte[] SerializeCondition<T>(T condition) where T : struct
@@ -545,6 +615,15 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         return NativeLibrary.TryGetExport(_libraryHandle, exportName, out var export)
             ? Marshal.GetDelegateForFunctionPointer<TDelegate>(export)
             : null;
+    }
+
+    private static IReadOnlyDictionary<string, object> DescribeStruct<T>(IReadOnlyList<string> fieldNames) where T : struct
+    {
+        return new Dictionary<string, object>
+        {
+            ["Size"] = Marshal.SizeOf<T>(),
+            ["Offsets"] = fieldNames.ToDictionary(name => name, name => Marshal.OffsetOf<T>(name).ToInt32()),
+        };
     }
 
     private void OnDisconnect(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData) =>
@@ -940,13 +1019,14 @@ public sealed record DahuaNetSdkRecordQueryStrategy(
     int RecordType,
     string RecordTypeName,
     string ConditionStructName,
-    byte[] ConditionBytes)
+    byte[] ConditionBytes,
+    int BatchSize)
 {
-    public static DahuaNetSdkRecordQueryStrategy Ex(string queryMode, string conditionStructName, byte[] conditionBytes) =>
-        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx, "NET_RECORD_ACCESSCTLCARDREC_EX", conditionStructName, conditionBytes);
+    public static DahuaNetSdkRecordQueryStrategy Ex(string queryMode, string conditionStructName, byte[] conditionBytes, int batchSize) =>
+        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx, "NET_RECORD_ACCESSCTLCARDREC_EX", conditionStructName, conditionBytes, batchSize);
 
-    public static DahuaNetSdkRecordQueryStrategy Legacy(string queryMode, string conditionStructName, byte[] conditionBytes) =>
-        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecLegacy, "NET_RECORD_ACCESSCTLCARDREC", conditionStructName, conditionBytes);
+    public static DahuaNetSdkRecordQueryStrategy Legacy(string queryMode, string conditionStructName, byte[] conditionBytes, int batchSize) =>
+        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecLegacy, "NET_RECORD_ACCESSCTLCARDREC", conditionStructName, conditionBytes, batchSize);
 }
 
 public sealed record DahuaNetSdkRecordQueryAttempt(
@@ -956,6 +1036,7 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
     string ConditionStructName,
     int ConditionBytesLength,
     string ConditionFirst256Hex,
+    int BatchSize,
     long FindRecordReturnHandle,
     bool FindRecordReturnBool,
     int FindRecordNativeErrorSigned,
@@ -965,8 +1046,16 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
     string FindNextNativeErrorHex,
     int FindNextCalls,
     int NativeReturnedRecords,
+    int SuspiciousEmptyBufferCount,
+    int ZeroBufferRecords,
     int OutParamRetRecordNum,
     string OutputBufferFirst256Hex,
+    string OutputBufferFirst1024BeforeHex,
+    string OutputBufferFirst1024AfterHex,
+    string FindNextInputBytesHex,
+    string FindNextOutputBeforeBytesHex,
+    string FindNextOutputAfterBytesHex,
+    int RecordBufferLength,
     IReadOnlyList<IReadOnlyDictionary<string, string?>> MappedRecordDiagnostics,
     IReadOnlyList<IReadOnlyDictionary<string, string?>> InvalidMappedRecordDiagnostics,
     IReadOnlyList<DahuaAccessRecord> MappedRecords,
@@ -984,8 +1073,16 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
         int findNextNativeErrorSigned,
         int findNextCalls,
         int nativeReturnedRecords,
+        int suspiciousEmptyBufferCount,
+        int zeroBufferRecords,
         int outParamRetRecordNum,
         string outputBufferFirst256Hex,
+        string outputBufferFirst1024BeforeHex,
+        string outputBufferFirst1024AfterHex,
+        string findNextInputBytesHex,
+        string findNextOutputBeforeBytesHex,
+        string findNextOutputAfterBytesHex,
+        int recordBufferLength,
         IReadOnlyList<DahuaAccessRecord> mappedRecords,
         IReadOnlyList<DahuaAccessRecord> validMappedRecords,
         IReadOnlyList<IReadOnlyDictionary<string, string?>> mappedRecordDiagnostics,
@@ -998,6 +1095,7 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
             strategy.ConditionStructName,
             strategy.ConditionBytes.Length,
             Convert.ToHexString(strategy.ConditionBytes.AsSpan(0, Math.Min(256, strategy.ConditionBytes.Length))),
+            strategy.BatchSize,
             findRecordReturnHandle.ToInt64(),
             findRecordReturnBool,
             findRecordNativeErrorSigned,
@@ -1007,8 +1105,16 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
             $"0x{findNextNativeErrorSigned:X8}",
             findNextCalls,
             nativeReturnedRecords,
+            suspiciousEmptyBufferCount,
+            zeroBufferRecords,
             outParamRetRecordNum,
             outputBufferFirst256Hex,
+            outputBufferFirst1024BeforeHex,
+            outputBufferFirst1024AfterHex,
+            findNextInputBytesHex,
+            findNextOutputBeforeBytesHex,
+            findNextOutputAfterBytesHex,
+            recordBufferLength,
             mappedRecordDiagnostics,
             invalidMappedRecordDiagnostics,
             mappedRecords,
