@@ -1199,6 +1199,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
             result.ErrorCode,
             cursor,
             findNextAttempts = result.FindNextAttempts,
+            nativeReturnedRecords = result.StrategyAttempts.Sum(x => x.NativeReturnedRecords),
+            mappedRecords = result.StrategyAttempts.Sum(x => x.MappedRecords.Count),
+            validMappedRecords = result.Records.Count,
+            invalidMappedRecords = result.StrategyAttempts.Sum(x => x.InvalidMappedRecordDiagnostics.Count),
             returnedRecords = result.Records.Count,
             candidateRecords = records.Count,
             ingested,
@@ -1220,9 +1224,15 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 x.FindNextNativeErrorSigned,
                 x.FindNextNativeErrorHex,
                 x.FindNextCalls,
+                nativeReturnedRecords = x.NativeReturnedRecords,
                 outParamRetRecordNum = x.OutParamRetRecordNum,
                 x.OutputBufferFirst256Hex,
+                recordSize = DahuaNetSdkRecordQueryMapper.RecordStructBytes,
+                bufferLength = DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes,
+                nMaxRecordNum = 1,
                 mappedRecords = x.MappedRecordDiagnostics,
+                validMappedRecords = x.ValidMappedRecords.Select(record => record.RawFields),
+                invalidMappedRecords = x.InvalidMappedRecordDiagnostics,
                 x.Error,
             }),
         };
@@ -1257,7 +1267,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
         if (result.Success)
         {
-            logger.LogInformation("Dahua NetSDK record query completed. Device {DeviceId}, Cursor {Cursor}, Returned {Returned}, Candidates {Candidates}, Ingested {Ingested}, LastRecNo {LastRecNo}", device.Id, cursor, result.Records.Count, records.Count, ingested, maxProcessedRecNo);
+            logger.LogInformation("Dahua NetSDK record query completed. Device {DeviceId}, Cursor {Cursor}, NativeReturned {NativeReturned}, ValidMapped {ValidMapped}, Candidates {Candidates}, Ingested {Ingested}, LastRecNo {LastRecNo}", device.Id, cursor, result.StrategyAttempts.Sum(x => x.NativeReturnedRecords), result.Records.Count, records.Count, ingested, maxProcessedRecNo);
             if (result.Records.Count == 0)
             {
                 logger.LogWarning("Dahua NetSDK record query returned 0 mapped records. Device {DeviceId}, Cursor {Cursor}, StrategyAttempts {StrategyAttempts}", device.Id, cursor, result.StrategyAttempts.Count);

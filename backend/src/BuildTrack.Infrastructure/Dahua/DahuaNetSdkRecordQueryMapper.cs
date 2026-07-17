@@ -9,6 +9,7 @@ public static class DahuaNetSdkRecordQueryMapper
     public const int RecordTypeAccessControlCardRecEx = 16;
     public const int AccessControlCardRecordMinimumBytes = 1164;
     public const int DefaultRecordBufferBytes = 64 * 1024;
+    public const int RecordStructBytes = 1164;
 
     private const int OffsetDwSize = 0;
     private const int OffsetRecNo = 4;
@@ -105,6 +106,40 @@ public static class DahuaNetSdkRecordQueryMapper
         }
     }
 
+    public static bool IsValidAccessRecord(DahuaAccessRecord record, out string reason)
+    {
+        var raw = record.RawFields;
+        var dwSize = GetLong(raw, "dwSize");
+        var cardNo = raw.GetValueOrDefault("CardNo");
+        var openMethodRaw = GetLong(raw, "OpenMethodRaw");
+        var statusRaw = raw.GetValueOrDefault("Status");
+        var url = FirstNonEmpty(
+            raw.GetValueOrDefault("RecordURL") ?? string.Empty,
+            raw.GetValueOrDefault("SnapFtpUrl") ?? string.Empty,
+            raw.GetValueOrDefault("SnapFaceURL") ?? string.Empty,
+            raw.GetValueOrDefault("URL") ?? string.Empty);
+
+        var hasAnySignal =
+            record.RecNo is > 0
+            || !string.IsNullOrWhiteSpace(record.CardName)
+            || !string.IsNullOrWhiteSpace(record.UserId)
+            || !string.IsNullOrWhiteSpace(cardNo)
+            || openMethodRaw != 0
+            || statusRaw == "1"
+            || !string.IsNullOrWhiteSpace(url);
+
+        if (hasAnySignal)
+        {
+            reason = "Valid";
+            return true;
+        }
+
+        reason = dwSize == 0
+            ? "InvalidMappedRecord: default/empty NET_RECORDSET_ACCESS_CTL_CARDREC buffer (dwSize=0 and no event fields)"
+            : "InvalidMappedRecord: mapped record has no event-identifying fields";
+        return false;
+    }
+
     private static DateTimeOffset ReadNetTimeAsUtc(byte[] payload, int offset, TimeZoneInfo deviceTimeZone)
     {
         var year = ReadUInt32(payload, offset);
@@ -138,6 +173,11 @@ public static class DahuaNetSdkRecordQueryMapper
     }
 
     private static string? FirstNonEmpty(params string[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+    private static long GetLong(IReadOnlyDictionary<string, string?> values, string key)
+    {
+        return values.TryGetValue(key, out var value) && long.TryParse(value, out var parsed) ? parsed : 0;
+    }
 }
 
 public static class DahuaNetSdkRecordQueryCursor

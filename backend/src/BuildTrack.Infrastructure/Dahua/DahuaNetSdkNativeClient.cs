@@ -233,15 +233,15 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             var attempt = ExecuteRecordQueryStrategy(loginHandle, strategy, Math.Max(1, maxRecords), deviceTimeZone);
             allAttempts.Add(attempt);
 
-            if (attempt.MappedRecords.Count > 0 || !diagnosticMode && attempt.FindRecordNativeErrorSigned != 0)
+            if (attempt.ValidMappedRecords.Count > 0 || !diagnosticMode && attempt.FindRecordNativeErrorSigned != 0)
             {
                 break;
             }
         }
 
-        var successfulAttemptWithRecords = allAttempts.FirstOrDefault(x => x.MappedRecords.Count > 0);
+        var successfulAttemptWithRecords = allAttempts.FirstOrDefault(x => x.ValidMappedRecords.Count > 0);
         var firstSuccessfulAttempt = successfulAttemptWithRecords ?? allAttempts.FirstOrDefault(x => x.Success);
-        var records = (successfulAttemptWithRecords ?? firstSuccessfulAttempt)?.MappedRecords ?? [];
+        var records = (successfulAttemptWithRecords ?? firstSuccessfulAttempt)?.ValidMappedRecords ?? [];
         var success = firstSuccessfulAttempt is not null;
         var error = success ? null : allAttempts.LastOrDefault()?.Error ?? "No Dahua NetSDK record-query strategy succeeded";
         var errorCode = success ? 0 : allAttempts.LastOrDefault()?.FindRecordNativeErrorSigned ?? LastErrorCode;
@@ -264,12 +264,15 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         IntPtr findHandle = IntPtr.Zero;
         var mappedRecords = new List<DahuaAccessRecord>();
         var mappedDiagnostics = new List<IReadOnlyDictionary<string, string?>>();
+        var validMappedRecords = new List<DahuaAccessRecord>();
+        var invalidMappedDiagnostics = new List<IReadOnlyDictionary<string, string?>>();
         var outputBufferFirst256Hex = string.Empty;
         var findRecordResult = false;
         var findRecordError = 0;
         var findNextResult = false;
         var findNextError = 0;
         var lastReturnRecordNum = 0;
+        var nativeReturnedRecords = 0;
         var findNextCalls = 0;
         string? error = null;
 
@@ -290,7 +293,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             if (!findRecordResult || findHandle == IntPtr.Zero)
             {
                 error = $"CLIENT_FindRecord failed. Result={findRecordResult}, Handle={findHandle.ToInt64()}";
-                return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
+                return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
             }
 
             while (findNextCalls < maxRecords)
@@ -304,6 +307,7 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
                 findNextResult = _clientFindNextRecord!(ref nextInput, ref nextOutput, 3000);
                 findNextError = LastErrorCode;
                 lastReturnRecordNum = nextOutput.ReturnRecordNum;
+                nativeReturnedRecords += Math.Max(0, nextOutput.ReturnRecordNum);
 
                 var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
                 Marshal.Copy(recordBuffer, payload, 0, payload.Length);
@@ -317,27 +321,45 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
                 if (nextOutput.ReturnRecordNum <= 0) break;
 
-                if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError, strategy.RecordTypeName))
+                var recordsToMap = Math.Min(nextOutput.ReturnRecordNum, 1);
+                for (var rawIndex = 0; rawIndex < recordsToMap; rawIndex++)
                 {
-                    mappedRecords.Add(record);
-                    mappedDiagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
-                }
-                else
-                {
-                    mappedDiagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                    if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError, strategy.RecordTypeName))
                     {
-                        ["ParseError"] = parseError,
-                        ["PayloadFirstBytesHex"] = outputBufferFirst256Hex,
-                    });
+                        mappedRecords.Add(record);
+                        mappedDiagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
+
+                        if (DahuaNetSdkRecordQueryMapper.IsValidAccessRecord(record, out var validityReason))
+                        {
+                            validMappedRecords.Add(record);
+                        }
+                        else
+                        {
+                            invalidMappedDiagnostics.Add(BuildInvalidMappedRecordDiagnostics(record, rawIndex, validityReason, outputBufferFirst256Hex));
+                        }
+                    }
+                    else
+                    {
+                        invalidMappedDiagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["rawIndex"] = rawIndex.ToString(),
+                            ["reason"] = parseError,
+                            ["recordSize"] = DahuaNetSdkRecordQueryMapper.RecordStructBytes.ToString(),
+                            ["bufferLength"] = DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes.ToString(),
+                            ["nMaxRecordNum"] = "1",
+                            ["nRetRecordNum"] = nextOutput.ReturnRecordNum.ToString(),
+                            ["PayloadFirstBytesHex"] = outputBufferFirst256Hex,
+                        });
+                    }
                 }
             }
 
-            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
         }
         catch (Exception ex)
         {
             error = ex.Message;
-            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, LastErrorCode, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, LastErrorCode, findNextResult, findNextError, findNextCalls, nativeReturnedRecords, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, validMappedRecords, mappedDiagnostics, invalidMappedDiagnostics, error);
         }
         finally
         {
@@ -349,6 +371,28 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             if (conditionPtr != IntPtr.Zero) Marshal.FreeHGlobal(conditionPtr);
             Marshal.FreeHGlobal(recordBuffer);
         }
+    }
+
+    private static IReadOnlyDictionary<string, string?> BuildInvalidMappedRecordDiagnostics(DahuaAccessRecord record, int rawIndex, string reason, string payloadFirst256Hex)
+    {
+        var raw = record.RawFields;
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["rawIndex"] = rawIndex.ToString(),
+            ["reason"] = reason,
+            ["dwSize"] = raw.GetValueOrDefault("dwSize"),
+            ["RecNo"] = raw.GetValueOrDefault("RecNo"),
+            ["CardName"] = raw.GetValueOrDefault("CardName"),
+            ["UserID"] = raw.GetValueOrDefault("UserID"),
+            ["CardNo"] = raw.GetValueOrDefault("CardNo"),
+            ["Status"] = raw.GetValueOrDefault("Status"),
+            ["Method"] = raw.GetValueOrDefault("Method"),
+            ["OpenMethodRaw"] = raw.GetValueOrDefault("OpenMethodRaw"),
+            ["recordSize"] = DahuaNetSdkRecordQueryMapper.RecordStructBytes.ToString(),
+            ["bufferLength"] = DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes.ToString(),
+            ["nMaxRecordNum"] = "1",
+            ["PayloadFirstBytesHex"] = payloadFirst256Hex,
+        };
     }
 
     private static IReadOnlyList<DahuaNetSdkRecordQueryStrategy> BuildRecordQueryStrategies(TimeZoneInfo deviceTimeZone, bool diagnosticMode)
@@ -920,10 +964,13 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
     int FindNextNativeErrorSigned,
     string FindNextNativeErrorHex,
     int FindNextCalls,
+    int NativeReturnedRecords,
     int OutParamRetRecordNum,
     string OutputBufferFirst256Hex,
     IReadOnlyList<IReadOnlyDictionary<string, string?>> MappedRecordDiagnostics,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>> InvalidMappedRecordDiagnostics,
     IReadOnlyList<DahuaAccessRecord> MappedRecords,
+    IReadOnlyList<DahuaAccessRecord> ValidMappedRecords,
     string? Error)
 {
     public bool Success => FindRecordReturnBool && FindRecordReturnHandle != 0 && Error is null;
@@ -936,10 +983,13 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
         bool findNextReturnBool,
         int findNextNativeErrorSigned,
         int findNextCalls,
+        int nativeReturnedRecords,
         int outParamRetRecordNum,
         string outputBufferFirst256Hex,
         IReadOnlyList<DahuaAccessRecord> mappedRecords,
+        IReadOnlyList<DahuaAccessRecord> validMappedRecords,
         IReadOnlyList<IReadOnlyDictionary<string, string?>> mappedRecordDiagnostics,
+        IReadOnlyList<IReadOnlyDictionary<string, string?>> invalidMappedRecordDiagnostics,
         string? error) =>
         new(
             strategy.QueryMode,
@@ -956,10 +1006,13 @@ public sealed record DahuaNetSdkRecordQueryAttempt(
             findNextNativeErrorSigned,
             $"0x{findNextNativeErrorSigned:X8}",
             findNextCalls,
+            nativeReturnedRecords,
             outParamRetRecordNum,
             outputBufferFirst256Hex,
             mappedRecordDiagnostics,
+            invalidMappedRecordDiagnostics,
             mappedRecords,
+            validMappedRecords,
             error);
 }
 

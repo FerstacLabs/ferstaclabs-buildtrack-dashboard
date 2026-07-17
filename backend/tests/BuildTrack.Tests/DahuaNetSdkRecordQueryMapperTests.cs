@@ -97,6 +97,23 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
     }
 
     [Fact]
+    public void DefaultEmptyMappedRecord_IsInvalidAndDoesNotBecomeCandidate()
+    {
+        var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+        var baku = TimeZoneInfo.CreateCustomTimeZone("Asia/Baku-Test", TimeSpan.FromHours(4), "Asia/Baku-Test", "Asia/Baku-Test");
+
+        var mapped = DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, baku, out var record, out var error);
+        var valid = DahuaNetSdkRecordQueryMapper.IsValidAccessRecord(record, out var reason);
+        var cursor = DahuaNetSdkRecordQueryCursor.Apply([record], 692);
+
+        Assert.True(mapped, error);
+        Assert.False(valid);
+        Assert.Contains("InvalidMappedRecord", reason);
+        Assert.Empty(cursor.CandidateRecords);
+        Assert.Equal(692, cursor.LastRecNo);
+    }
+
+    [Fact]
     public void QueryAttemptJson_IncludesNativeFindRecordAndFindNextDiagnostics()
     {
         var strategy = DahuaNetSdkRecordQueryStrategy.Ex(
@@ -111,10 +128,13 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
             findNextReturnBool: true,
             findNextNativeErrorSigned: 0,
             findNextCalls: 1,
+            nativeReturnedRecords: 1,
             outParamRetRecordNum: 0,
             outputBufferFirst256Hex: "ABCD",
             mappedRecords: [],
+            validMappedRecords: [],
             mappedRecordDiagnostics: [],
+            invalidMappedRecordDiagnostics: [],
             error: null);
 
         var json = JsonSerializer.Serialize(new { attempts = new[] { attempt } });

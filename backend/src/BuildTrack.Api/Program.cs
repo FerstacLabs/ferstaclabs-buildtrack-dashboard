@@ -525,6 +525,39 @@ app.MapGet("/api/dahua/active-register/record-query-test", async (
     var result = await sdk.RunRecordQueryDiagnosticAsync(deviceId, Math.Clamp(maxRecords ?? 20, 1, 200), ct);
     return Results.Ok(result);
 });
+app.MapGet("/api/dahua/active-register/latest-record-query-diagnostic", async (
+    Guid? deviceId,
+    BuildTrackDbContext db,
+    CancellationToken ct) =>
+{
+    var query = db.DahuaActiveRegisterRawEvents
+        .AsNoTracking()
+        .Where(x => x.CallbackCommandName != null && x.CallbackCommandName.StartsWith("NETSDK_RECORD_QUERY_"));
+
+    if (deviceId is not null)
+    {
+        query = query.Where(x => x.DeviceId == deviceId);
+    }
+
+    var latest = await query
+        .OrderByDescending(x => x.CreatedAt)
+        .Select(x => new
+        {
+            x.Id,
+            x.DeviceId,
+            x.RegisterDeviceId,
+            x.CallbackCommand,
+            x.CallbackCommandName,
+            x.DecodeStatus,
+            x.DecodedJson,
+            x.CreatedAt,
+        })
+        .FirstOrDefaultAsync(ct);
+
+    return latest is null
+        ? Results.NotFound(new { error = "No persisted Dahua NetSDK record-query diagnostic was found", deviceId })
+        : Results.Ok(latest);
+});
 app.MapGet("/api/dahua/active-register/raw-events", async (int? limit, BuildTrackDbContext db, CancellationToken ct) =>
 {
     var take = Math.Clamp(limit ?? 100, 1, 500);
