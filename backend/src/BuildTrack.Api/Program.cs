@@ -435,6 +435,7 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
         {
             enabled = apiEnabled,
             ingestionEnabled = apiIngestionEnabled,
+            netsdkRecordQueryDiagnosticMode = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_DIAGNOSTIC_MODE"]),
             ports = apiPorts,
         },
         worker = diagnostics is null ? null : new
@@ -486,6 +487,7 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
             diagnostics.LastAlarmDecodeStatus,
             diagnostics.LastDecodedAlarmJson,
             diagnostics.NetSdkRecordQueryEnabled,
+            diagnostics.NetSdkRecordQueryDiagnosticMode,
             diagnostics.LastRecordQueryAt,
             diagnostics.LastRecordQuerySuccess,
             diagnostics.LastRecordQueryError,
@@ -506,12 +508,22 @@ app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, I
         startListenExSucceeded = diagnostics?.StartListenExSuccess,
         startListenExErrorHex = diagnostics?.StartListenExErrorHex,
         netsdkRecordQueryEnabled = diagnostics?.NetSdkRecordQueryEnabled ?? IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_ENABLED"]),
+        netsdkRecordQueryDiagnosticMode = diagnostics?.NetSdkRecordQueryDiagnosticMode ?? IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_DIAGNOSTIC_MODE"]),
         lastRecordQueryAt = diagnostics?.LastRecordQueryAt,
         lastRecordQuerySuccess = diagnostics?.LastRecordQuerySuccess,
         lastRecordQueryError = diagnostics?.LastRecordQueryError,
         lastRecordQueryCount = diagnostics?.LastRecordQueryCount ?? 0,
         lastRecordQueryLastRecNo = diagnostics?.LastRecordQueryLastRecNo,
     });
+});
+app.MapGet("/api/dahua/active-register/record-query-test", async (
+    Guid deviceId,
+    int? maxRecords,
+    IDahuaActiveRegisterSdk sdk,
+    CancellationToken ct) =>
+{
+    var result = await sdk.RunRecordQueryDiagnosticAsync(deviceId, Math.Clamp(maxRecords ?? 20, 1, 200), ct);
+    return Results.Ok(result);
 });
 app.MapGet("/api/dahua/active-register/raw-events", async (int? limit, BuildTrackDbContext db, CancellationToken ct) =>
 {
@@ -614,6 +626,7 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         lastAlarmDecodeStatus = persisted.LastAlarmDecodeStatus,
         lastDecodedAlarmJson = persisted.LastDecodedAlarmJson,
         netsdkRecordQueryEnabled = persisted.NetSdkRecordQueryEnabled,
+        netsdkRecordQueryDiagnosticMode = persisted.NetSdkRecordQueryDiagnosticMode,
         lastRecordQueryAt = persisted.LastRecordQueryAt,
         lastRecordQuerySuccess = persisted.LastRecordQuerySuccess,
         lastRecordQueryError = persisted.LastRecordQueryError,

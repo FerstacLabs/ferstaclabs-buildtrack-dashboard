@@ -207,12 +207,13 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     public bool TryQueryAccessControlCardRecords(IntPtr loginHandle, int maxRecords, TimeZoneInfo deviceTimeZone, out IReadOnlyList<DahuaAccessRecord> records, out string? error)
     {
-        var result = TryQueryAccessControlCardRecords(loginHandle, 0, maxRecords, deviceTimeZone);
+        var result = TryQueryAccessControlCardRecords(loginHandle, 0, maxRecords, deviceTimeZone, diagnosticMode: true);
         records = result.Records;
         error = result.Error;
         return result.Success;
     }
-    public DahuaNetSdkRecordQueryResult TryQueryAccessControlCardRecords(IntPtr loginHandle, long lastRecNo, int maxRecords, TimeZoneInfo deviceTimeZone)
+
+    public DahuaNetSdkRecordQueryResult TryQueryAccessControlCardRecords(IntPtr loginHandle, long lastRecNo, int maxRecords, TimeZoneInfo deviceTimeZone, bool diagnosticMode = false)
     {
         if (loginHandle == IntPtr.Zero)
         {
@@ -224,69 +225,119 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             return DahuaNetSdkRecordQueryResult.Failure("CLIENT_FindRecord/CLIENT_FindNextRecord/CLIENT_FindRecordClose exports are unavailable", LastErrorCode);
         }
 
-        var records = new List<DahuaAccessRecord>();
-        var diagnostics = new List<Dictionary<string, string?>>();
-        var condition = FindRecordAccessCtlCardRecConditionEx.Create();
-        var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FindRecordAccessCtlCardRecConditionEx>());
+        var attempts = BuildRecordQueryStrategies(deviceTimeZone, diagnosticMode);
+        var allAttempts = new List<DahuaNetSdkRecordQueryAttempt>();
+
+        foreach (var strategy in attempts)
+        {
+            var attempt = ExecuteRecordQueryStrategy(loginHandle, strategy, Math.Max(1, maxRecords), deviceTimeZone);
+            allAttempts.Add(attempt);
+
+            if (attempt.MappedRecords.Count > 0 || !diagnosticMode && attempt.FindRecordNativeErrorSigned != 0)
+            {
+                break;
+            }
+        }
+
+        var successfulAttemptWithRecords = allAttempts.FirstOrDefault(x => x.MappedRecords.Count > 0);
+        var firstSuccessfulAttempt = successfulAttemptWithRecords ?? allAttempts.FirstOrDefault(x => x.Success);
+        var records = (successfulAttemptWithRecords ?? firstSuccessfulAttempt)?.MappedRecords ?? [];
+        var success = firstSuccessfulAttempt is not null;
+        var error = success ? null : allAttempts.LastOrDefault()?.Error ?? "No Dahua NetSDK record-query strategy succeeded";
+        var errorCode = success ? 0 : allAttempts.LastOrDefault()?.FindRecordNativeErrorSigned ?? LastErrorCode;
+        var cursorResult = DahuaNetSdkRecordQueryCursor.Apply(records, lastRecNo);
+
+        return new DahuaNetSdkRecordQueryResult(
+            success,
+            error,
+            errorCode,
+            records,
+            allAttempts,
+            allAttempts.Sum(x => x.FindNextCalls),
+            cursorResult.CandidateRecords.Count);
+    }
+
+    private DahuaNetSdkRecordQueryAttempt ExecuteRecordQueryStrategy(IntPtr loginHandle, DahuaNetSdkRecordQueryStrategy strategy, int maxRecords, TimeZoneInfo deviceTimeZone)
+    {
         var recordBuffer = Marshal.AllocHGlobal(DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes);
+        var conditionPtr = IntPtr.Zero;
         IntPtr findHandle = IntPtr.Zero;
+        var mappedRecords = new List<DahuaAccessRecord>();
+        var mappedDiagnostics = new List<IReadOnlyDictionary<string, string?>>();
+        var outputBufferFirst256Hex = string.Empty;
+        var findRecordResult = false;
+        var findRecordError = 0;
+        var findNextResult = false;
+        var findNextError = 0;
+        var lastReturnRecordNum = 0;
+        var findNextCalls = 0;
+        string? error = null;
 
         try
         {
-            Marshal.StructureToPtr(condition, conditionPtr, false);
-            var input = NetInFindRecordParam.Create(DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx, conditionPtr);
-            var output = NetOutFindRecordParam.Create();
-            var findResult = _clientFindRecord!(loginHandle, ref input, ref output, 3000);
-            var findError = LastErrorCode;
-            if (!findResult || output.FindHandle == IntPtr.Zero)
+            if (strategy.ConditionBytes.Length > 0)
             {
-                return DahuaNetSdkRecordQueryResult.Failure($"CLIENT_FindRecord failed. Result={findResult}, Handle={output.FindHandle.ToInt64()}", findError);
+                conditionPtr = Marshal.AllocHGlobal(strategy.ConditionBytes.Length);
+                Marshal.Copy(strategy.ConditionBytes, 0, conditionPtr, strategy.ConditionBytes.Length);
             }
 
+            var input = NetInFindRecordParam.Create(strategy.RecordType, conditionPtr);
+            var output = NetOutFindRecordParam.Create();
+            findRecordResult = _clientFindRecord!(loginHandle, ref input, ref output, 3000);
+            findRecordError = LastErrorCode;
             findHandle = output.FindHandle;
-            var attempts = 0;
-            while (attempts < Math.Max(1, maxRecords))
+
+            if (!findRecordResult || findHandle == IntPtr.Zero)
             {
-                attempts++;
+                error = $"CLIENT_FindRecord failed. Result={findRecordResult}, Handle={findHandle.ToInt64()}";
+                return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
+            }
+
+            while (findNextCalls < maxRecords)
+            {
+                findNextCalls++;
                 var zero = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
                 Marshal.Copy(zero, 0, recordBuffer, zero.Length);
 
                 var nextInput = NetInFindNextRecordParam.Create(findHandle, 1);
                 var nextOutput = NetOutFindNextRecordParam.Create(recordBuffer, 1);
-                var nextResult = _clientFindNextRecord!(ref nextInput, ref nextOutput, 3000);
-                var nextError = LastErrorCode;
-                if (!nextResult)
+                findNextResult = _clientFindNextRecord!(ref nextInput, ref nextOutput, 3000);
+                findNextError = LastErrorCode;
+                lastReturnRecordNum = nextOutput.ReturnRecordNum;
+
+                var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
+                Marshal.Copy(recordBuffer, payload, 0, payload.Length);
+                outputBufferFirst256Hex = Convert.ToHexString(payload.AsSpan(0, Math.Min(256, payload.Length)));
+
+                if (!findNextResult)
                 {
-                    return new DahuaNetSdkRecordQueryResult(false, $"CLIENT_FindNextRecord failed after {attempts} attempts", nextError, records, diagnostics, attempts, records.Count);
+                    error = $"CLIENT_FindNextRecord failed on call {findNextCalls}";
+                    break;
                 }
 
                 if (nextOutput.ReturnRecordNum <= 0) break;
 
-                var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
-                Marshal.Copy(recordBuffer, payload, 0, payload.Length);
-                if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError))
+                if (DahuaNetSdkRecordQueryMapper.TryMapAccessControlCardRecord(payload, deviceTimeZone, out var record, out var parseError, strategy.RecordTypeName))
                 {
-                    diagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
-                    if (record.RecNo is not null && record.RecNo > lastRecNo)
-                    {
-                        records.Add(record);
-                    }
+                    mappedRecords.Add(record);
+                    mappedDiagnostics.Add(new Dictionary<string, string?>(record.RawFields, StringComparer.OrdinalIgnoreCase));
                 }
                 else
                 {
-                    diagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                    mappedDiagnostics.Add(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["ParseError"] = parseError,
-                        ["PayloadFirstBytesHex"] = Convert.ToHexString(payload.Take(128).ToArray()),
+                        ["PayloadFirstBytesHex"] = outputBufferFirst256Hex,
                     });
                 }
             }
 
-            return new DahuaNetSdkRecordQueryResult(true, null, 0, records, diagnostics, attempts, records.Count);
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, findRecordError, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
         }
         catch (Exception ex)
         {
-            return DahuaNetSdkRecordQueryResult.Failure(ex.Message, LastErrorCode);
+            error = ex.Message;
+            return DahuaNetSdkRecordQueryAttempt.Create(strategy, findRecordResult, findHandle, LastErrorCode, findNextResult, findNextError, findNextCalls, lastReturnRecordNum, outputBufferFirst256Hex, mappedRecords, mappedDiagnostics, error);
         }
         finally
         {
@@ -295,9 +346,80 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
                 try { _clientFindRecordClose!(findHandle); } catch { }
             }
 
-            Marshal.FreeHGlobal(conditionPtr);
+            if (conditionPtr != IntPtr.Zero) Marshal.FreeHGlobal(conditionPtr);
             Marshal.FreeHGlobal(recordBuffer);
         }
+    }
+
+    private static IReadOnlyList<DahuaNetSdkRecordQueryStrategy> BuildRecordQueryStrategies(TimeZoneInfo deviceTimeZone, bool diagnosticMode)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var localNow = TimeZoneInfo.ConvertTime(now, deviceTimeZone);
+        var todayStartLocal = new DateTimeOffset(localNow.Date, deviceTimeZone.GetUtcOffset(localNow.Date));
+        var todayStartUtc = todayStartLocal.ToUniversalTime();
+        var todayEndUtc = todayStartUtc.AddDays(1).AddTicks(-1);
+        var broadStartUtc = now.AddDays(-7);
+        var broadEndUtc = now.AddMinutes(5);
+
+        var currentEx = DahuaNetSdkRecordQueryStrategy.Ex(
+            "A_EX_DefaultCondition",
+            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
+            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.Create()));
+        var nullEx = DahuaNetSdkRecordQueryStrategy.Ex(
+            "B_EX_NoCondition",
+            "None",
+            []);
+        var todayEx = DahuaNetSdkRecordQueryStrategy.Ex(
+            "C_EX_TodayTimeRange",
+            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
+            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(todayStartUtc, todayEndUtc, deviceTimeZone)));
+        var broadEx = DahuaNetSdkRecordQueryStrategy.Ex(
+            "D_EX_Last7DaysTimeRange",
+            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION_EX",
+            SerializeCondition(FindRecordAccessCtlCardRecConditionEx.CreateTimeRange(broadStartUtc, broadEndUtc, deviceTimeZone)));
+        var legacyToday = DahuaNetSdkRecordQueryStrategy.Legacy(
+            "E_Legacy_TodayTimeRange",
+            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION",
+            SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(todayStartUtc, todayEndUtc, deviceTimeZone)));
+        var legacyBroad = DahuaNetSdkRecordQueryStrategy.Legacy(
+            "F_Legacy_Last7DaysTimeRange",
+            "FIND_RECORD_ACCESSCTLCARDREC_CONDITION",
+            SerializeCondition(FindRecordAccessCtlCardRecCondition.Create(broadStartUtc, broadEndUtc, deviceTimeZone)));
+
+        return diagnosticMode
+            ? [nullEx, currentEx, todayEx, broadEx, legacyToday, legacyBroad]
+            : [currentEx, nullEx, todayEx, broadEx, legacyToday, legacyBroad];
+    }
+
+    private static byte[] SerializeCondition<T>(T condition) where T : struct
+    {
+        var size = Marshal.SizeOf<T>();
+        var ptr = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.StructureToPtr(condition, ptr, false);
+            var bytes = new byte[size];
+            Marshal.Copy(ptr, bytes, 0, size);
+            return bytes;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
+    }
+
+    private static DahuaNetSdkAccessEventDecoder.NetTime ToNetTime(DateTimeOffset utc, TimeZoneInfo deviceTimeZone)
+    {
+        var local = TimeZoneInfo.ConvertTime(utc, deviceTimeZone);
+        return new DahuaNetSdkAccessEventDecoder.NetTime
+        {
+            DwYear = (uint)local.Year,
+            DwMonth = (uint)local.Month,
+            DwDay = (uint)local.Day,
+            DwHour = (uint)local.Hour,
+            DwMinute = (uint)local.Minute,
+            DwSecond = (uint)local.Second,
+        };
     }
 
 
@@ -421,6 +543,32 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
             OrderCount = 0,
             Orders = Enumerable.Range(0, 6).Select(_ => FindRecordAccessCtlCardRecOrder.Empty()).ToArray(),
             Reserved = new byte[40],
+        };
+
+        public static FindRecordAccessCtlCardRecConditionEx CreateTimeRange(DateTimeOffset startUtc, DateTimeOffset endUtc, TimeZoneInfo deviceTimeZone)
+        {
+            var condition = Create();
+            condition.TimeEnabled = true;
+            condition.StartTime = ToNetTime(startUtc, deviceTimeZone);
+            condition.EndTime = ToNetTime(endUtc, deviceTimeZone);
+            return condition;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FindRecordAccessCtlCardRecCondition
+    {
+        public uint Size;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] CardNo;
+        public DahuaNetSdkAccessEventDecoder.NetTime StartTime;
+        public DahuaNetSdkAccessEventDecoder.NetTime EndTime;
+
+        public static FindRecordAccessCtlCardRecCondition Create(DateTimeOffset startUtc, DateTimeOffset endUtc, TimeZoneInfo deviceTimeZone) => new()
+        {
+            Size = (uint)Marshal.SizeOf<FindRecordAccessCtlCardRecCondition>(),
+            CardNo = new byte[32],
+            StartTime = ToNetTime(startUtc, deviceTimeZone),
+            EndTime = ToNetTime(endUtc, deviceTimeZone),
         };
     }
 
@@ -743,13 +891,85 @@ internal sealed record DahuaActiveRegisterLoginAttempt(
     }
 }
 
+public sealed record DahuaNetSdkRecordQueryStrategy(
+    string QueryMode,
+    int RecordType,
+    string RecordTypeName,
+    string ConditionStructName,
+    byte[] ConditionBytes)
+{
+    public static DahuaNetSdkRecordQueryStrategy Ex(string queryMode, string conditionStructName, byte[] conditionBytes) =>
+        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx, "NET_RECORD_ACCESSCTLCARDREC_EX", conditionStructName, conditionBytes);
+
+    public static DahuaNetSdkRecordQueryStrategy Legacy(string queryMode, string conditionStructName, byte[] conditionBytes) =>
+        new(queryMode, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecLegacy, "NET_RECORD_ACCESSCTLCARDREC", conditionStructName, conditionBytes);
+}
+
+public sealed record DahuaNetSdkRecordQueryAttempt(
+    string QueryMode,
+    int RecordType,
+    string RecordTypeName,
+    string ConditionStructName,
+    int ConditionBytesLength,
+    string ConditionFirst256Hex,
+    long FindRecordReturnHandle,
+    bool FindRecordReturnBool,
+    int FindRecordNativeErrorSigned,
+    string FindRecordNativeErrorHex,
+    bool FindNextReturnBool,
+    int FindNextNativeErrorSigned,
+    string FindNextNativeErrorHex,
+    int FindNextCalls,
+    int OutParamRetRecordNum,
+    string OutputBufferFirst256Hex,
+    IReadOnlyList<IReadOnlyDictionary<string, string?>> MappedRecordDiagnostics,
+    IReadOnlyList<DahuaAccessRecord> MappedRecords,
+    string? Error)
+{
+    public bool Success => FindRecordReturnBool && FindRecordReturnHandle != 0 && Error is null;
+
+    public static DahuaNetSdkRecordQueryAttempt Create(
+        DahuaNetSdkRecordQueryStrategy strategy,
+        bool findRecordReturnBool,
+        IntPtr findRecordReturnHandle,
+        int findRecordNativeErrorSigned,
+        bool findNextReturnBool,
+        int findNextNativeErrorSigned,
+        int findNextCalls,
+        int outParamRetRecordNum,
+        string outputBufferFirst256Hex,
+        IReadOnlyList<DahuaAccessRecord> mappedRecords,
+        IReadOnlyList<IReadOnlyDictionary<string, string?>> mappedRecordDiagnostics,
+        string? error) =>
+        new(
+            strategy.QueryMode,
+            strategy.RecordType,
+            strategy.RecordTypeName,
+            strategy.ConditionStructName,
+            strategy.ConditionBytes.Length,
+            Convert.ToHexString(strategy.ConditionBytes.AsSpan(0, Math.Min(256, strategy.ConditionBytes.Length))),
+            findRecordReturnHandle.ToInt64(),
+            findRecordReturnBool,
+            findRecordNativeErrorSigned,
+            $"0x{findRecordNativeErrorSigned:X8}",
+            findNextReturnBool,
+            findNextNativeErrorSigned,
+            $"0x{findNextNativeErrorSigned:X8}",
+            findNextCalls,
+            outParamRetRecordNum,
+            outputBufferFirst256Hex,
+            mappedRecordDiagnostics,
+            mappedRecords,
+            error);
+}
+
 internal sealed record DahuaNetSdkRecordQueryResult(
     bool Success,
     string? Error,
     int ErrorCode,
     IReadOnlyList<DahuaAccessRecord> Records,
-    IReadOnlyList<IReadOnlyDictionary<string, string?>> Diagnostics,
-    int Attempts,
+    IReadOnlyList<DahuaNetSdkRecordQueryAttempt> StrategyAttempts,
+    int FindNextAttempts,
     int CandidateCount)
 {
     public static DahuaNetSdkRecordQueryResult Failure(string error, int errorCode) => new(false, error, errorCode, [], [], 0, 0);

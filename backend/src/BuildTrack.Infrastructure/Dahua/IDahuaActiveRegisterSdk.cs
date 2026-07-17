@@ -10,6 +10,7 @@ public interface IDahuaActiveRegisterSdk
     string StartupWarning { get; }
     DahuaNetSdkDiagnostics Diagnostics { get; }
     Task StartAsync(IEnumerable<int> ports, CancellationToken cancellationToken);
+    Task<object> RunRecordQueryDiagnosticAsync(Guid deviceId, int maxRecords, CancellationToken cancellationToken);
 }
 
 public interface IDahuaEventSubscriber

@@ -66,6 +66,7 @@ public sealed class NetSdkRuntimeDiagnostics
     public string? LastAlarmDecodeStatus { get; set; }
     public string? LastDecodedAlarmJson { get; set; }
     public bool NetSdkRecordQueryEnabled { get; set; }
+    public bool NetSdkRecordQueryDiagnosticMode { get; set; }
     public DateTimeOffset? LastRecordQueryAt { get; set; }
     public bool? LastRecordQuerySuccess { get; set; }
     public string? LastRecordQueryError { get; set; }

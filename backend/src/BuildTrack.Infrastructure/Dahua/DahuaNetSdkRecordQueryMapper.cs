@@ -5,6 +5,7 @@ namespace BuildTrack.Infrastructure.Dahua;
 
 public static class DahuaNetSdkRecordQueryMapper
 {
+    public const int RecordTypeAccessControlCardRecLegacy = 6;
     public const int RecordTypeAccessControlCardRecEx = 16;
     public const int AccessControlCardRecordMinimumBytes = 1164;
     public const int DefaultRecordBufferBytes = 64 * 1024;
@@ -24,7 +25,7 @@ public static class DahuaNetSdkRecordQueryMapper
     private const int OffsetCardName = 664;
     private const int OffsetSnapFaceUrl = 1036;
 
-    public static bool TryMapAccessControlCardRecord(byte[] payload, TimeZoneInfo deviceTimeZone, out DahuaAccessRecord record, out string? error)
+    public static bool TryMapAccessControlCardRecord(byte[] payload, TimeZoneInfo deviceTimeZone, out DahuaAccessRecord record, out string? error, string recordTypeName = "NET_RECORD_ACCESSCTLCARDREC_EX")
     {
         record = new DahuaAccessRecord();
         error = null;
@@ -73,7 +74,7 @@ public static class DahuaNetSdkRecordQueryMapper
                 RawFields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Source"] = DahuaEventSourceExtensions.ActiveRegisterSource,
-                    ["NetSdkRecordType"] = "NET_RECORD_ACCESSCTLCARDREC_EX",
+                    ["NetSdkRecordType"] = recordTypeName,
                     ["NetSdkStruct"] = "NET_RECORDSET_ACCESS_CTL_CARDREC",
                     ["dwSize"] = dwSize.ToString(),
                     ["RecNo"] = recNo > 0 ? recNo.ToString() : null,
@@ -138,3 +139,23 @@ public static class DahuaNetSdkRecordQueryMapper
 
     private static string? FirstNonEmpty(params string[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 }
+
+public static class DahuaNetSdkRecordQueryCursor
+{
+    public static DahuaNetSdkRecordQueryCursorResult Apply(IEnumerable<DahuaAccessRecord> mappedRecords, long cursor)
+    {
+        var candidates = mappedRecords
+            .Where(x => x.RecNo is not null && x.RecNo > cursor)
+            .OrderBy(x => x.RecNo)
+            .ToList();
+        var lastRecNo = candidates.Count == 0
+            ? cursor
+            : candidates.Max(x => x.RecNo ?? cursor);
+
+        return new DahuaNetSdkRecordQueryCursorResult(candidates, lastRecNo);
+    }
+}
+
+public sealed record DahuaNetSdkRecordQueryCursorResult(
+    IReadOnlyList<DahuaAccessRecord> CandidateRecords,
+    long LastRecNo);

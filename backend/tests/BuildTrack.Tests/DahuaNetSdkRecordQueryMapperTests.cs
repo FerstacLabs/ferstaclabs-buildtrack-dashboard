@@ -1,4 +1,6 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
+using System.Text.Json;
+using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Dahua;
 
@@ -11,6 +13,7 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
     {
         // dhnetsdk.h enum order: UNKNOWN=0, ... HEALTHCARENOTICE=15, ACCESSCTLCARDREC_EX=16.
         Assert.Equal(16, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecEx);
+        Assert.Equal(6, DahuaNetSdkRecordQueryMapper.RecordTypeAccessControlCardRecLegacy);
     }
 
     [Fact]
@@ -63,7 +66,64 @@ public sealed class DahuaNetSdkRecordQueryMapperTests
         Assert.Equal("16", record.RawFields["ErrorCode"]);
         Assert.True(DahuaUnknownFacePolicy.IsUnknownFace(record));
     }
+    [Fact]
+    public void CursorFilter_HappensAfterMapping()
+    {
+        var records = Enumerable.Range(696, 7)
+            .Select(recNo => new DahuaAccessRecord
+            {
+                RecNo = recNo,
+                UserId = "1",
+                CardName = "ilham",
+                StatusRaw = "1",
+                MethodRaw = "15",
+                Type = "Entry",
+            })
+            .ToList();
 
+        var result = DahuaNetSdkRecordQueryCursor.Apply(records, 692);
+
+        Assert.Equal(7, result.CandidateRecords.Count);
+        Assert.Equal(702, result.LastRecNo);
+    }
+
+    [Fact]
+    public void CursorFilter_KeepsCursorWhenNoMappedRecords()
+    {
+        var result = DahuaNetSdkRecordQueryCursor.Apply([], 692);
+
+        Assert.Empty(result.CandidateRecords);
+        Assert.Equal(692, result.LastRecNo);
+    }
+
+    [Fact]
+    public void QueryAttemptJson_IncludesNativeFindRecordAndFindNextDiagnostics()
+    {
+        var strategy = DahuaNetSdkRecordQueryStrategy.Ex(
+            "B_EX_NoCondition",
+            "None",
+            []);
+        var attempt = DahuaNetSdkRecordQueryAttempt.Create(
+            strategy,
+            findRecordReturnBool: true,
+            findRecordReturnHandle: new IntPtr(123),
+            findRecordNativeErrorSigned: 0,
+            findNextReturnBool: true,
+            findNextNativeErrorSigned: 0,
+            findNextCalls: 1,
+            outParamRetRecordNum: 0,
+            outputBufferFirst256Hex: "ABCD",
+            mappedRecords: [],
+            mappedRecordDiagnostics: [],
+            error: null);
+
+        var json = JsonSerializer.Serialize(new { attempts = new[] { attempt } });
+
+        Assert.Contains("FindRecordReturnHandle", json);
+        Assert.Contains("FindNextReturnBool", json);
+        Assert.Contains("OutParamRetRecordNum", json);
+        Assert.Contains("OutputBufferFirst256Hex", json);
+    }
     private static byte[] CreatePayload(int recNo, string userId, string cardName, bool status, int method, int direction, string url, int errorCode = 0)
     {
         var payload = new byte[DahuaNetSdkRecordQueryMapper.DefaultRecordBufferBytes];
