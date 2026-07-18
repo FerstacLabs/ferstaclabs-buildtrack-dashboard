@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Dahua;
 using BuildTrack.Infrastructure.Data;
@@ -63,8 +64,7 @@ public sealed class DahuaCgiPollingHostedService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
-        var ingestion = scope.ServiceProvider.GetRequiredService<IAttendanceIngestionService>();
-        var securityEvents = scope.ServiceProvider.GetRequiredService<ISecurityEventService>();
+        var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
 
         var device = await ResolveDeviceAsync(db, cancellationToken);
         if (device is null)
@@ -102,14 +102,12 @@ public sealed class DahuaCgiPollingHostedService(
         var debounced = 0;
         var securityCreated = 0;
         var securityDebounced = 0;
-        var unknownFaceDebounceWindow = TimeSpan.FromSeconds(unknownFaceDebounceSeconds);
         foreach (var record in processableRecords)
         {
             if (DahuaUnknownFacePolicy.IsUnknownFace(record))
             {
-                var securityResult = await securityEvents.IngestUnknownFaceAsync(device.Id, record, unknownFaceDebounceWindow, deviceTimeZone, Source, cancellationToken);
-                if (securityResult.Status == SecurityEventIngestionResultStatus.Created) securityCreated++;
-                if (securityResult.Status == SecurityEventIngestionResultStatus.Debounced) securityDebounced++;
+                await pipeline.IngestAsync(device.Id, record, DahuaEventSource.CgiPolling, cancellationToken);
+                securityCreated++;
                 if (record.RecNo is not null && record.RecNo > maxProcessedRecNo) maxProcessedRecNo = record.RecNo.Value;
                 continue;
             }
@@ -151,21 +149,9 @@ public sealed class DahuaCgiPollingHostedService(
                     record.RecNo,
                     record.CreateTime);
             }
-
-            var insertedEvent = await ingestion.IngestDahuaRecordAsync(
-                device.Id,
-                record,
-                host,
-                null,
-                cancellationToken,
-                Source,
-                requireSuccessfulAttendance: true);
-
-            if (insertedEvent is not null)
-            {
-                inserted++;
-                logger.LogInformation("Inserted CGI event. Device {DeviceId}, WorkerExternalId {WorkerExternalId}, Direction {Direction}, RecNo {RecNo}, EventTime {EventTime}", device.Id, record.UserId, record.NormalizedDirection, record.RecNo, record.CreateTime);
-            }
+            await pipeline.IngestAsync(device.Id, record, DahuaEventSource.CgiPolling, cancellationToken);
+            inserted++;
+            logger.LogInformation("Submitted CGI event to shared ingestion pipeline. Device {DeviceId}, WorkerExternalId {WorkerExternalId}, Direction {Direction}, RecNo {RecNo}, EventTime {EventTime}", device.Id, record.UserId, record.NormalizedDirection, record.RecNo, record.CreateTime);
             if (record.RecNo is not null && record.RecNo > maxProcessedRecNo) maxProcessedRecNo = record.RecNo.Value;
         }
 
@@ -309,6 +295,8 @@ public sealed record DahuaCgiAdaptiveFetchResult(
     long MaxRecNoInResponse,
     bool AdaptiveRetryHappened,
     bool MaxFetchReachedWithoutNewerRecords);
+
+
 
 
 

@@ -21,10 +21,21 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy => policy
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowAnyOrigin());
+    var allowedOrigins = (builder.Configuration["CORS_ALLOWED_ORIGINS"] ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyHeader().AllowAnyMethod();
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+        else
+        {
+            policy.AllowAnyOrigin();
+        }
+    });
 });
 builder.Services.AddBuildTrackInfrastructure(builder.Configuration);
 
@@ -397,13 +408,199 @@ app.MapGet("/api/security-events/{eventId:guid}/snapshot", async (Guid eventId, 
     if (!localSnapshot.Exists || localSnapshot.Bytes is null) return Results.NotFound();
     return Results.File(localSnapshot.Bytes, localSnapshot.ContentType);
 });
+
+app.MapGet("/api/dahua/active-register/status", async (BuildTrackDbContext db, IDahuaActiveRegisterSdk sdk, IConfiguration configuration, CancellationToken ct) =>
+{
+    var diagnostics = await db.NetSdkRuntimeDiagnostics.AsNoTracking().FirstOrDefaultAsync(x => x.Id == "dahua-netsdk-runtime", ct);
+    var lastRawEvent = await db.DahuaActiveRegisterRawEvents.AsNoTracking().OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+    var rawEventCount = await db.DahuaActiveRegisterRawEvents.AsNoTracking().CountAsync(ct);
+    var decodedEventCount = await db.DahuaActiveRegisterRawEvents.AsNoTracking().CountAsync(x => x.DecodeStatus.StartsWith("Decoded") || x.DecodeStatus == "Ingested", ct);
+    var ingestedEventCount = await db.DahuaActiveRegisterRawEvents.AsNoTracking().CountAsync(x => x.DecodeStatus == "Ingested", ct);
+    var apiPorts = ParsePorts(configuration["DAHUA_ACTIVE_REGISTER_PORTS"]);
+    var workerPorts = ParseDiagnosticsPorts(diagnostics?.ListenerPortsJson);
+    var effectivePorts = workerPorts.Length > 0 ? workerPorts : apiPorts;
+    var apiEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_ENABLED"]);
+    var apiIngestionEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]);
+    var diagnosticsRecent = diagnostics?.UpdatedAt >= DateTimeOffset.UtcNow.AddMinutes(-5);
+    var rawEventRecent = lastRawEvent?.CreatedAt >= DateTimeOffset.UtcNow.AddMinutes(-10);
+    var workerListenerActive = sdk.IsSdkListenerActive || (diagnostics?.SdkInitialized == true && effectivePorts.Length > 0 && (diagnosticsRecent || rawEventRecent || lastRawEvent is not null));
+    var workerIngestionObserved = diagnostics?.LoginStrategy is not null || diagnostics?.StartListenExCalled == true || diagnostics?.StartListenExSuccess == true;
+
+    return Results.Ok(new
+    {
+        enabled = apiEnabled || workerListenerActive,
+        listenerActive = workerListenerActive,
+        ports = effectivePorts,
+        lastCallbackTime = lastRawEvent?.CreatedAt,
+        lastCommand = lastRawEvent?.CallbackCommandName ?? diagnostics?.LastServiceEventType,
+        lastPayloadBytes = lastRawEvent?.PayloadBytes ?? diagnostics?.LastServicePayloadBytes ?? 0,
+        lastPayloadFirst256Hex = lastRawEvent?.PayloadFirstBytesHex ?? diagnostics?.LastServicePayloadFirst256Hex,
+        rawEventCount,
+        decodedEventCount,
+        ingestedEventCount,
+        ingestionEnabled = apiIngestionEnabled || workerIngestionObserved,
+        diagnosticsEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_DIAGNOSTICS_ENABLED"], defaultValue: true),
+        decodeStatus = diagnostics?.NetSdkDecodeStatus ?? sdk.DecodeStatus,
+        warning = sdk.StartupWarning,
+        apiConfig = new
+        {
+            enabled = apiEnabled,
+            ingestionEnabled = apiIngestionEnabled,
+            netsdkRecordQueryDiagnosticMode = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_DIAGNOSTIC_MODE"]),
+            ports = apiPorts,
+        },
+        worker = diagnostics is null ? null : new
+        {
+            diagnosticsPresent = true,
+            listenerActive = workerListenerActive,
+            sdkLoaded = diagnostics.SdkLoaded,
+            sdkInitialized = diagnostics.SdkInitialized,
+            ports = workerPorts,
+            diagnostics.UpdatedAt,
+            diagnostics.NetSdkDecodeStatus,
+            diagnostics.LastServiceCommand,
+            diagnostics.LastServiceEventType,
+            diagnostics.LastServicePayloadBytes,
+            diagnostics.LastServicePayloadFirst256Hex,
+            diagnostics.LastRegisterDeviceId,
+            diagnostics.LastParsedRegisterDeviceIdOffset,
+            diagnostics.LastParsedRegisterDeviceId,
+            diagnostics.LastParsedSerialOffset,
+            diagnostics.LastParsedSerial,
+            diagnostics.LastParsedRemoteIp,
+            diagnostics.LastParsedRemotePort,
+            diagnostics.LastPossibleSessionHandlesJson,
+            diagnostics.LastPayloadStructLayout,
+            diagnostics.ResponseDevRegCalled,
+            diagnostics.ResponseDevRegSuccess,
+            diagnostics.ResponseDevRegErrorSigned,
+            diagnostics.ResponseDevRegErrorHex,
+            diagnostics.ResponseDevRegDevSerial,
+            diagnostics.ResponseDevRegIp,
+            diagnostics.ResponseDevRegPort,
+            diagnostics.LoginStrategy,
+            diagnostics.LoginHandle,
+            diagnostics.LoginSucceeded,
+            diagnostics.LoginErrorSigned,
+            diagnostics.LoginErrorHex,
+            diagnostics.LoginNativeErrorSigned,
+            diagnostics.LoginNativeErrorHex,
+            diagnostics.LoginPossibleMarshallingWarning,
+            diagnostics.StartListenExCalled,
+            diagnostics.StartListenExSuccess,
+            diagnostics.StartListenExErrorSigned,
+            diagnostics.StartListenExErrorHex,
+            diagnostics.ExperimentalServiceHandleSubscribeEnabled,
+            diagnostics.LastExperimentalSubscribeJson,
+            diagnostics.LastAlarmCommand,
+            diagnostics.LastAlarmCommandName,
+            diagnostics.LastAlarmPayloadFirst256Hex,
+            diagnostics.LastAlarmDecodeStatus,
+            diagnostics.LastDecodedAlarmJson,
+            diagnostics.NetSdkRecordQueryEnabled,
+            diagnostics.NetSdkRecordQueryDiagnosticMode,
+            diagnostics.LastRecordQueryAt,
+            diagnostics.LastRecordQuerySuccess,
+            diagnostics.LastRecordQueryError,
+            diagnostics.LastRecordQueryCount,
+            diagnostics.LastRecordQueryLastRecNo,
+            diagnostics.LastDecodeError,
+        },
+        workerDiagnosticsPresent = diagnostics is not null,
+        workerListenerActive,
+        lastDecodeStatus = diagnostics?.NetSdkDecodeStatus,
+        lastLoginStrategy = diagnostics?.LoginStrategy,
+        lastLoginSucceeded = diagnostics?.LoginSucceeded,
+        lastLoginErrorSigned = diagnostics?.LoginErrorSigned,
+        lastLoginErrorHex = diagnostics?.LoginErrorHex,
+        lastLoginNativeErrorSigned = diagnostics?.LoginNativeErrorSigned,
+        lastLoginNativeErrorHex = diagnostics?.LoginNativeErrorHex,
+        loginPossibleMarshallingWarning = diagnostics?.LoginPossibleMarshallingWarning ?? false,
+        startListenExSucceeded = diagnostics?.StartListenExSuccess,
+        startListenExErrorHex = diagnostics?.StartListenExErrorHex,
+        netsdkRecordQueryEnabled = diagnostics?.NetSdkRecordQueryEnabled ?? IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_ENABLED"]),
+        netsdkRecordQueryDiagnosticMode = diagnostics?.NetSdkRecordQueryDiagnosticMode ?? IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_NETSDK_RECORD_QUERY_DIAGNOSTIC_MODE"]),
+        lastRecordQueryAt = diagnostics?.LastRecordQueryAt,
+        lastRecordQuerySuccess = diagnostics?.LastRecordQuerySuccess,
+        lastRecordQueryError = diagnostics?.LastRecordQueryError,
+        lastRecordQueryCount = diagnostics?.LastRecordQueryCount ?? 0,
+        lastRecordQueryLastRecNo = diagnostics?.LastRecordQueryLastRecNo,
+    });
+});
+app.MapGet("/api/dahua/active-register/record-query-test", async (
+    Guid deviceId,
+    int? maxRecords,
+    IDahuaActiveRegisterSdk sdk,
+    CancellationToken ct) =>
+{
+    var result = await sdk.RunRecordQueryDiagnosticAsync(deviceId, Math.Clamp(maxRecords ?? 20, 1, 200), ct);
+    return Results.Ok(result);
+});
+app.MapGet("/api/dahua/active-register/latest-record-query-diagnostic", async (
+    Guid? deviceId,
+    BuildTrackDbContext db,
+    CancellationToken ct) =>
+{
+    var query = db.DahuaActiveRegisterRawEvents
+        .AsNoTracking()
+        .Where(x => x.CallbackCommandName != null && x.CallbackCommandName.StartsWith("NETSDK_RECORD_QUERY_"));
+
+    if (deviceId is not null)
+    {
+        query = query.Where(x => x.DeviceId == deviceId);
+    }
+
+    var latest = await query
+        .OrderByDescending(x => x.CreatedAt)
+        .Select(x => new
+        {
+            x.Id,
+            x.DeviceId,
+            x.RegisterDeviceId,
+            x.CallbackCommand,
+            x.CallbackCommandName,
+            x.DecodeStatus,
+            x.DecodedJson,
+            x.CreatedAt,
+        })
+        .FirstOrDefaultAsync(ct);
+
+    return latest is null
+        ? Results.NotFound(new { error = "No persisted Dahua NetSDK record-query diagnostic was found", deviceId })
+        : Results.Ok(latest);
+});
+app.MapGet("/api/dahua/active-register/raw-events", async (int? limit, BuildTrackDbContext db, CancellationToken ct) =>
+{
+    var take = Math.Clamp(limit ?? 100, 1, 500);
+    return await db.DahuaActiveRegisterRawEvents
+        .AsNoTracking()
+        .OrderByDescending(x => x.CreatedAt)
+        .Take(take)
+        .Select(x => new
+        {
+            x.Id,
+            x.DeviceId,
+            x.RegisterDeviceId,
+            x.RemoteIp,
+            x.RemotePort,
+            x.ListenerPort,
+            x.CallbackCommand,
+            x.CallbackCommandName,
+            x.PayloadBytes,
+            x.PayloadFirstBytesHex,
+            x.DecodeStatus,
+            x.DecodedJson,
+            x.CreatedAt,
+        })
+        .ToListAsync(ct);
+});
 app.MapGet("/api/dahua/listener/status", (IConfiguration configuration, IDahuaActiveRegisterSdk sdk) =>
 {
     var ports = ParsePorts(configuration["DAHUA_ACTIVE_REGISTER_PORTS"]);
     return Results.Ok(new
     {
         ports,
-        defaultPorts = new[] { 9500, 7000 },
+        defaultPorts = new[] { 7000, 9500 },
         realSdkAvailable = sdk.IsRealSdkAvailable,
         decodeStatus = sdk.DecodeStatus,
         simulatorEnabled = bool.TryParse(configuration["DAHUA_SIMULATOR_ENABLED"], out var enabled) && enabled,
@@ -434,7 +631,16 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         lastServiceCommand = persisted.LastServiceCommand,
         lastServiceEventType = persisted.LastServiceEventType,
         lastServicePayloadBytes = persisted.LastServicePayloadBytes,
+        lastServicePayloadFirst256Hex = persisted.LastServicePayloadFirst256Hex,
         lastRegisterDeviceId = persisted.LastRegisterDeviceId,
+        lastParsedRegisterDeviceIdOffset = persisted.LastParsedRegisterDeviceIdOffset,
+        lastParsedRegisterDeviceId = persisted.LastParsedRegisterDeviceId,
+        lastParsedSerialOffset = persisted.LastParsedSerialOffset,
+        lastParsedSerial = persisted.LastParsedSerial,
+        lastParsedRemoteIp = persisted.LastParsedRemoteIp,
+        lastParsedRemotePort = persisted.LastParsedRemotePort,
+        lastPossibleSessionHandlesJson = persisted.LastPossibleSessionHandlesJson,
+        lastPayloadStructLayout = persisted.LastPayloadStructLayout,
         responseDevRegCalled = persisted.ResponseDevRegCalled,
         responseDevRegSuccess = persisted.ResponseDevRegSuccess,
         responseDevRegErrorSigned = persisted.ResponseDevRegErrorSigned,
@@ -456,7 +662,20 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
         startListenExSuccess = persisted.StartListenExSuccess,
         startListenExErrorSigned = persisted.StartListenExErrorSigned,
         startListenExErrorHex = persisted.StartListenExErrorHex,
+        experimentalServiceHandleSubscribeEnabled = persisted.ExperimentalServiceHandleSubscribeEnabled,
+        lastExperimentalSubscribeJson = persisted.LastExperimentalSubscribeJson,
         lastAlarmCommand = persisted.LastAlarmCommand,
+        lastAlarmCommandName = persisted.LastAlarmCommandName,
+        lastAlarmPayloadFirst256Hex = persisted.LastAlarmPayloadFirst256Hex,
+        lastAlarmDecodeStatus = persisted.LastAlarmDecodeStatus,
+        lastDecodedAlarmJson = persisted.LastDecodedAlarmJson,
+        netsdkRecordQueryEnabled = persisted.NetSdkRecordQueryEnabled,
+        netsdkRecordQueryDiagnosticMode = persisted.NetSdkRecordQueryDiagnosticMode,
+        lastRecordQueryAt = persisted.LastRecordQueryAt,
+        lastRecordQuerySuccess = persisted.LastRecordQuerySuccess,
+        lastRecordQueryError = persisted.LastRecordQueryError,
+        lastRecordQueryCount = persisted.LastRecordQueryCount,
+        lastRecordQueryLastRecNo = persisted.LastRecordQueryLastRecNo,
         lastDecodeError = persisted.LastDecodeError,
         netSdkDecodeStatus = persisted.NetSdkDecodeStatus,
         updatedAt = persisted.UpdatedAt,
@@ -590,7 +809,27 @@ static async Task<string> GetPersistedNetSdkStatusAsync(BuildTrackDbContext db, 
         .FirstOrDefaultAsync(ct);
     return string.IsNullOrWhiteSpace(status) ? sdk.DecodeStatus : status;
 }
-static int[] ParsePorts(string? raw) => (string.IsNullOrWhiteSpace(raw) ? "9500,7000" : raw)
+static bool IsEnabled(string? value, bool defaultValue = false)
+{
+    if (string.IsNullOrWhiteSpace(value)) return defaultValue;
+    return value.Equals("true", StringComparison.OrdinalIgnoreCase)
+           || value.Equals("1", StringComparison.OrdinalIgnoreCase)
+           || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+}
+
+static int[] ParseDiagnosticsPorts(string? json)
+{
+    if (string.IsNullOrWhiteSpace(json)) return [];
+    try
+    {
+        return JsonSerializer.Deserialize<int[]>(json) ?? [];
+    }
+    catch
+    {
+        return [];
+    }
+}
+static int[] ParsePorts(string? raw) => (string.IsNullOrWhiteSpace(raw) ? "7000,9500" : raw)
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Select(value => int.TryParse(value, out var port) ? port : 0)
     .Where(port => port > 0)
@@ -616,6 +855,13 @@ static async Task EnsureDatabaseWithRetryAsync(IServiceProvider services, ILogge
         }
     }
 }
+
+
+
+
+
+
+
 
 
 

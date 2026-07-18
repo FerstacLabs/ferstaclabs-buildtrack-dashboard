@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
 
@@ -28,7 +28,7 @@ public static class DahuaSdkAccessEventNormalizer
         record.RawFields.TryAdd("Status", record.StatusRaw);
         record.RawFields.TryAdd("Method", record.MethodRaw);
         record.RawFields.TryAdd("Type", record.Type);
-        record.RawFields.TryAdd("Source", "dahua_netsdk_active_register");
+        record.RawFields.TryAdd("Source", DahuaEventSourceExtensions.ActiveRegisterSource);
         if (record.RecNo is not null) record.RawFields.TryAdd("RecNo", record.RecNo.Value.ToString());
         record.RawFields.TryAdd("CreateTime", record.CreateTime.ToString("O"));
 
@@ -125,4 +125,5 @@ public static class DahuaSdkAccessEventNormalizer
         return null;
     }
 }
+
 

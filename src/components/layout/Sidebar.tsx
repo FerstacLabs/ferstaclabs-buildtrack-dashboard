@@ -11,9 +11,12 @@
   FieldTimeOutlined,
   FileSearchOutlined,
   LineChartOutlined,
+  ProfileOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  TeamOutlined,
   ThunderboltOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
@@ -22,6 +25,8 @@ interface SidebarItem {
   label: string
   path: string
   icon: ReactNode
+  end?: boolean
+  children?: SidebarItem[]
 }
 
 const menuItems: SidebarItem[] = [
@@ -39,6 +44,17 @@ const menuItems: SidebarItem[] = [
   { label: 'Dahua Cihazları', path: '/devices', icon: <ApiOutlined /> },
   { label: 'Canlı Davamiyyət', path: '/attendance-live', icon: <ThunderboltOutlined /> },
   { label: 'Tanınmayan üzlər', path: '/security-events', icon: <EyeInvisibleOutlined /> },
+  {
+    label: 'Layihə Gedişatı',
+    path: '/project-progress',
+    icon: <ProfileOutlined />,
+    children: [
+      { label: 'Dashboard', path: '/project-progress', icon: <DashboardOutlined />, end: true },
+      { label: 'Smeta', path: '/project-progress/estimate', icon: <FileSearchOutlined /> },
+      { label: 'Briqadalar', path: '/project-progress/crews', icon: <TeamOutlined /> },
+      { label: 'Təqvim / Gedişat', path: '/project-progress/timeline', icon: <UnorderedListOutlined /> },
+    ],
+  },
   { label: 'Ayarlar', path: '/settings', icon: <SettingOutlined /> },
 ]
 
@@ -54,15 +70,27 @@ export const Sidebar = () => (
 
     <nav className="sidebar-nav">
       {menuItems.map((item) => (
-        <NavLink
-          key={item.path}
-          to={item.path}
-          end={item.path === '/'}
-          className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
-        >
-          <span className="sidebar-icon">{item.icon}</span>
-          <span>{item.label}</span>
-        </NavLink>
+        <div className="sidebar-group" key={item.path}>
+          <NavLink
+            to={item.path}
+            end={item.end ?? item.path === '/'}
+            className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
+          >
+            <span className="sidebar-icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </NavLink>
+          {item.children?.map((child) => (
+            <NavLink
+              key={child.path}
+              to={child.path}
+              end={child.end}
+              className={({ isActive }) => `sidebar-link sidebar-child${isActive ? ' active' : ''}`}
+            >
+              <span className="sidebar-icon">{child.icon}</span>
+              <span>{child.label}</span>
+            </NavLink>
+          ))}
+        </div>
       ))}
     </nav>
   </aside>

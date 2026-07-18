@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContext<BuildTrackDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<IPasswordProtector, AesPasswordProtector>();
         services.AddScoped<IAttendanceIngestionService, AttendanceIngestionService>();
+        services.AddScoped<IDahuaAccessRecordIngestionPipeline, DahuaAccessRecordIngestionPipeline>();
         services.AddScoped<IAttendanceSessionService, AttendanceSessionService>();
         services.AddScoped<ISecuritySnapshotStore, SecuritySnapshotStore>();
         services.AddScoped<ISecurityEventService, SecurityEventService>();
@@ -29,6 +30,7 @@ public static class ServiceCollectionExtensions
         return services;
     }
 }
+
 
 
 
