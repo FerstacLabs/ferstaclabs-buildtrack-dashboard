@@ -1,4 +1,6 @@
-﻿export type DeviceMode = 'ActiveRegister' | 'CgiPollingFallback' | 'Simulator'
+import { API_BASE_URL } from '../../shared/api/client'
+
+export type DeviceMode = 'ActiveRegister' | 'CgiPollingFallback' | 'Simulator'
 export type DeviceStatus = 'Pending' | 'Online' | 'Offline' | 'Error'
 export type AttendanceStatus = 'Ok' | 'Failed' | 'Stranger'
 export type AttendanceMethod = 'Face' | 'Card' | 'Fingerprint' | 'Password' | 'Manual' | 'Unknown'
@@ -206,7 +208,7 @@ export class BackendApiError extends Error {
   }
 }
 
-const API_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? (import.meta.env.VITE_BUILDTRACK_API_URL as string | undefined))?.replace(/\/$/, '') ?? 'http://localhost:8080'
+const API_BASE = API_BASE_URL
 
 const parseJsonBody = (text: string) => {
   if (!text) return undefined

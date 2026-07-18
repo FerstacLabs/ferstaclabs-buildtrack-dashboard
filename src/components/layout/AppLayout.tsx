@@ -2,6 +2,7 @@ import { Alert, Spin } from 'antd'
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useBuildTrackStore } from '../../services/data/dataService'
+import { ApiConnectionStatus } from './ApiConnectionStatus'
 import { Sidebar } from './Sidebar'
 
 export const AppLayout = () => {
@@ -24,6 +25,7 @@ export const AppLayout = () => {
     <div className="app-shell">
       <Sidebar />
       <main className="app-main">
+        <ApiConnectionStatus />
         {error ? <Alert type="warning" showIcon message="Demo məlumatları lokal rejimdə açıldı" description={error} /> : null}
         {data ? <Outlet /> : <Spin size="large" />}
       </main>

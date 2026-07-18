@@ -11,6 +11,10 @@ import { ExportPage } from '../features/export/ExportPage'
 import { ImportPage } from '../features/import/ImportPage'
 import { PayrollPage } from '../features/payroll/PayrollPage'
 import { PerformancePage } from '../features/performance/PerformancePage'
+import { ProjectCrewsPage } from '../features/projectProgress/ProjectCrewsPage'
+import { ProjectEstimatePage } from '../features/projectProgress/ProjectEstimatePage'
+import { ProjectProgressDashboardPage } from '../features/projectProgress/ProjectProgressDashboardPage'
+import { ProjectTimelinePage } from '../features/projectProgress/ProjectTimelinePage'
 import { RiskWorkersPage } from '../features/riskWorkers/RiskWorkersPage'
 import { SecurityEventsPage } from '../features/securityEvents/SecurityEventsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
@@ -36,6 +40,10 @@ export const router = createBrowserRouter([
       { path: 'devices', element: <DevicesPage /> },
       { path: 'attendance-live', element: <AttendanceLivePage /> },
       { path: 'security-events', element: <SecurityEventsPage /> },
+      { path: 'project-progress', element: <ProjectProgressDashboardPage /> },
+      { path: 'project-progress/estimate', element: <ProjectEstimatePage /> },
+      { path: 'project-progress/crews', element: <ProjectCrewsPage /> },
+      { path: 'project-progress/timeline', element: <ProjectTimelinePage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'import', element: <ImportPage /> },
     ],

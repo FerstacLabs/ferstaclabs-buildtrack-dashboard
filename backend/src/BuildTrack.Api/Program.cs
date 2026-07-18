@@ -21,10 +21,21 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy => policy
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowAnyOrigin());
+    var allowedOrigins = (builder.Configuration["CORS_ALLOWED_ORIGINS"] ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyHeader().AllowAnyMethod();
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+        else
+        {
+            policy.AllowAnyOrigin();
+        }
+    });
 });
 builder.Services.AddBuildTrackInfrastructure(builder.Configuration);
 
