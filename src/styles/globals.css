@@ -1124,7 +1124,36 @@ a {
 
 .assistant-panel {
   height: 100%;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+}
+
+.assistant-title {
+  display: grid;
+  gap: 3px;
+}
+
+.assistant-title strong {
+  color: var(--bt-navy);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.assistant-title span,
+.assistant-context-line {
+  color: var(--bt-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.assistant-context-line {
+  border: 1px solid rgba(7, 139, 85, 0.16);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: linear-gradient(135deg, rgba(7, 139, 85, 0.08), rgba(20, 121, 255, 0.06));
+}
+
+.assistant-context-line strong {
+  color: var(--bt-green);
 }
 
 .assistant-prompts {
@@ -1134,7 +1163,7 @@ a {
 .assistant-prompts button {
   min-height: 44px;
   border: 1px solid var(--bt-border);
-  border-radius: 8px;
+  border-radius: 999px;
   padding: 8px 10px;
   color: var(--bt-navy);
   background: #f8fbfa;
@@ -1147,6 +1176,8 @@ a {
 .assistant-prompts button:hover {
   border-color: var(--bt-green);
   color: var(--bt-green);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 72, 63, 0.08);
 }
 
 .assistant-messages {
@@ -1158,17 +1189,20 @@ a {
   display: grid;
   gap: 8px;
   border: 1px solid var(--bt-border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px;
   background: #fff;
+  box-shadow: 0 8px 18px rgba(12, 36, 54, 0.05);
 }
 
 .assistant-message.user {
   background: #f7fbff;
+  border-color: rgba(20, 121, 255, 0.18);
 }
 
 .assistant-message.assistant {
   background: #f8fbfa;
+  border-color: rgba(7, 139, 85, 0.18);
 }
 
 .assistant-message p {
