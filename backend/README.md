@@ -87,6 +87,9 @@ Default environment variables in `docker-compose.yml`:
 ```text
 POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
 BUILDTRACK_SECRET_KEY=change-this-32-byte-production-secret
+OPENAI_ASSISTANT_ENABLED=true
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=
 DAHUA_ACTIVE_REGISTER_PORTS=9500,7000
 DAHUA_SIMULATOR_ENABLED=false
 DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK=false
@@ -99,13 +102,21 @@ ASPNETCORE_ENVIRONMENT=Production
 2. Install Docker and Docker Compose.
 3. Copy the repository to the VPS.
 4. Set a strong `BUILDTRACK_SECRET_KEY`.
-5. Add Dahua NetSDK native binaries under `backend/vendor/dahua-netsdk/linux-x64/`, including `libdhnetsdk.so` and its required `lib*.so` dependencies. The worker container sets `LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64`.
-6. Run `docker compose up -d --build`.
-7. Open TCP ports on the VPS firewall:
+5. Add `OPENAI_API_KEY=sk-...` to the `.env` file beside `docker-compose.yml` if the AI assistant should use OpenAI. Keep this key only on the backend/VPS, never in Vercel.
+6. Add Dahua NetSDK native binaries under `backend/vendor/dahua-netsdk/linux-x64/`, including `libdhnetsdk.so` and its required `lib*.so` dependencies. The worker container sets `LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64`.
+7. Run `docker compose up -d --build`.
+8. Open TCP ports on the VPS firewall:
    - `8080` or your reverse-proxied API port
    - `9500/tcp` for Dahua Active Register
    - `7000/tcp` if using that Dahua/NVR style port
-8. Do not put `9500` or `7000` behind Cloudflare HTTP proxy. These ports need raw TCP reachability.
+9. Do not put `9500` or `7000` behind Cloudflare HTTP proxy. These ports need raw TCP reachability.
+
+AI assistant endpoints:
+
+- `GET /api/ai/project-assistant/status`
+- `POST /api/ai/project-assistant/chat`
+
+If `OPENAI_API_KEY` is missing, the API returns a fallback-compatible response so the Vercel frontend can continue with local demo analysis.
 
 ## Configure Dahua terminal Active Register
 

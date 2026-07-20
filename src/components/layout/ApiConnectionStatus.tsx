@@ -27,7 +27,7 @@ export const ApiConnectionStatus = () => {
   if (status === 'connected') {
     return (
       <div className="api-status-row connected">
-        <Tag color="success" icon={<CheckCircleOutlined />}>Sinxronizasiya aktivdir</Tag>
+        <Tag color="success" icon={<CheckCircleOutlined />}>Backend bağlantısı aktivdir</Tag>
       </div>
     )
   }
@@ -36,7 +36,7 @@ export const ApiConnectionStatus = () => {
     <div className="api-status-row connected">
       <Tooltip title={API_BASE_URL_SOURCE === 'VITE_API_BASE_URL' ? 'Backend cavabı gözlənilir' : 'Backend ünvanı Vercel mühit dəyişəni ilə verilə bilər'}>
         <Tag color={status === 'checking' ? 'processing' : 'default'} icon={<SyncOutlined spin={status === 'checking'} />}>
-          {status === 'checking' ? 'Sinxronizasiya yoxlanılır' : 'Lokal yaddaş aktivdir'}
+          {status === 'checking' ? 'Sinxronizasiya yoxlanılır' : 'Yaddaş aktivdir'}
         </Tag>
       </Tooltip>
     </div>

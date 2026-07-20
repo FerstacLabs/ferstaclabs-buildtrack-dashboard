@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using BuildTrack.Api.Contracts;
+using BuildTrack.Api.Options;
+using BuildTrack.Api.Services;
 using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure;
@@ -38,6 +40,14 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddBuildTrackInfrastructure(builder.Configuration);
+var aiOptions = BuildAiOptions(builder.Configuration);
+builder.Services.AddSingleton(aiOptions);
+builder.Services.AddHttpClient<IOpenAiProjectAssistantService, OpenAiProjectAssistantService>((serviceProvider, client) =>
+{
+    var options = serviceProvider.GetRequiredService<AiOptions>();
+    client.BaseAddress = new Uri("https://api.openai.com/v1/");
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+});
 
 var app = builder.Build();
 
@@ -48,6 +58,21 @@ app.UseSwaggerUI();
 await EnsureDatabaseWithRetryAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", service = "BuildTrack.Api", time = DateTimeOffset.UtcNow }));
+
+app.MapGet("/api/ai/project-assistant/status", (AiOptions options) =>
+    Results.Ok(new ProjectAssistantStatusResponse(
+        options.Enabled,
+        !string.IsNullOrWhiteSpace(options.ApiKey),
+        options.Model)));
+
+app.MapPost("/api/ai/project-assistant/chat", async (
+    ProjectAssistantChatRequest request,
+    IOpenAiProjectAssistantService assistantService,
+    CancellationToken ct) =>
+{
+    var response = await assistantService.GetAnswerAsync(request, ct);
+    return Results.Ok(response);
+});
 
 app.MapGet("/api/sites", async (BuildTrackDbContext db, CancellationToken ct) =>
     await db.Sites.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
@@ -756,6 +781,20 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
 
 app.Run();
 
+static AiOptions BuildAiOptions(IConfiguration configuration)
+{
+    return new AiOptions
+    {
+        Enabled = IsEnabled(configuration["OPENAI_ASSISTANT_ENABLED"] ?? configuration["Ai:Enabled"], false),
+        ApiKey = configuration["OPENAI_API_KEY"] ?? configuration["Ai:ApiKey"] ?? string.Empty,
+        Model = string.IsNullOrWhiteSpace(configuration["OPENAI_MODEL"] ?? configuration["Ai:Model"])
+            ? "gpt-4o-mini"
+            : (configuration["OPENAI_MODEL"] ?? configuration["Ai:Model"] ?? "gpt-4o-mini").Trim(),
+        TimeoutSeconds = int.TryParse(configuration["OPENAI_TIMEOUT_SECONDS"] ?? configuration["Ai:TimeoutSeconds"], out var timeout)
+            ? Math.Clamp(timeout, 5, 60)
+            : 30,
+    };
+}
 
 static TimeZoneInfo ResolveApiTimeZone(string? timeZoneId)
 {

@@ -5,11 +5,14 @@ import { useLocation } from 'react-router-dom'
 import { tryApiRequest } from '../../shared/api/client'
 import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
-import { buildAiProjectContext } from './aiContextBuilder'
 import { getAssistantAnswer } from './aiAssistantEngine'
+import { buildAiProjectContext, type AiProjectContext } from './aiContextBuilder'
 
 interface AssistantApiResponse {
   answer?: string
+  source?: 'openai' | 'local-fallback' | string
+  model?: string
+  error?: string | null
 }
 
 interface SpeechRecognitionLike {
@@ -25,15 +28,15 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 const quickPrompts = [
   'Bugünkü ümumi vəziyyət necədir?',
-  'Hazırda ən kritik risklər hansılardır?',
-  'Hansı layihələr plan üzrə getmir?',
+  'Ən kritik risklər hansılardır?',
+  'Hansı işlər gecikir?',
   'Büdcə vəziyyəti necədir?',
   'İşçi heyətinin vəziyyəti necədir?',
-  'Bu gün ilk növbədə nəyə diqqət etməliyəm?',
-  'Təhlükəsizliklə bağlı hər hansı problem varmı?',
-  'Mənə vacib məlumatları özün təqdim et',
-  'Monolit briqadasının vəziyyəti necədir?',
-  'Hansı material azalır?',
+  'Bu gün nəyə diqqət etməliyəm?',
+  'Material çatışmazlığı varmı?',
+  'Prorab son nə qeyd edib?',
+  'Maaş xərci nə qədərdir?',
+  'Vacib məlumatları özün təqdim et',
 ]
 
 const pageObjectFilterKeyByPath: Array<[string, string]> = [
@@ -76,6 +79,35 @@ const ConstructionBotIcon = () => (
   </svg>
 )
 
+const containsCyrillic = (value: string) => /[\u0400-\u04FF]/.test(value)
+
+const buildAssistantPayloadContext = (context: AiProjectContext) => ({
+  selectedObjectId: context.selectedObject?.id ?? null,
+  selectedObjectName: context.selectedObject?.name ?? 'Bütün obyektlər',
+  summary: context.summary,
+  objects: context.objects,
+  stages: context.stages.slice(0, 18),
+  workItems: context.workItems.slice(0, 30),
+  crews: context.crews.slice(0, 16),
+  workers: context.workers.slice(0, 30),
+  attendance: context.attendance.slice(0, 30),
+  payroll: context.payroll.slice(0, 20),
+  materials: context.materials.slice(0, 25),
+  dailyReports: context.dailyReports.slice(0, 12),
+  risks: context.risks.slice(0, 20),
+  delays: context.delays.slice(0, 20),
+  audit: context.audit.slice(0, 16),
+  exportRows: context.exportRows.slice(0, 16),
+  topInsights: context.topInsights.slice(0, 10),
+})
+
+const pickVoice = () => {
+  const voices = window.speechSynthesis.getVoices()
+  return voices.find((voice) => voice.lang.toLowerCase().startsWith('az'))
+    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('tr'))
+    ?? null
+}
+
 export const AiAssistant = () => {
   const data = useProjectProgressStore()
   const addAssistantMessage = useProjectProgressStore((state) => state.addAssistantMessage)
@@ -84,6 +116,9 @@ export const AiAssistant = () => {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null)
+  const [voiceNote, setVoiceNote] = useState<string | null>(null)
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
   const speechRecognition = getSpeechRecognition()
   const canSpeak = 'speechSynthesis' in window
   const messages = data.assistantMessages
@@ -92,24 +127,53 @@ export const AiAssistant = () => {
   const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 
+  const stopSpeaking = () => {
+    if (!canSpeak) return
+    window.speechSynthesis.cancel()
+    setSpeakingMessageId(null)
+  }
+
+  const closeDrawer = () => {
+    stopSpeaking()
+    setOpen(false)
+  }
+
+  const addLocalAnswer = (question: string) => {
+    const localAnswer = getAssistantAnswer(question, buildAiProjectContext({ data, objectId: selectedObjectId }))
+    addAssistantMessage({ role: 'assistant', content: localAnswer.answer })
+    setFallbackNote('Lokal analiz istifadə olundu.')
+  }
+
   const submitQuestion = async (question: string) => {
     const trimmed = question.trim()
     if (!trimmed) return
+
     setInput('')
     setLoading(true)
+    setFallbackNote(null)
     addAssistantMessage({ role: 'user', content: trimmed })
-    const localAnswer = getAssistantAnswer(trimmed, buildAiProjectContext({ data, objectId: selectedObjectId }))
-    addAssistantMessage({ role: 'assistant', content: localAnswer.answer })
-    setLoading(false)
-    void tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
+
+    const history = messages
+      .slice(-8)
+      .map((item) => ({ role: item.role, content: item.content }))
+
+    const apiAnswer = await tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
       method: 'POST',
       body: JSON.stringify({
         message: trimmed,
-        projectId: data.project.id,
-        objectId: selectedObjectId === ALL_OBJECTS_ID ? null : selectedObjectId,
-        intent: localAnswer.intent,
+        context: buildAssistantPayloadContext(context),
+        history,
       }),
     })
+
+    if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
+      addAssistantMessage({ role: 'assistant', content: apiAnswer.answer })
+      setFallbackNote(null)
+    } else {
+      addLocalAnswer(trimmed)
+    }
+
+    setLoading(false)
   }
 
   const startVoiceInput = () => {
@@ -123,11 +187,30 @@ export const AiAssistant = () => {
     recognition.start()
   }
 
-  const speak = (text: string) => {
+  const toggleSpeak = (messageId: string, text: string) => {
     if (!canSpeak) return
+    if (speakingMessageId === messageId) {
+      stopSpeaking()
+      return
+    }
+
+    const voice = pickVoice()
+    if (!voice) {
+      setVoiceNote('Bu brauzerdə Azərbaycan/Türk səsi tapılmadı.')
+      return
+    }
+
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'az-AZ'
+    utterance.lang = voice.lang
+    utterance.voice = voice
+    utterance.rate = 0.95
+    utterance.pitch = 1
+    utterance.volume = 1
+    utterance.onend = () => setSpeakingMessageId(null)
+    utterance.onerror = () => setSpeakingMessageId(null)
+    setVoiceNote(null)
+    setSpeakingMessageId(messageId)
     window.speechSynthesis.speak(utterance)
   }
 
@@ -149,16 +232,18 @@ export const AiAssistant = () => {
         title={(
           <div className="assistant-title">
             <strong>AI Rəhbər Köməkçisi</strong>
-            <span>Layihə, smeta, briqada, risk və maliyyə üzrə suallar verin</span>
+            <span>Layihə, smeta, briqada, risk və maliyyə üzrə suallar verin.</span>
           </div>
         )}
         open={open}
         width={480}
-        onClose={() => setOpen(false)}
-        extra={<Button icon={<CloseOutlined />} onClick={() => setOpen(false)} />}
+        onClose={closeDrawer}
+        extra={<Button icon={<CloseOutlined />} onClick={closeDrawer} />}
       >
         <div className="assistant-panel">
           <div className="assistant-context-line">Kontekst: <strong>{contextLabel}</strong></div>
+          {fallbackNote ? <div className="assistant-note">{fallbackNote}</div> : null}
+          {voiceNote ? <div className="assistant-note warning">{voiceNote}</div> : null}
           <div className="assistant-prompts">
             {quickPrompts.map((prompt) => (
               <button type="button" key={prompt} onClick={() => void submitQuestion(prompt)}>
@@ -173,7 +258,9 @@ export const AiAssistant = () => {
                 <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
                 <p>{item.content}</p>
                 {item.role === 'assistant' && canSpeak ? (
-                  <Button size="small" icon={<SoundOutlined />} onClick={() => speak(item.content)}>Səsli oxu</Button>
+                  <Button size="small" icon={<SoundOutlined />} onClick={() => toggleSpeak(item.id, item.content)}>
+                    {speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
+                  </Button>
                 ) : null}
               </div>
             )) : <div className="empty-soft">Rəhbər brifinqi üçün sual yazın və ya hazır ssenarilərdən birini seçin.</div>}
@@ -195,7 +282,7 @@ export const AiAssistant = () => {
                   void submitQuestion(input)
                 }
               }}
-              placeholder="Rəhbər sualınızı yazın..."
+              placeholder="Sualınızı yazın və ya səsli deyin..."
             />
             <Button type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
           </Space.Compact>

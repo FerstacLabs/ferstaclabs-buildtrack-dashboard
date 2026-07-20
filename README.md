@@ -34,6 +34,32 @@ If multiple origins are needed, separate them with commas. The docker-compose fi
 
 Project progress endpoints are optional for now. If `/api/project-progress/*` does not exist or the API is unavailable, the frontend keeps using persisted local demo data from `localStorage`.
 
+## AI assistant backend setup
+
+The BuildTrack AI assistant must call OpenAI only through the VPS backend. Do not add `OPENAI_API_KEY` or any secret to Vercel or React/Vite environment variables.
+
+Create or update the `.env` file next to `docker-compose.yml` on the VPS:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_ASSISTANT_ENABLED=true
+```
+
+Then recreate the backend API container:
+
+```bash
+docker compose up -d --build buildtrack-api
+```
+
+The frontend continues to use only:
+
+```env
+VITE_API_BASE_URL=https://api.ferstaclabs.com
+```
+
+If the backend has no OpenAI key or the AI endpoint is unavailable, the assistant falls back to the local BuildTrack analysis engine and shows a quiet note: `Lokal analiz istifadə olundu.`
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

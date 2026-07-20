@@ -993,6 +993,23 @@ a {
   gap: 16px;
 }
 
+.settings-ai-status {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.settings-ai-status > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bt-border);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
 .advanced-filter-drawer .ant-drawer-header {
   border-bottom-color: var(--bt-border);
 }
@@ -1154,6 +1171,21 @@ a {
 
 .assistant-context-line strong {
   color: var(--bt-green);
+}
+
+.assistant-note {
+  padding: 8px 10px;
+  border: 1px solid #d7eadf;
+  border-radius: 8px;
+  background: #f3fbf6;
+  color: #23714a;
+  font-size: 12px;
+}
+
+.assistant-note.warning {
+  border-color: #ffe0a6;
+  background: #fff8e8;
+  color: #9a5a00;
 }
 
 .assistant-prompts {

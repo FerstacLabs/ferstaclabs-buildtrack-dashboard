@@ -1,7 +1,8 @@
-import { ClockCircleOutlined, ExportOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
-import { Button, Form, Input, InputNumber, Select, message } from 'antd'
-import { useEffect } from 'react'
+import { ClockCircleOutlined, ExportOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
+import { Button, Form, Input, InputNumber, Select, Tag, message } from 'antd'
+import { useCallback, useEffect, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
+import { tryApiRequest } from '../../shared/api/client'
 import { useBuildTrackStore } from '../../services/data/dataService'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 
@@ -16,6 +17,12 @@ interface AppSettings {
   exportFormatPreference: string
 }
 
+interface AiAssistantStatus {
+  enabled: boolean
+  configured: boolean
+  model: string
+}
+
 const settingsStorageKey = 'buildtrack-app-settings'
 
 const settingCards = [
@@ -24,6 +31,7 @@ const settingCards = [
   ['Risk qaydaları', 'Risk balı limitləri və nəzarət səviyyələri.', <SafetyCertificateOutlined />],
   ['Export formatları', 'Excel, CSV və 1C üçün əsas seçimlər.', <ExportOutlined />],
   ['İstifadəçi rolları', 'Layihə rəhbəri, mühasibatlıq, prorab və operator rolları.', <TeamOutlined />],
+  ['AI köməkçi', 'OpenAI bağlantısı backend serverdə idarə olunur.', <RobotOutlined />],
 ]
 
 const loadSettings = (fallbackName: string): AppSettings => {
@@ -51,16 +59,39 @@ export const SettingsPage = () => {
   const project = useProjectProgressStore((state) => state.project)
   const refreshSeedData = useProjectProgressStore((state) => state.refreshSeedData)
   const [form] = Form.useForm<AppSettings>()
+  const [riskForm] = Form.useForm<AppSettings>()
+  const [aiStatus, setAiStatus] = useState<AiAssistantStatus | null>(null)
+  const [aiChecking, setAiChecking] = useState(false)
   const companyName = data?.company[0]?.company_name ?? project.name
 
   useEffect(() => {
-    form.setFieldsValue(loadSettings(companyName))
-  }, [companyName, form])
+    const settings = loadSettings(companyName)
+    form.setFieldsValue(settings)
+    riskForm.setFieldsValue(settings)
+  }, [companyName, form, riskForm])
+
+  const checkAiStatus = useCallback(async () => {
+    setAiChecking(true)
+    const status = await tryApiRequest<AiAssistantStatus>('/api/ai/project-assistant/status')
+    setAiChecking(false)
+    if (status) {
+      setAiStatus(status)
+      void message.success('AI bağlantısı yoxlanıldı')
+    } else {
+      setAiStatus({ enabled: false, configured: false, model: 'Naməlum' })
+      void message.warning('Backend AI statusu əlçatan deyil')
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void checkAiStatus(), 0)
+    return () => window.clearTimeout(timer)
+  }, [checkAiStatus])
 
   if (!data) return null
 
   const saveSettings = (values: AppSettings) => {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify(values))
+    window.localStorage.setItem(settingsStorageKey, JSON.stringify({ ...loadSettings(companyName), ...values }))
     void message.success('Ayarlar yadda saxlandı')
   }
 
@@ -72,7 +103,7 @@ export const SettingsPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Ayarlar" subtitle="Şirkət, iş saatı, risk və export parametrləri" />
+      <PageTitle title="Ayarlar" subtitle="Şirkət, iş saatı, risk, export və AI köməkçi parametrləri" />
 
       <section className="settings-grid">
         {settingCards.map(([title, text, icon]) => (
@@ -106,7 +137,7 @@ export const SettingsPage = () => {
 
         <section className="panel-card">
           <h2>Risk və export qaydaları</h2>
-          <Form form={form} layout="vertical" onFinish={saveSettings}>
+          <Form form={riskForm} layout="vertical" onFinish={saveSettings}>
             <Form.Item label="Orta risk başlanğıcı" name="lowRiskThreshold">
               <InputNumber min={0} max={100} />
             </Form.Item>
@@ -124,6 +155,26 @@ export const SettingsPage = () => {
           <div className="settings-reset">
             <Button danger onClick={() => void refreshSampleData()}>Nümunə məlumatları yenilə</Button>
           </div>
+        </section>
+
+        <section className="panel-card">
+          <h2>AI köməkçi</h2>
+          <div className="settings-ai-status">
+            <div>
+              <span className="muted-text">Status</span>
+              <Tag color={aiStatus?.enabled && aiStatus.configured ? 'success' : 'warning'}>
+                {aiStatus?.enabled && aiStatus.configured ? 'Aktiv' : 'Deaktiv'}
+              </Tag>
+            </div>
+            <div>
+              <span className="muted-text">Model</span>
+              <strong>{aiStatus?.model ?? 'Yoxlanılır'}</strong>
+            </div>
+            <Button loading={aiChecking} onClick={() => void checkAiStatus()}>API bağlantısını yoxla</Button>
+          </div>
+          <p className="muted-text">
+            OpenAI API key backend serverdə saxlanmalıdır. API key VPS serverdə <strong>OPENAI_API_KEY</strong> env dəyişəni kimi əlavə edilməlidir.
+          </p>
         </section>
       </section>
     </div>

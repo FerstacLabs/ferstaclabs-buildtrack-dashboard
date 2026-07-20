@@ -30,6 +30,9 @@ services:
       POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
       BUILDTRACK_SECRET_KEY: ${BUILDTRACK_SECRET_KEY:-change-this-32-byte-production-secret}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ferstaclabs-buildtrack-dashboard.vercel.app}
+      OPENAI_ASSISTANT_ENABLED: ${OPENAI_ASSISTANT_ENABLED:-false}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DAHUA_ACTIVE_REGISTER_PORTS: 9500,7000
       DAHUA_SIMULATOR_ENABLED: "false"
       DAHUA_DEV_SIMULATOR_ACTIONS_ENABLED: "false"
