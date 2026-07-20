@@ -1,9 +1,11 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
-import { Button, Drawer, Input, Space, Tag, Tooltip, message } from 'antd'
-import { useState } from 'react'
+import { Button, Drawer, Input, Space, Tag, Tooltip } from 'antd'
+import { useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { tryApiRequest } from '../../shared/api/client'
-import { getAiContextSummary } from '../projectProgress/projectSelectors'
+import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { buildAiProjectContext } from './aiContextBuilder'
 import { getAssistantAnswer } from './aiAssistantEngine'
 
 interface AssistantApiResponse {
@@ -22,16 +24,36 @@ interface SpeechRecognitionLike {
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
 
 const quickPrompts = [
-  'Bu gün kim neçə saat işləyib?',
-  'Hansı işlər gecikir?',
+  'Bugünkü ümumi vəziyyət necədir?',
+  'Hazırda ən kritik risklər hansılardır?',
+  'Hansı layihələr plan üzrə getmir?',
+  'Büdcə vəziyyəti necədir?',
+  'İşçi heyətinin vəziyyəti necədir?',
+  'Bu gün ilk növbədə nəyə diqqət etməliyəm?',
+  'Təhlükəsizliklə bağlı hər hansı problem varmı?',
+  'Mənə vacib məlumatları özün təqdim et',
   'Monolit briqadasının vəziyyəti necədir?',
-  'Layihənin ümumi gedişatı neçə faizdir?',
-  'Hansı işçilər risklidir?',
-  'Bu ay maaş xərci nə qədərdir?',
-  'Qalan iş saatı nə qədərdir?',
-  'Smetanı xülasə et',
-  'Prorab son nə qeyd edib?',
-  'Beton nə qədər qalıb?',
+  'Hansı material azalır?',
+]
+
+const pageObjectFilterKeyByPath: Array<[string, string]> = [
+  ['/estimate', 'estimate'],
+  ['/project-progress/estimate', 'estimate'],
+  ['/crews', 'crews'],
+  ['/project-progress/crews', 'crews'],
+  ['/workers', 'workers'],
+  ['/timeline', 'timeline'],
+  ['/project-progress/timeline', 'timeline'],
+  ['/daily-reports', 'dailyReports'],
+  ['/materials', 'materials'],
+  ['/daily-attendance', 'attendance'],
+  ['/site-hours', 'siteHours'],
+  ['/risk-workers', 'riskWorkers'],
+  ['/delays-permissions', 'delays'],
+  ['/payroll', 'payroll'],
+  ['/supervisor-audit', 'audit'],
+  ['/export', 'export'],
+  ['/', 'dashboard'],
 ]
 
 const getSpeechRecognition = () => {
@@ -58,12 +80,17 @@ export const AiAssistant = () => {
   const data = useProjectProgressStore()
   const addAssistantMessage = useProjectProgressStore((state) => state.addAssistantMessage)
   const clearAssistantMessages = useProjectProgressStore((state) => state.clearAssistantMessages)
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const speechRecognition = getSpeechRecognition()
   const canSpeak = 'speechSynthesis' in window
   const messages = data.assistantMessages
+  const pageFilterKey = pageObjectFilterKeyByPath.find(([path]) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)))?.[1] ?? 'dashboard'
+  const selectedObjectId = data.selectedObjectIdByPage[pageFilterKey] ?? ALL_OBJECTS_ID
+  const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
+  const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 
   const submitQuestion = async (question: string) => {
     const trimmed = question.trim()
@@ -71,26 +98,28 @@ export const AiAssistant = () => {
     setInput('')
     setLoading(true)
     addAssistantMessage({ role: 'user', content: trimmed })
-    const apiAnswer = await tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
-      method: 'POST',
-      body: JSON.stringify({ message: trimmed, projectId: data.project.id }),
-    })
-    const localAnswer = getAssistantAnswer(trimmed, getAiContextSummary(data))
-    addAssistantMessage({ role: 'assistant', content: apiAnswer?.answer || localAnswer.answer })
+    const localAnswer = getAssistantAnswer(trimmed, buildAiProjectContext({ data, objectId: selectedObjectId }))
+    addAssistantMessage({ role: 'assistant', content: localAnswer.answer })
     setLoading(false)
+    void tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message: trimmed,
+        projectId: data.project.id,
+        objectId: selectedObjectId === ALL_OBJECTS_ID ? null : selectedObjectId,
+        intent: localAnswer.intent,
+      }),
+    })
   }
 
   const startVoiceInput = () => {
-    if (!speechRecognition) {
-      void message.info('Səs girişi bu brauzerdə dəstəklənmir')
-      return
-    }
+    if (!speechRecognition) return
     const recognition = new speechRecognition()
     recognition.lang = 'az-AZ'
     recognition.interimResults = false
     recognition.maxAlternatives = 1
     recognition.onresult = (event) => setInput(event.results[0][0].transcript)
-    recognition.onerror = () => void message.warning('Səs girişi oxunmadı')
+    recognition.onerror = () => undefined
     recognition.start()
   }
 
@@ -117,13 +146,19 @@ export const AiAssistant = () => {
         />
       </Tooltip>
       <Drawer
-        title="Layihə AI köməkçisi"
+        title={(
+          <div className="assistant-title">
+            <strong>AI Rəhbər Köməkçisi</strong>
+            <span>Layihə, smeta, briqada, risk və maliyyə üzrə suallar verin</span>
+          </div>
+        )}
         open={open}
-        width={430}
+        width={480}
         onClose={() => setOpen(false)}
         extra={<Button icon={<CloseOutlined />} onClick={() => setOpen(false)} />}
       >
         <div className="assistant-panel">
+          <div className="assistant-context-line">Kontekst: <strong>{contextLabel}</strong></div>
           <div className="assistant-prompts">
             {quickPrompts.map((prompt) => (
               <button type="button" key={prompt} onClick={() => void submitQuestion(prompt)}>
@@ -135,13 +170,13 @@ export const AiAssistant = () => {
           <div className="assistant-messages">
             {messages.length ? messages.map((item) => (
               <div className={`assistant-message ${item.role}`} key={item.id}>
-                <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Köməkçi' : 'Sual'}</Tag>
+                <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
                 <p>{item.content}</p>
                 {item.role === 'assistant' && canSpeak ? (
-                  <Button size="small" icon={<SoundOutlined />} onClick={() => speak(item.content)}>Səsləndir</Button>
+                  <Button size="small" icon={<SoundOutlined />} onClick={() => speak(item.content)}>Səsli oxu</Button>
                 ) : null}
               </div>
-            )) : <div className="empty-soft">Layihə haqqında sual yazın və ya hazır suallardan seçin.</div>}
+            )) : <div className="empty-soft">Rəhbər brifinqi üçün sual yazın və ya hazır ssenarilərdən birini seçin.</div>}
           </div>
 
           <Space.Compact className="assistant-input">
@@ -160,11 +195,10 @@ export const AiAssistant = () => {
                   void submitQuestion(input)
                 }
               }}
-              placeholder="Layihə haqqında sual verin..."
+              placeholder="Rəhbər sualınızı yazın..."
             />
             <Button type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
           </Space.Compact>
-          {!speechRecognition ? <span className="muted-text">Səs girişi bu brauzerdə dəstəklənmir.</span> : null}
           <Button icon={<DeleteOutlined />} onClick={clearAssistantMessages}>Söhbəti təmizlə</Button>
         </div>
       </Drawer>
