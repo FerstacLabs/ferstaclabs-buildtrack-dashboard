@@ -44,6 +44,10 @@ Create or update the `.env` file next to `docker-compose.yml` on the VPS:
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_ASSISTANT_ENABLED=true
+OPENAI_TTS_ENABLED=true
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_VOICE=alloy
+OPENAI_TTS_FORMAT=mp3
 ```
 
 Then recreate the backend API container:
@@ -59,6 +63,8 @@ VITE_API_BASE_URL=https://api.ferstaclabs.com
 ```
 
 If the backend has no OpenAI key or the AI endpoint is unavailable, the assistant falls back to the local BuildTrack analysis engine and shows a quiet note: `Lokal analiz istifadə olundu.`
+
+Read-aloud audio is generated through the backend endpoint `POST /api/ai/tts`, so the OpenAI key remains server-only. If backend TTS is unavailable, the browser speech engine is used as a fallback.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

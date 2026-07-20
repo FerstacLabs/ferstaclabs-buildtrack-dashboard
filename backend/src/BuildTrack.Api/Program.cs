@@ -63,7 +63,11 @@ app.MapGet("/api/ai/project-assistant/status", (AiOptions options) =>
     Results.Ok(new ProjectAssistantStatusResponse(
         options.Enabled,
         !string.IsNullOrWhiteSpace(options.ApiKey),
-        options.Model)));
+        options.Model,
+        options.TtsEnabled,
+        options.TtsEnabled && !string.IsNullOrWhiteSpace(options.ApiKey),
+        options.TtsModel,
+        options.TtsVoice)));
 
 app.MapPost("/api/ai/project-assistant/chat", async (
     ProjectAssistantChatRequest request,
@@ -72,6 +76,20 @@ app.MapPost("/api/ai/project-assistant/chat", async (
 {
     var response = await assistantService.GetAnswerAsync(request, ct);
     return Results.Ok(response);
+});
+
+app.MapPost("/api/ai/tts", async (
+    ProjectAssistantTtsRequest request,
+    IOpenAiProjectAssistantService assistantService,
+    CancellationToken ct) =>
+{
+    var response = await assistantService.CreateSpeechAsync(request, ct);
+    if (response.Success)
+    {
+        return Results.File(response.Audio, response.ContentType);
+    }
+
+    return Results.Json(new { error = response.Error }, statusCode: response.StatusCode);
 });
 
 app.MapGet("/api/sites", async (BuildTrackDbContext db, CancellationToken ct) =>
@@ -783,16 +801,27 @@ app.Run();
 
 static AiOptions BuildAiOptions(IConfiguration configuration)
 {
+    var apiKey = configuration["OPENAI_API_KEY"] ?? configuration["Ai:ApiKey"] ?? string.Empty;
     return new AiOptions
     {
         Enabled = IsEnabled(configuration["OPENAI_ASSISTANT_ENABLED"] ?? configuration["Ai:Enabled"], false),
-        ApiKey = configuration["OPENAI_API_KEY"] ?? configuration["Ai:ApiKey"] ?? string.Empty,
+        ApiKey = apiKey,
         Model = string.IsNullOrWhiteSpace(configuration["OPENAI_MODEL"] ?? configuration["Ai:Model"])
             ? "gpt-4o-mini"
             : (configuration["OPENAI_MODEL"] ?? configuration["Ai:Model"] ?? "gpt-4o-mini").Trim(),
         TimeoutSeconds = int.TryParse(configuration["OPENAI_TIMEOUT_SECONDS"] ?? configuration["Ai:TimeoutSeconds"], out var timeout)
             ? Math.Clamp(timeout, 5, 60)
             : 30,
+        TtsEnabled = IsEnabled(configuration["OPENAI_TTS_ENABLED"] ?? configuration["Ai:TtsEnabled"], !string.IsNullOrWhiteSpace(apiKey)),
+        TtsModel = string.IsNullOrWhiteSpace(configuration["OPENAI_TTS_MODEL"] ?? configuration["Ai:TtsModel"])
+            ? "gpt-4o-mini-tts"
+            : (configuration["OPENAI_TTS_MODEL"] ?? configuration["Ai:TtsModel"] ?? "gpt-4o-mini-tts").Trim(),
+        TtsVoice = string.IsNullOrWhiteSpace(configuration["OPENAI_TTS_VOICE"] ?? configuration["Ai:TtsVoice"])
+            ? "alloy"
+            : (configuration["OPENAI_TTS_VOICE"] ?? configuration["Ai:TtsVoice"] ?? "alloy").Trim(),
+        TtsFormat = string.IsNullOrWhiteSpace(configuration["OPENAI_TTS_FORMAT"] ?? configuration["Ai:TtsFormat"])
+            ? "mp3"
+            : (configuration["OPENAI_TTS_FORMAT"] ?? configuration["Ai:TtsFormat"] ?? "mp3").Trim(),
     };
 }
 

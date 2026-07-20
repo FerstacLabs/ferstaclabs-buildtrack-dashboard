@@ -173,7 +173,7 @@ export const SettingsPage = () => {
             <Button loading={aiChecking} onClick={() => void checkAiStatus()}>API bağlantısını yoxla</Button>
           </div>
           <p className="muted-text">
-            OpenAI API key backend serverdə saxlanmalıdır. API key VPS serverdə <strong>OPENAI_API_KEY</strong> env dəyişəni kimi əlavə edilməlidir.
+            OpenAI API açarı yalnız backend serverdə saxlanmalıdır. Frontend, Vercel env və localStorage daxilində heç bir AI açarı saxlanmır.
           </p>
         </section>
       </section>

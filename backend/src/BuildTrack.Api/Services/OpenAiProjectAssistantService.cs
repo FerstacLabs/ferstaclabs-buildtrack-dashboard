@@ -10,7 +10,15 @@ namespace BuildTrack.Api.Services;
 public interface IOpenAiProjectAssistantService
 {
     Task<ProjectAssistantChatResponse> GetAnswerAsync(ProjectAssistantChatRequest request, CancellationToken cancellationToken);
+    Task<ProjectAssistantSpeechResult> CreateSpeechAsync(ProjectAssistantTtsRequest request, CancellationToken cancellationToken);
 }
+
+public sealed record ProjectAssistantSpeechResult(
+    bool Success,
+    byte[] Audio,
+    string ContentType,
+    int StatusCode,
+    string? Error);
 
 public sealed class OpenAiProjectAssistantService(
     HttpClient httpClient,
@@ -84,6 +92,62 @@ public sealed class OpenAiProjectAssistantService(
         }
     }
 
+    public async Task<ProjectAssistantSpeechResult> CreateSpeechAsync(ProjectAssistantTtsRequest request, CancellationToken cancellationToken)
+    {
+        var text = request.Text?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new ProjectAssistantSpeechResult(false, [], "application/json", StatusCodes.Status400BadRequest, "Text is required");
+        }
+
+        if (text.Length > 4000)
+        {
+            return new ProjectAssistantSpeechResult(false, [], "application/json", StatusCodes.Status400BadRequest, "Text must be 4000 characters or less");
+        }
+
+        if (!options.TtsEnabled || string.IsNullOrWhiteSpace(options.ApiKey))
+        {
+            return new ProjectAssistantSpeechResult(false, [], "application/json", StatusCodes.Status503ServiceUnavailable, "OpenAI TTS is not configured");
+        }
+
+        try
+        {
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "audio/speech");
+            requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+
+            var voice = string.IsNullOrWhiteSpace(request.Voice) ? options.TtsVoice : request.Voice.Trim();
+            var payload = new JsonObject
+            {
+                ["model"] = options.TtsModel,
+                ["voice"] = voice,
+                ["input"] = text,
+                ["response_format"] = options.TtsFormat,
+                ["speed"] = 1.0,
+                ["instructions"] = "Speak naturally in Azerbaijani. Use a calm, professional assistant voice for construction project management. Keep pronunciation clear.",
+            };
+
+            requestMessage.Content = JsonContent.Create(payload);
+            using var response = await httpClient.SendAsync(requestMessage, cancellationToken);
+            var audio = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("OpenAI TTS request failed. Status={StatusCode}", (int)response.StatusCode);
+                return new ProjectAssistantSpeechResult(false, [], "application/json", StatusCodes.Status502BadGateway, "OpenAI TTS request failed");
+            }
+
+            return new ProjectAssistantSpeechResult(true, audio, ResolveTtsContentType(options.TtsFormat), StatusCodes.Status200OK, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "OpenAI TTS request failed");
+            return new ProjectAssistantSpeechResult(false, [], "application/json", StatusCodes.Status502BadGateway, "OpenAI TTS request failed");
+        }
+    }
+
     private static JsonArray BuildOpenAiMessages(string message, JsonElement? context, IReadOnlyList<AiChatMessageDto>? history)
     {
         var messages = new JsonArray
@@ -92,7 +156,7 @@ public sealed class OpenAiProjectAssistantService(
             {
                 ["role"] = "system",
                 ["content"] = """
-You are “BuildTrack AI Rəhbər Köməkçisi”.
+You are "BuildTrack AI Rəhbər Köməkçisi".
 Always answer in Azerbaijani.
 You are an executive assistant for construction project management.
 Use only provided BuildTrack context data.
@@ -184,4 +248,11 @@ BuildTrack cari konteksti:
     }
 
     private static bool ContainsCyrillic(string value) => value.Any(ch => ch is >= '\u0400' and <= '\u04FF');
+
+    private static string ResolveTtsContentType(string format) =>
+        format.Equals("mp3", StringComparison.OrdinalIgnoreCase) ? "audio/mpeg" :
+        format.Equals("wav", StringComparison.OrdinalIgnoreCase) ? "audio/wav" :
+        format.Equals("aac", StringComparison.OrdinalIgnoreCase) ? "audio/aac" :
+        format.Equals("opus", StringComparison.OrdinalIgnoreCase) ? "audio/opus" :
+        "application/octet-stream";
 }

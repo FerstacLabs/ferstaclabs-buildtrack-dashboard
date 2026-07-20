@@ -1,8 +1,8 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
 import { Button, Drawer, Input, Space, Tag, Tooltip } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { tryApiRequest } from '../../shared/api/client'
+import { API_BASE_URL, tryApiRequest } from '../../shared/api/client'
 import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { getAssistantAnswer } from './aiAssistantEngine'
@@ -80,6 +80,9 @@ const ConstructionBotIcon = () => (
 )
 
 const containsCyrillic = (value: string) => /[\u0400-\u04FF]/.test(value)
+const devLog = (message: string, details?: unknown) => {
+  if (import.meta.env.DEV) console.debug(`[BuildTrack AI] ${message}`, details ?? '')
+}
 
 const buildAssistantPayloadContext = (context: AiProjectContext) => ({
   selectedObjectId: context.selectedObject?.id ?? null,
@@ -101,12 +104,26 @@ const buildAssistantPayloadContext = (context: AiProjectContext) => ({
   topInsights: context.topInsights.slice(0, 10),
 })
 
-const pickVoice = () => {
-  const voices = window.speechSynthesis.getVoices()
-  return voices.find((voice) => voice.lang.toLowerCase().startsWith('az'))
-    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('tr'))
-    ?? null
+const getBrowserVoices = async () => {
+  if (!('speechSynthesis' in window)) return []
+  const current = window.speechSynthesis.getVoices()
+  if (current.length) return current
+
+  return await new Promise<SpeechSynthesisVoice[]>((resolve) => {
+    const finish = () => resolve(window.speechSynthesis.getVoices())
+    window.speechSynthesis.onvoiceschanged = finish
+    window.setTimeout(finish, 500)
+  })
 }
+
+const pickBrowserVoice = (voices: SpeechSynthesisVoice[]) =>
+  voices.find((voice) => voice.lang.toLowerCase() === 'az-az')
+    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('az'))
+    ?? voices.find((voice) => voice.lang.toLowerCase() === 'tr-tr')
+    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('tr'))
+    ?? voices.find((voice) => voice.lang.toLowerCase() === 'en-us')
+    ?? voices.find((voice) => !voice.lang.toLowerCase().startsWith('ru'))
+    ?? null
 
 export const AiAssistant = () => {
   const data = useProjectProgressStore()
@@ -119,8 +136,10 @@ export const AiAssistant = () => {
   const [fallbackNote, setFallbackNote] = useState<string | null>(null)
   const [voiceNote, setVoiceNote] = useState<string | null>(null)
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
+  const [preparingMessageId, setPreparingMessageId] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioUrlRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
-  const canSpeak = 'speechSynthesis' in window
   const messages = data.assistantMessages
   const pageFilterKey = pageObjectFilterKeyByPath.find(([path]) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)))?.[1] ?? 'dashboard'
   const selectedObjectId = data.selectedObjectIdByPage[pageFilterKey] ?? ALL_OBJECTS_ID
@@ -128,10 +147,21 @@ export const AiAssistant = () => {
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 
   const stopSpeaking = () => {
-    if (!canSpeak) return
-    window.speechSynthesis.cancel()
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ''
+      audioRef.current = null
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
     setSpeakingMessageId(null)
+    setPreparingMessageId(null)
   }
+
+  useEffect(() => stopSpeaking, [])
 
   const closeDrawer = () => {
     stopSpeaking()
@@ -148,6 +178,7 @@ export const AiAssistant = () => {
     const trimmed = question.trim()
     if (!trimmed) return
 
+    stopSpeaking()
     setInput('')
     setLoading(true)
     setFallbackNote(null)
@@ -166,6 +197,7 @@ export const AiAssistant = () => {
       }),
     })
 
+    stopSpeaking()
     if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
       addAssistantMessage({ role: 'assistant', content: apiAnswer.answer })
       setFallbackNote(null)
@@ -187,31 +219,79 @@ export const AiAssistant = () => {
     recognition.start()
   }
 
-  const toggleSpeak = (messageId: string, text: string) => {
-    if (!canSpeak) return
-    if (speakingMessageId === messageId) {
-      stopSpeaking()
+  const speakWithBrowserFallback = async (messageId: string, text: string) => {
+    if (!('speechSynthesis' in window)) {
+      setVoiceNote('Səsli oxuma bu brauzerdə dəstəklənmir.')
       return
     }
 
-    const voice = pickVoice()
-    if (!voice) {
-      setVoiceNote('Bu brauzerdə Azərbaycan/Türk səsi tapılmadı.')
-      return
-    }
-
+    devLog('TTS error fallback used')
     window.speechSynthesis.cancel()
+    const voices = await getBrowserVoices()
+    const voice = pickBrowserVoice(voices)
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = voice.lang
+    utterance.lang = voice?.lang ?? 'az-AZ'
     utterance.voice = voice
     utterance.rate = 0.95
     utterance.pitch = 1
     utterance.volume = 1
-    utterance.onend = () => setSpeakingMessageId(null)
+    utterance.onend = () => {
+      setSpeakingMessageId(null)
+      devLog('Browser speech playback ended')
+    }
     utterance.onerror = () => setSpeakingMessageId(null)
-    setVoiceNote(null)
     setSpeakingMessageId(messageId)
+    setPreparingMessageId(null)
     window.speechSynthesis.speak(utterance)
+  }
+
+  const toggleSpeak = async (messageId: string, text: string) => {
+    if (!text.trim()) return
+    if (speakingMessageId === messageId || preparingMessageId === messageId) {
+      stopSpeaking()
+      return
+    }
+
+    stopSpeaking()
+    setVoiceNote(null)
+    setPreparingMessageId(messageId)
+    devLog('TTS request started')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ai/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language: 'az-AZ', voice: 'alloy' }),
+      })
+
+      if (!response.ok) throw new Error(`TTS HTTP ${response.status}`)
+      const blob = await response.blob()
+      devLog('TTS audio received', { size: blob.size, type: blob.type })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audioRef.current = audio
+      audioUrlRef.current = url
+      audio.onplay = () => {
+        setPreparingMessageId(null)
+        setSpeakingMessageId(messageId)
+        devLog('TTS playback started')
+      }
+      audio.onended = () => {
+        devLog('TTS playback ended')
+        stopSpeaking()
+      }
+      audio.onerror = () => {
+        stopSpeaking()
+        setVoiceNote('Səsli oxuma alınmadı. Browser səsi ilə yoxlanılır.')
+        void speakWithBrowserFallback(messageId, text)
+      }
+      await audio.play()
+    } catch (error) {
+      devLog('TTS error fallback used', error)
+      stopSpeaking()
+      setVoiceNote('Səsli oxuma alınmadı. Browser səsi ilə yoxlanılır.')
+      await speakWithBrowserFallback(messageId, text)
+    }
   }
 
   return (
@@ -257,9 +337,15 @@ export const AiAssistant = () => {
               <div className={`assistant-message ${item.role}`} key={item.id}>
                 <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
                 <p>{item.content}</p>
-                {item.role === 'assistant' && canSpeak ? (
-                  <Button size="small" icon={<SoundOutlined />} onClick={() => toggleSpeak(item.id, item.content)}>
-                    {speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
+                {item.role === 'assistant' ? (
+                  <Button
+                    size="small"
+                    icon={<SoundOutlined />}
+                    disabled={!item.content.trim()}
+                    loading={preparingMessageId === item.id}
+                    onClick={() => void toggleSpeak(item.id, item.content)}
+                  >
+                    {preparingMessageId === item.id ? 'Səs hazırlanır...' : speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
                   </Button>
                 ) : null}
               </div>

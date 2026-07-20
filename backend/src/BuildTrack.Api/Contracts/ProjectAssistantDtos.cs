@@ -20,4 +20,13 @@ public sealed record ProjectAssistantChatResponse(
 public sealed record ProjectAssistantStatusResponse(
     bool Enabled,
     bool Configured,
-    string Model);
+    string Model,
+    bool TtsEnabled,
+    bool TtsConfigured,
+    string TtsModel,
+    string TtsVoice);
+
+public sealed record ProjectAssistantTtsRequest(
+    string Text,
+    string? Language,
+    string? Voice);
