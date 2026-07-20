@@ -82,7 +82,7 @@ const ConstructionBotIcon = () => (
 
 const containsCyrillic = (value: string) => /[\u0400-\u04FF]/.test(value)
 const devLog = (message: string, details?: unknown) => {
-  if (import.meta.env.DEV) console.debug(`[BuildTrack AI] ${message}`, details ?? '')
+  if (import.meta.env.DEV) console.log(`[AI TTS] ${message}`, details ?? '')
 }
 
 const buildAssistantPayloadContext = (context: AiProjectContext) => ({
@@ -105,27 +105,6 @@ const buildAssistantPayloadContext = (context: AiProjectContext) => ({
   topInsights: context.topInsights.slice(0, 10),
 })
 
-const getBrowserVoices = async () => {
-  if (!('speechSynthesis' in window)) return []
-  const current = window.speechSynthesis.getVoices()
-  if (current.length) return current
-
-  return await new Promise<SpeechSynthesisVoice[]>((resolve) => {
-    const finish = () => resolve(window.speechSynthesis.getVoices())
-    window.speechSynthesis.onvoiceschanged = finish
-    window.setTimeout(finish, 500)
-  })
-}
-
-const pickBrowserVoice = (voices: SpeechSynthesisVoice[]) =>
-  voices.find((voice) => voice.lang.toLowerCase() === 'az-az')
-    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('az'))
-    ?? voices.find((voice) => voice.lang.toLowerCase() === 'tr-tr')
-    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('tr'))
-    ?? voices.find((voice) => voice.lang.toLowerCase() === 'en-us')
-    ?? voices.find((voice) => !voice.lang.toLowerCase().startsWith('ru'))
-    ?? null
-
 export const AiAssistant = () => {
   const data = useProjectProgressStore()
   const addAssistantMessage = useProjectProgressStore((state) => state.addAssistantMessage)
@@ -134,7 +113,7 @@ export const AiAssistant = () => {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [voiceNoteByMessageId, setVoiceNoteByMessageId] = useState<Record<string, string>>({})
+  const [speechStatusByMessageId, setSpeechStatusByMessageId] = useState<Record<string, string>>({})
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
   const [preparingMessageId, setPreparingMessageId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -146,25 +125,26 @@ export const AiAssistant = () => {
   const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 
-  const stopSpeaking = () => {
+  const cleanupAudio = () => {
     if (audioRef.current) {
       audioRef.current.pause()
-      audioRef.current.src = ''
+      audioRef.current.currentTime = 0
       audioRef.current = null
     }
+
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current)
       audioUrlRef.current = null
     }
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel()
+
     setSpeakingMessageId(null)
     setPreparingMessageId(null)
   }
 
-  useEffect(() => stopSpeaking, [])
+  useEffect(() => cleanupAudio, [])
 
   const closeDrawer = () => {
-    stopSpeaking()
+    cleanupAudio()
     setOpen(false)
   }
 
@@ -177,10 +157,10 @@ export const AiAssistant = () => {
     const trimmed = question.trim()
     if (!trimmed) return
 
-    stopSpeaking()
+    cleanupAudio()
     setInput('')
     setLoading(true)
-    setVoiceNoteByMessageId({})
+    setSpeechStatusByMessageId({})
     addAssistantMessage({ role: 'user', content: trimmed })
 
     const history = messages
@@ -196,7 +176,7 @@ export const AiAssistant = () => {
       }),
     })
 
-    stopSpeaking()
+    cleanupAudio()
     if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
       addAssistantMessage({ role: 'assistant', content: apiAnswer.answer, source: 'openai' })
     } else {
@@ -217,41 +197,17 @@ export const AiAssistant = () => {
     recognition.start()
   }
 
-  const speakWithBrowserFallback = async (messageId: string, text: string) => {
-    if (!('speechSynthesis' in window)) {
-      setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'Səsli oxuma bu brauzerdə dəstəklənmir.' }))
-      return
-    }
-
-    devLog('TTS error fallback used')
-    window.speechSynthesis.cancel()
-    const voices = await getBrowserVoices()
-    const voice = pickBrowserVoice(voices)
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = voice?.lang ?? 'az-AZ'
-    utterance.voice = voice
-    utterance.rate = 0.95
-    utterance.pitch = 1
-    utterance.volume = 1
-    utterance.onend = () => {
-      setSpeakingMessageId(null)
-      devLog('Browser speech playback ended')
-    }
-    utterance.onerror = () => setSpeakingMessageId(null)
-    setSpeakingMessageId(messageId)
-    setPreparingMessageId(null)
-    window.speechSynthesis.speak(utterance)
-  }
-
   const toggleSpeak = async (messageId: string, text: string) => {
-    if (!text.trim()) return
+    const textToSpeak = text.trim().replace(/\s+/g, ' ').slice(0, 3900)
+    if (!textToSpeak) return
+
     if (speakingMessageId === messageId || preparingMessageId === messageId) {
-      stopSpeaking()
+      cleanupAudio()
       return
     }
 
-    stopSpeaking()
-    setVoiceNoteByMessageId((state) => {
+    cleanupAudio()
+    setSpeechStatusByMessageId((state) => {
       const next = { ...state }
       delete next[messageId]
       return next
@@ -259,31 +215,32 @@ export const AiAssistant = () => {
     setPreparingMessageId(messageId)
 
     try {
-      const blob = await fetchTtsAudio(text)
-      const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
+      const blob = await fetchTtsAudio(textToSpeak)
+      const audioUrl = URL.createObjectURL(blob)
+      const audio = new Audio(audioUrl)
+
       audioRef.current = audio
-      audioUrlRef.current = url
+      audioUrlRef.current = audioUrl
+
       audio.onplay = () => {
-        setPreparingMessageId(null)
         setSpeakingMessageId(messageId)
+        setPreparingMessageId(null)
         devLog('OpenAI TTS playback started')
       }
       audio.onended = () => {
         devLog('OpenAI TTS playback ended')
-        stopSpeaking()
+        cleanupAudio()
       }
       audio.onerror = () => {
-        stopSpeaking()
-        setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi alınmadı, browser səsi ilə yoxlanılır.' }))
-        void speakWithBrowserFallback(messageId, text)
+        cleanupAudio()
+        setSpeechStatusByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi oxunmadı. Yenidən cəhd edin.' }))
       }
+
       await audio.play()
     } catch (error) {
-      devLog('Browser fallback used', error)
-      stopSpeaking()
-      setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi alınmadı, browser səsi ilə yoxlanılır.' }))
-      await speakWithBrowserFallback(messageId, text)
+      devLog('OpenAI TTS playback failed', error)
+      cleanupAudio()
+      setSpeechStatusByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi oxunmadı. Yenidən cəhd edin.' }))
     }
   }
 
@@ -345,7 +302,7 @@ export const AiAssistant = () => {
                     >
                       {preparingMessageId === item.id ? 'Səs hazırlanır...' : speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
                     </Button>
-                    {voiceNoteByMessageId[item.id] ? <span>{voiceNoteByMessageId[item.id]}</span> : null}
+                    {speechStatusByMessageId[item.id] ? <span>{speechStatusByMessageId[item.id]}</span> : null}
                   </div>
                 ) : null}
               </div>
@@ -373,7 +330,7 @@ export const AiAssistant = () => {
             />
             <Button className="aiComposerSendButton" type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
           </div>
-          <Button icon={<DeleteOutlined />} onClick={() => { stopSpeaking(); clearAssistantMessages() }}>Söhbəti təmizlə</Button>
+          <Button icon={<DeleteOutlined />} onClick={() => { cleanupAudio(); clearAssistantMessages() }}>Söhbəti təmizlə</Button>
         </div>
       </Drawer>
     </>
