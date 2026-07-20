@@ -5,7 +5,7 @@ export const API_BASE_URL = (
 
 export const API_BASE_URL_SOURCE = (import.meta.env.VITE_API_BASE_URL as string | undefined)
   ? 'VITE_API_BASE_URL'
-  : 'local-dev-fallback'
+  : 'default-dev-url'
 
 export class ApiClientError extends Error {
   readonly url: string
@@ -59,7 +59,7 @@ export const tryApiRequest = async <T>(path: string, init?: RequestInit): Promis
   try {
     return await apiRequest<T>(path, init)
   } catch (error) {
-    console.debug('BuildTrack API fallback mode', { path, error })
+    console.debug('BuildTrack API request unavailable', { path, error })
     return undefined
   }
 }

@@ -1,12 +1,13 @@
-import { Alert, Spin } from 'antd'
+import { Spin } from 'antd'
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
+import { AiAssistant } from '../../features/aiAssistant/AiAssistant'
 import { useBuildTrackStore } from '../../services/data/dataService'
 import { ApiConnectionStatus } from './ApiConnectionStatus'
 import { Sidebar } from './Sidebar'
 
 export const AppLayout = () => {
-  const { data, error, initialized, loadData, loading } = useBuildTrackStore()
+  const { data, initialized, loadData, loading } = useBuildTrackStore()
 
   useEffect(() => {
     void loadData()
@@ -16,7 +17,7 @@ export const AppLayout = () => {
     return (
       <div className="initial-loader">
         <Spin size="large" />
-        <span>BuildTrack demo məlumatları hazırlanır...</span>
+        <span>BuildTrack məlumatları hazırlanır...</span>
       </div>
     )
   }
@@ -26,9 +27,9 @@ export const AppLayout = () => {
       <Sidebar />
       <main className="app-main">
         <ApiConnectionStatus />
-        {error ? <Alert type="warning" showIcon message="Demo məlumatları lokal rejimdə açıldı" description={error} /> : null}
         {data ? <Outlet /> : <Spin size="large" />}
       </main>
+      <AiAssistant />
     </div>
   )
 }

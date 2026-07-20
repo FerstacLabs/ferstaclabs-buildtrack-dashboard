@@ -3,8 +3,8 @@ import { Alert, Button, Upload, message } from 'antd'
 import { useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { parseExcelFile, type ExcelImportResult } from '../../services/data/excelImportService'
 import { useBuildTrackStore } from '../../services/data/dataService'
+import { parseExcelFile, type ExcelImportResult } from '../../services/data/excelImportService'
 import { ExcelImportPreview } from './ExcelImportPreview'
 
 export const ImportPage = () => {
@@ -46,8 +46,8 @@ export const ImportPage = () => {
         </section>
 
         <aside className="panel-card export-panel">
-          <h2>Demo data idarəetməsi</h2>
-          <p>Cari mənbə: <strong>{data?.source === 'imported' ? 'Excel import' : 'Sample data'}</strong></p>
+          <h2>Məlumat idarəetməsi</h2>
+          <p>Cari mənbə: <strong>{data?.source === 'imported' ? 'Excel import' : 'Nümunə məlumatları'}</strong></p>
           <ToolbarButton
             icon={<UploadOutlined />}
             tone="green"
@@ -56,15 +56,15 @@ export const ImportPage = () => {
                 void message.warning('Əvvəlcə düzgün Excel faylı seçin.')
                 return
               }
-              void saveImportedData(result.data).then(() => message.success('Import yadda saxlanıldı və demo hesabatlar yeniləndi'))
+              void saveImportedData(result.data).then(() => message.success('Import yadda saxlanıldı və hesabatlar yeniləndi'))
             }}
           >
             Importu yadda saxla
           </ToolbarButton>
-          <ToolbarButton icon={<ReloadOutlined />} onClick={() => void generateSampleData().then(() => message.success('Sample data yaradıldı'))}>
-            Generate Sample Data
+          <ToolbarButton icon={<ReloadOutlined />} onClick={() => void generateSampleData().then(() => message.success('Nümunə məlumatları yaradıldı'))}>
+            Nümunə məlumatları yarat
           </ToolbarButton>
-          <Button danger onClick={() => void resetDemoData().then(() => message.success('Demo data reset edildi'))}>Reset Demo Data</Button>
+          <Button danger onClick={() => void resetDemoData().then(() => message.success('Nümunə məlumatları yeniləndi'))}>Nümunə məlumatları yenilə</Button>
         </aside>
       </section>
 

@@ -5,7 +5,7 @@ export const formatNumber = (value: number, digits = 0) =>
   }).format(value)
 
 export const formatCurrency = (value: number) =>
-  `${formatNumber(value, value % 1 === 0 ? 0 : 2)} ₼`
+  `${formatNumber(value, value % 1 === 0 ? 0 : 2)} AZN`
 
 export const formatPercent = (value: number, digits = 1) => `${formatNumber(value, digits)}%`
 

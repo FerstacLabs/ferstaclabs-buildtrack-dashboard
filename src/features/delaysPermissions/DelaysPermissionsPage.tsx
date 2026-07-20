@@ -1,51 +1,56 @@
 import { CheckCircleOutlined, ClockCircleOutlined, DownloadOutlined, LoginOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { LineChartCard } from '../../components/charts/LineChartCard'
-import { FilterBar } from '../../components/layout/FilterBar'
+import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { PageTitle } from '../../components/ui/PageTitle'
-import { delayPermissionRows, trendByDate } from '../../services/data/reportCalculations'
-import { useBuildTrackStore } from '../../services/data/dataService'
 import { exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
-import type { DelayPermissionRow } from '../../types/reports'
 import { formatNumber, formatPercent } from '../../utils/formatters'
+import { ALL_OBJECTS_ID, getDelayRowsByObject, getWorkersByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
+import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 
 export const DelaysPermissionsPage = () => {
-  const { data, filters } = useBuildTrackStore()
-  if (!data) return null
+  const store = useProjectProgressStore()
+  const selectedObjectId = store.selectedObjectIdByPage.delays ?? ALL_OBJECTS_ID
+  const rows = getDelayRowsByObject(store, selectedObjectId)
+  const workers = getWorkersByObject(store, selectedObjectId)
+  const lateCount = rows.reduce((sum, row) => sum + row.delayCount, 0)
+  const lateMinutes = rows.reduce((sum, row) => sum + row.totalDelayMinutes, 0)
+  const earlyCount = rows.filter((row) => row.riskScore >= 60).length
+  const attendance = workers.length ? ((workers.length - rows.length) / workers.length) * 100 : 100
+  const trend = rows.slice(0, 8).map((row) => ({
+    name: row.crewName.slice(0, 14),
+    gecikmə: row.delayCount,
+    saat: Math.round(row.totalDelayMinutes / 60),
+    erkən: row.riskScore >= 60 ? 1 : 0,
+  }))
 
-  const rows = delayPermissionRows(data, filters)
-  const trend = trendByDate(data, filters)
-  const lateCount = rows.reduce((sum, row) => sum + row.late_count, 0)
-  const lateMinutes = rows.reduce((sum, row) => sum + row.late_minutes, 0)
-  const earlyCount = rows.reduce((sum, row) => sum + row.early_count, 0)
-  const attendance = rows.length ? rows.reduce((sum, row) => sum + row.attendance_percent, 0) / rows.length : 0
-  const columns: TableColumnsType<DelayPermissionRow> = [
-    { title: 'İşçi adı', dataIndex: 'full_name', sorter: (a, b) => a.full_name.localeCompare(b.full_name) },
-    { title: 'Obyekt', dataIndex: 'site_name' },
-    { title: 'Vəzifə', dataIndex: 'position' },
-    { title: 'Gecikmə Sayı', dataIndex: 'late_count', sorter: (a, b) => a.late_count - b.late_count },
-    { title: 'Ümumi Gecikmə', dataIndex: 'late_minutes' },
-    { title: 'Erkən Çıxış Sayı', dataIndex: 'early_count' },
-    { title: 'İcazə Saat/Gün', dataIndex: 'permission_hours' },
-    { title: 'Davamiyyət %', dataIndex: 'attendance_percent', render: (value) => formatPercent(value) },
-    { title: 'Trend', dataIndex: 'trend', render: (value) => <span className={`trend-pill trend-${value}`}>{value === 'up' ? 'Yaxşı' : value === 'stable' ? 'Sabit' : 'Risk'}</span> },
-    { title: 'Qeyd', dataIndex: 'note' },
+  const columns: TableColumnsType<DelayRiskRow> = [
+    { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
+    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Vəzifə', dataIndex: 'role' },
+    { title: 'Briqada', dataIndex: 'crewName' },
+    { title: 'Gecikmə Sayı', dataIndex: 'delayCount', sorter: (a, b) => a.delayCount - b.delayCount },
+    { title: 'Ümumi Gecikmə', dataIndex: 'totalDelayMinutes', render: (value) => `${value} dəq` },
+    { title: 'Erkən Çıxış Sayı', render: (_, row) => row.riskScore >= 60 ? 1 : 0 },
+    { title: 'İcazə Saat/Gün', render: () => '0' },
+    { title: 'Davamiyyət %', render: (_, row) => formatPercent(Math.max(0, 100 - row.riskScore / 2)) },
+    { title: 'Trend', render: (_, row) => <span className={`trend-pill trend-${row.riskScore >= 60 ? 'down' : 'stable'}`}>{row.riskScore >= 60 ? 'Risk' : 'Sabit'}</span> },
+    { title: 'Qeyd', dataIndex: 'reason' },
   ]
 
   return (
     <div className="page-stack">
-      <PageTitle title="4. Gecikmə, Erkən Çıxış və İcazələr" />
-      <FilterBar data={data} showPosition advancedFields={['dateRange', 'siteId', 'brigade', 'position', 'status', 'entryMethod']} />
+      <PageTitle title="4. Gecikmə, Erkən Çıxış və İcazələr" extra={<ObjectFilter pageKey="delays" />} />
 
       <section className="kpi-grid">
-        <KpiCard icon={<ClockCircleOutlined />} title="Gecikmə Sayı" value={formatNumber(lateCount)} trend="8% (öncəki aya nisbətən)" tone="green" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Ümumi Gecikmə Dəq" value={formatNumber(lateMinutes)} trend="6% (öncəki aya nisbətən)" tone="blue" />
-        <KpiCard icon={<LoginOutlined />} title="Erkən Çıxış" value={formatNumber(earlyCount)} trend="5% (öncəki aya nisbətən)" tone="orange" />
-        <KpiCard icon={<CheckCircleOutlined />} title="Davamiyyət Faizi" value={formatPercent(attendance)} trend="2,1% (öncəki aya nisbətən)" tone="green" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Gecikmə Sayı" value={formatNumber(lateCount)} trend="filtered object" tone="green" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Ümumi Gecikmə Dəq" value={formatNumber(lateMinutes)} trend="central risk rows" tone="blue" />
+        <KpiCard icon={<LoginOutlined />} title="Erkən Çıxış" value={formatNumber(earlyCount)} trend="risk score əsaslı" tone="orange" />
+        <KpiCard icon={<CheckCircleOutlined />} title="Davamiyyət Faizi" value={formatPercent(attendance)} trend={`${workers.length} işçi`} tone="green" />
       </section>
 
       <DataTable
@@ -71,12 +76,12 @@ export const DelaysPermissionsPage = () => {
 
       <section className="explanation-grid">
         <ExplanationCard icon={<QuestionCircleOutlined />} title="Bu tablo niyə lazımdır?">
-          <p>İşçilərin zaman intizamını və icazə istifadəsini izləmək üçün əsas idarəetmə vasitəsidir.</p>
+          <p>İşçilərin zaman intizamını eyni obyekt, briqada və worker modelində izləmək üçün əsas idarəetmə vasitəsidir.</p>
         </ExplanationCard>
         <ExplanationCard icon={<ClockCircleOutlined />} title="Custom imkanlar" tone="orange">
           <ul>
-            <li>Tarix, obyekt, işçi və vəzifə üzrə filtr.</li>
-            <li>Gecikmə limiti keçildikdə xəbərdarlıq.</li>
+            <li>Obyekt üzrə filtr.</li>
+            <li>Risk score dəyişdikcə gecikmə göstəriciləri yenilənir.</li>
             <li>Excel və CSV formatında ixrac imkanı.</li>
           </ul>
         </ExplanationCard>

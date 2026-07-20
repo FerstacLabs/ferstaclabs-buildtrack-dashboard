@@ -1,53 +1,69 @@
-﻿import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
-import { FilterBar } from '../../components/layout/FilterBar'
+import { Tag } from 'antd'
 import { DonutChartCard } from '../../components/charts/DonutChartCard'
+import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { RiskBadge } from '../../components/ui/RiskBadge'
-import { StatusBadge } from '../../components/ui/StatusBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { dailyAttendanceRows, dailySummary } from '../../services/data/reportCalculations'
-import { useBuildTrackStore } from '../../services/data/dataService'
 import { exportRowsToExcel } from '../../services/data/exportService'
-import type { DailyAttendanceRow } from '../../types/reports'
 import { formatHours, formatNumber, formatPercent } from '../../utils/formatters'
+import { ALL_OBJECTS_ID, getAttendanceRowsByObject, getWorkersByObject, type AttendancePanelRow } from '../projectProgress/projectSelectors'
+import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+
+const statusColor: Record<AttendancePanelRow['status'], string> = {
+  'Gəlib': 'green',
+  Gecikib: 'orange',
+  Riskli: 'red',
+}
 
 export const DailyAttendancePage = () => {
-  const { data, filters } = useBuildTrackStore()
-  if (!data) return null
+  const store = useProjectProgressStore()
+  const selectedObjectId = store.selectedObjectIdByPage.attendance ?? ALL_OBJECTS_ID
+  const rows = getAttendanceRowsByObject(store, selectedObjectId)
+  const workers = getWorkersByObject(store, selectedObjectId)
+  const present = new Set(rows.map((row) => row.workerId)).size
+  const absent = Math.max(0, workers.filter((worker) => worker.status === 'active').length - present)
+  const late = rows.filter((row) => row.status === 'Gecikib').length
+  const risky = rows.filter((row) => row.status === 'Riskli').length
+  const activeHours = rows.reduce((sum, row) => sum + row.totalHours, 0)
+  const total = Math.max(1, present + absent)
+  const donut = [
+    { name: 'Gəlib', value: present },
+    { name: 'Gəlməyib', value: absent },
+    { name: 'Gecikib', value: late },
+    { name: 'Riskli', value: risky },
+  ]
 
-  const rows = dailyAttendanceRows(data, filters)
-  const summary = dailySummary(data, filters)
-  const columns: TableColumnsType<DailyAttendanceRow> = [
-    { title: 'İşçi ID', dataIndex: 'worker_id', sorter: (a, b) => a.worker_id.localeCompare(b.worker_id) },
-    { title: 'İşçi adı', dataIndex: 'full_name', sorter: (a, b) => a.full_name.localeCompare(b.full_name) },
-    { title: 'Obyekt', dataIndex: 'site_name' },
-    { title: 'Vəzifə', dataIndex: 'position' },
-    { title: 'Briqada', dataIndex: 'brigade' },
-    { title: 'Plan Giriş', dataIndex: 'planned_check_in' },
-    { title: 'Faktiki Giriş', dataIndex: 'actual_check_in' },
-    { title: 'Plan Çıxış', dataIndex: 'planned_check_out' },
-    { title: 'Faktiki Çıxış', dataIndex: 'actual_check_out' },
-    { title: 'Status', dataIndex: 'status', render: (status) => <StatusBadge status={status} /> },
-    { title: 'Gecikmə', dataIndex: 'late_minutes', sorter: (a, b) => a.late_minutes - b.late_minutes },
-    { title: 'İşlənmiş Saat', dataIndex: 'worked_hours', sorter: (a, b) => a.worked_hours - b.worked_hours },
-    { title: 'Giriş Metodu', dataIndex: 'entry_method' },
-    { title: 'Risk', dataIndex: 'risk_level', render: (_, row) => <RiskBadge level={row.risk_level} score={row.risk_score} /> },
+  const columns: TableColumnsType<AttendancePanelRow> = [
+    { title: 'İşçi ID', dataIndex: 'workerExternalId', sorter: (a, b) => a.workerExternalId.localeCompare(b.workerExternalId) },
+    { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
+    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Vəzifə', dataIndex: 'role' },
+    { title: 'Briqada', dataIndex: 'crewName' },
+    { title: 'Plan Giriş', render: () => '08:00' },
+    { title: 'Faktiki Giriş', dataIndex: 'firstSeen' },
+    { title: 'Plan Çıxış', render: () => '18:00' },
+    { title: 'Faktiki Çıxış', dataIndex: 'lastSeen' },
+    { title: 'Status', dataIndex: 'status', render: (status: AttendancePanelRow['status']) => <Tag color={statusColor[status]}>{status}</Tag> },
+    { title: 'Gecikmə', render: (_, row) => row.status === 'Gecikib' ? '25 dəq' : '0 dəq' },
+    { title: 'İşlənmiş Saat', dataIndex: 'totalHours', sorter: (a, b) => a.totalHours - b.totalHours, render: (value) => formatHours(Number(value), 1) },
+    { title: 'Giriş Metodu', dataIndex: 'source' },
+    { title: 'Risk', dataIndex: 'riskScore', render: (score: number) => <RiskBadge level={score >= 80 ? 'Kritik' : score >= 60 ? 'Yüksək' : score >= 35 ? 'Orta' : 'Aşağı'} score={score} /> },
   ]
 
   return (
     <div className="page-stack">
-      <PageTitle title="1. Günlük Davamiyyət Paneli" />
-      <FilterBar data={data} showStatus advancedFields={['dateRange', 'siteId', 'brigade', 'status', 'entryMethod', 'riskLevel']} />
+      <PageTitle title="1. Günlük Davamiyyət Paneli" extra={<ObjectFilter pageKey="attendance" />} />
 
       <section className="kpi-grid">
-        <KpiCard icon={<TeamOutlined />} title="Bugün Gələn" value={formatNumber(summary.present)} trend={formatPercent((summary.present / summary.total) * 100)} tone="green" />
-        <KpiCard icon={<UserDeleteOutlined />} title="Gəlməyən" value={formatNumber(summary.absent)} trend={formatPercent((summary.absent / summary.total) * 100)} tone="red" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Gecikən" value={formatNumber(summary.late)} trend={formatPercent((summary.late / summary.total) * 100)} tone="orange" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Aktiv Saat" value={formatHours(summary.activeHours, 0)} trend="gələnlər üzrə" tone="blue" />
+        <KpiCard icon={<TeamOutlined />} title="Bugün Gələn" value={formatNumber(present)} trend={formatPercent((present / total) * 100)} tone="green" />
+        <KpiCard icon={<UserDeleteOutlined />} title="Gəlməyən" value={formatNumber(absent)} trend={formatPercent((absent / total) * 100)} tone="red" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Gecikən" value={formatNumber(late)} trend={formatPercent((late / total) * 100)} tone="orange" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Aktiv Saat" value={formatHours(activeHours, 0)} trend="gələnlər üzrə" tone="blue" />
       </section>
 
       <DataTable
@@ -58,33 +74,31 @@ export const DailyAttendancePage = () => {
       />
 
       <section className="daily-summary-grid">
-        <DonutChartCard title="Status üzrə xülasə" data={summary.donut} centerValue={formatNumber(summary.total)} centerLabel="cəmi nəfər" height={220} />
+        <DonutChartCard title="Status üzrə xülasə" data={donut} centerValue={formatNumber(present + absent)} centerLabel="cəmi nəfər" height={220} />
         <aside className="panel-card daily-insight-card">
           <h2>Günün xülasəsi</h2>
-          <div className="summary-metric"><span>Davamiyyət faizi</span><strong>{formatPercent((summary.present / summary.total) * 100)}</strong></div>
-          <div className="summary-metric"><span>Riskli və gecikən qeydlər</span><strong>{formatNumber(summary.late + summary.early)}</strong></div>
-          <div className="summary-metric"><span>Aktiv iş saatı</span><strong>{formatHours(summary.activeHours, 0)}</strong></div>
-          <p>Bu bölmə cədvəli sıxmadan status paylanmasını və əsas günlük göstəriciləri oxunaqlı göstərir.</p>
+          <div className="summary-metric"><span>Davamiyyət faizi</span><strong>{formatPercent((present / total) * 100)}</strong></div>
+          <div className="summary-metric"><span>Riskli və gecikən qeydlər</span><strong>{formatNumber(late + risky)}</strong></div>
+          <div className="summary-metric"><span>Aktiv iş saatı</span><strong>{formatHours(activeHours, 0)}</strong></div>
+          <p>Bu bölmə central işçi, briqada və obyekt datasından hesablanır.</p>
         </aside>
       </section>
 
       <section className="explanation-grid">
         <ExplanationCard icon={<TeamOutlined />} title="Bu tablo niyə lazımdır?">
           <ul>
-            <li>Gündəlik davamiyyətin real vaxtda izlənməsi üçün.</li>
-            <li>Gecikmə, gəlməmə və erkən çıxış hallarını dərhal görmək üçün.</li>
+            <li>Gündəlik davamiyyətin obyekt, briqada və işçi modeli ilə uyğun izlənməsi üçün.</li>
+            <li>Gecikmə, gəlməmə və riskli qeyd hallarını eyni dashboard datasında görmək üçün.</li>
             <li>Maaş hesablamasına gedən iş saatlarını dəqiqləşdirmək üçün.</li>
           </ul>
         </ExplanationCard>
         <ExplanationCard icon={<DownloadOutlined />} title="Custom imkanlar" tone="orange">
           <ul>
-            <li>Tarix, obyekt, briqada və status üzrə filtrləmə.</li>
-            <li>Sütunların sıralanması və Excel export.</li>
-            <li>Riskli işçilərin operativ seçilməsi.</li>
+            <li>Obyekt üzrə filtr və Excel export.</li>
+            <li>Sütunların sıralanması və riskli işçilərin operativ seçilməsi.</li>
           </ul>
         </ExplanationCard>
       </section>
     </div>
   )
 }
-

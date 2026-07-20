@@ -119,7 +119,7 @@ export const SecurityEventsPage = () => {
       setRows(securityRows)
     } catch (err) {
       setRows([])
-      setError(err instanceof Error ? `${err.message}. API: ${buildTrackBackendApi.baseUrl}` : 'Tanınmayan üz hadisələri yüklənmədi')
+      setError(err instanceof Error ? err.message : 'Tanınmayan üz hadisələri yüklənmədi')
     } finally {
       setLoading(false)
     }
@@ -219,7 +219,7 @@ export const SecurityEventsPage = () => {
         <KpiCard icon={<EyeInvisibleOutlined />} title="Tanınmayan üzlər" value={rows.length.toString()} trend={date} tone="orange" />
         <KpiCard icon={<WarningOutlined />} title="Açıq hadisə" value={openCount.toString()} trend="baxış gözləyir" tone="red" />
         <KpiCard icon={<SafetyCertificateOutlined />} title="Baxılıb" value={reviewedCount.toString()} trend="security review" tone="green" />
-        <KpiCard icon={<SafetyCertificateOutlined />} title="Yox sayılıb" value={ignoredCount.toString()} trend="demo/local filter" tone="purple" />
+        <KpiCard icon={<SafetyCertificateOutlined />} title="Yox sayılıb" value={ignoredCount.toString()} trend="cari filtr" tone="purple" />
       </section>
 
       <section className="table-card">
