@@ -113,11 +113,13 @@ export const AiAssistant = () => {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [speechStatusByMessageId, setSpeechStatusByMessageId] = useState<Record<string, string>>({})
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
-  const [preparingMessageId, setPreparingMessageId] = useState<string | null>(null)
+  const [speechStatus, setSpeechStatus] = useState<string | null>(null)
+  const [isPreparingSpeech, setIsPreparingSpeech] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [activeSpeechMessageId, setActiveSpeechMessageId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
+  const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
   const messages = data.assistantMessages
   const pageFilterKey = pageObjectFilterKeyByPath.find(([path]) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)))?.[1] ?? 'dashboard'
@@ -125,10 +127,11 @@ export const AiAssistant = () => {
   const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 
-  const cleanupAudio = () => {
+  const cleanupAudioUrl = () => {
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
+      audioRef.current.src = ''
       audioRef.current = null
     }
 
@@ -137,14 +140,26 @@ export const AiAssistant = () => {
       audioUrlRef.current = null
     }
 
-    setSpeakingMessageId(null)
-    setPreparingMessageId(null)
+    preparedSpeechTextRef.current = null
+    setIsSpeaking(false)
+    setIsPreparingSpeech(false)
+    setActiveSpeechMessageId(null)
   }
 
-  useEffect(() => cleanupAudio, [])
+  const stopSpeech = () => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+
+    setIsSpeaking(false)
+    setIsPreparingSpeech(false)
+  }
+
+  useEffect(() => cleanupAudioUrl, [])
 
   const closeDrawer = () => {
-    cleanupAudio()
+    cleanupAudioUrl()
     setOpen(false)
   }
 
@@ -157,10 +172,10 @@ export const AiAssistant = () => {
     const trimmed = question.trim()
     if (!trimmed) return
 
-    cleanupAudio()
+    cleanupAudioUrl()
     setInput('')
     setLoading(true)
-    setSpeechStatusByMessageId({})
+    setSpeechStatus(null)
     addAssistantMessage({ role: 'user', content: trimmed })
 
     const history = messages
@@ -176,7 +191,7 @@ export const AiAssistant = () => {
       }),
     })
 
-    cleanupAudio()
+    cleanupAudioUrl()
     if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
       addAssistantMessage({ role: 'assistant', content: apiAnswer.answer, source: 'openai' })
     } else {
@@ -197,50 +212,86 @@ export const AiAssistant = () => {
     recognition.start()
   }
 
+  const prepareOpenAiSpeech = async (messageId: string, textToSpeak: string): Promise<HTMLAudioElement> => {
+    if (audioRef.current && audioUrlRef.current && preparedSpeechTextRef.current === textToSpeak) {
+      setActiveSpeechMessageId(messageId)
+      return audioRef.current
+    }
+
+    cleanupAudioUrl()
+    setActiveSpeechMessageId(messageId)
+    setIsPreparingSpeech(true)
+    setSpeechStatus('Səs hazırlanır...')
+
+    const blob = await fetchTtsAudio(textToSpeak)
+    const audioUrl = URL.createObjectURL(blob)
+    const audio = new Audio()
+    audio.preload = 'auto'
+    audio.src = audioUrl
+
+    audio.onplay = () => {
+      setIsSpeaking(true)
+      setIsPreparingSpeech(false)
+      setSpeechStatus(null)
+      devLog('play success')
+    }
+
+    audio.onended = () => {
+      setIsSpeaking(false)
+      setIsPreparingSpeech(false)
+      setSpeechStatus(null)
+      if (audioRef.current) audioRef.current.currentTime = 0
+      devLog('OpenAI TTS playback ended')
+    }
+
+    audio.onerror = (event) => {
+      console.error('[AI TTS] audio element error', event, audio.error)
+      cleanupAudioUrl()
+      setActiveSpeechMessageId(messageId)
+      setSpeechStatus('OpenAI səsi oxunmadı. Yenidən cəhd edin.')
+    }
+
+    audioRef.current = audio
+    audioUrlRef.current = audioUrl
+    preparedSpeechTextRef.current = textToSpeak
+    setIsPreparingSpeech(false)
+    setSpeechStatus(null)
+
+    return audio
+  }
+
   const toggleSpeak = async (messageId: string, text: string) => {
-    const textToSpeak = text.trim().replace(/\s+/g, ' ').slice(0, 3900)
+    const textToSpeak = text.replace(/\s+/g, ' ').trim().slice(0, 3900)
     if (!textToSpeak) return
 
-    if (speakingMessageId === messageId || preparingMessageId === messageId) {
-      cleanupAudio()
+    if (isSpeaking && activeSpeechMessageId === messageId) {
+      stopSpeech()
       return
     }
 
-    cleanupAudio()
-    setSpeechStatusByMessageId((state) => {
-      const next = { ...state }
-      delete next[messageId]
-      return next
-    })
-    setPreparingMessageId(messageId)
+    if (isPreparingSpeech && activeSpeechMessageId === messageId) {
+      stopSpeech()
+      return
+    }
 
     try {
-      const blob = await fetchTtsAudio(textToSpeak)
-      const audioUrl = URL.createObjectURL(blob)
-      const audio = new Audio(audioUrl)
+      const audio = await prepareOpenAiSpeech(messageId, textToSpeak)
 
-      audioRef.current = audio
-      audioUrlRef.current = audioUrl
-
-      audio.onplay = () => {
-        setSpeakingMessageId(messageId)
-        setPreparingMessageId(null)
-        devLog('OpenAI TTS playback started')
+      try {
+        audio.currentTime = 0
+        await audio.play()
+      } catch (playError) {
+        console.error('[AI TTS] audio.play failed', playError)
+        setIsSpeaking(false)
+        setIsPreparingSpeech(false)
+        setActiveSpeechMessageId(messageId)
+        setSpeechStatus('Səs hazırdır — başlatmaq üçün yenidən basın')
       }
-      audio.onended = () => {
-        devLog('OpenAI TTS playback ended')
-        cleanupAudio()
-      }
-      audio.onerror = () => {
-        cleanupAudio()
-        setSpeechStatusByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi oxunmadı. Yenidən cəhd edin.' }))
-      }
-
-      await audio.play()
     } catch (error) {
-      devLog('OpenAI TTS playback failed', error)
-      cleanupAudio()
-      setSpeechStatusByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi oxunmadı. Yenidən cəhd edin.' }))
+      console.error('[AI TTS] prepare failed', error)
+      cleanupAudioUrl()
+      setActiveSpeechMessageId(messageId)
+      setSpeechStatus('OpenAI səsi oxunmadı. Yenidən cəhd edin.')
     }
   }
 
@@ -297,12 +348,18 @@ export const AiAssistant = () => {
                       size="small"
                       icon={<SoundOutlined />}
                       disabled={!item.content.trim()}
-                      loading={preparingMessageId === item.id}
+                      loading={isPreparingSpeech && activeSpeechMessageId === item.id}
                       onClick={() => void toggleSpeak(item.id, item.content)}
                     >
-                      {preparingMessageId === item.id ? 'Səs hazırlanır...' : speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
+                      {activeSpeechMessageId === item.id && isPreparingSpeech
+                        ? 'Səs hazırlanır...'
+                        : activeSpeechMessageId === item.id && isSpeaking
+                          ? 'Dayandır'
+                          : activeSpeechMessageId === item.id && speechStatus === 'Səs hazırdır — başlatmaq üçün yenidən basın'
+                            ? 'Səsi başlat'
+                            : 'Səsli oxu'}
                     </Button>
-                    {speechStatusByMessageId[item.id] ? <span>{speechStatusByMessageId[item.id]}</span> : null}
+                    {activeSpeechMessageId === item.id && speechStatus ? <span>{speechStatus}</span> : null}
                   </div>
                 ) : null}
               </div>
@@ -330,7 +387,7 @@ export const AiAssistant = () => {
             />
             <Button className="aiComposerSendButton" type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
           </div>
-          <Button icon={<DeleteOutlined />} onClick={() => { cleanupAudio(); clearAssistantMessages() }}>Söhbəti təmizlə</Button>
+          <Button icon={<DeleteOutlined />} onClick={() => { cleanupAudioUrl(); clearAssistantMessages() }}>Söhbəti təmizlə</Button>
         </div>
       </Drawer>
     </>
