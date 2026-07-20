@@ -213,7 +213,7 @@ export const CustomReportsPage = () => {
       filter_count: appliedFilters.length,
       column_count: selectedColumns.length,
       export_format: exportFormat,
-      owner: 'Demo istifadəçi',
+      owner: 'Sistem istifadəçisi',
       status: 'Aktiv',
       last_used: dayjs(filters.dateRange[1]).format('DD.MM.YYYY'),
       selected_columns: selectedColumns,
@@ -231,10 +231,10 @@ export const CustomReportsPage = () => {
       <FilterBar data={data} showReportType advancedFields={['dateRange', 'siteId', 'brigade', 'status', 'reportType']} />
 
       <section className="kpi-grid">
-        <KpiCard icon={<FileTextOutlined />} title="Yaradılmış Hesabatlar" value={formatNumber(rows.length)} trend="demo insight: cari filtr" tone="green" />
-        <KpiCard icon={<SettingOutlined />} title="Aktiv Şablonlar" value={formatNumber(active)} trend="demo insight: saxlanmış + hazır" tone="purple" />
-        <KpiCard icon={<DownloadOutlined />} title="Son Exportlar" value={formatNumber(recentExports)} trend="demo insight: son 6 ay" tone="blue" />
-        <KpiCard icon={<FileSearchOutlined />} title="1C Uyumlu Hesabatlar" value={formatNumber(oneC)} trend="demo insight: cari filtr" tone="green" />
+        <KpiCard icon={<FileTextOutlined />} title="Yaradılmış Hesabatlar" value={formatNumber(rows.length)} trend="cari filtr" tone="green" />
+        <KpiCard icon={<SettingOutlined />} title="Aktiv Şablonlar" value={formatNumber(active)} trend="saxlanmış + hazır" tone="purple" />
+        <KpiCard icon={<DownloadOutlined />} title="Son Exportlar" value={formatNumber(recentExports)} trend="son 6 ay" tone="blue" />
+        <KpiCard icon={<FileSearchOutlined />} title="1C Uyumlu Hesabatlar" value={formatNumber(oneC)} trend="cari filtr" tone="green" />
       </section>
 
       <section className="content-grid wide-side">
@@ -325,7 +325,7 @@ export const CustomReportsPage = () => {
               <div><span>Kateqoriya</span><strong>{previewReport.category}</strong></div>
               <div><span>Data mənbəyi</span><strong>{sourceLabel(previewReport.data_source ?? previewReport.report_type)}</strong></div>
               <div><span>Export formatı</span><strong>{previewReport.export_format}</strong></div>
-              <div><span>Qruplaşdırma</span><strong>{previewReport.grouping ?? 'Demo qruplaşdırma'}</strong></div>
+              <div><span>Qruplaşdırma</span><strong>{previewReport.grouping ?? 'Cari qruplaşdırma'}</strong></div>
               <div><span>Sütun sayı</span><strong>{previewReport.column_count}</strong></div>
             </section>
             <section className="preview-tag-section">

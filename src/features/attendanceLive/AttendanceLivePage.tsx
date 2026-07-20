@@ -69,7 +69,7 @@ export const AttendanceLivePage = () => {
       const initialSiteId = resolveInitialSiteId(siteRows, siteId)
       if (initialSiteId && initialSiteId !== siteId) setSiteId(initialSiteId)
     } catch (err) {
-      setError(err instanceof Error ? `${err.message}. API: ${buildTrackBackendApi.baseUrl}` : 'Backend ilə əlaqə alınmadı')
+      setError(err instanceof Error ? err.message : 'Backend ilə əlaqə alınmadı')
     }
   }
 
@@ -93,7 +93,7 @@ export const AttendanceLivePage = () => {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Canlı davamiyyət sessiyaları yüklənmədi'
-      setError(`${message}. API: ${buildTrackBackendApi.baseUrl}`)
+      setError(message)
       setLiveStatus(undefined)
       setSummary(undefined)
       setSecurityEventsCount(0)

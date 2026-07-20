@@ -1053,6 +1053,139 @@ a {
   grid-template-columns: minmax(240px, 420px) 140px;
   justify-content: start;
 }
+
+.dashboard-warning-list,
+.daily-report-feed,
+.assistant-panel,
+.assistant-messages,
+.assistant-prompts {
+  display: grid;
+  gap: 12px;
+}
+
+.empty-soft {
+  display: grid;
+  min-height: 82px;
+  place-items: center;
+  border: 1px dashed var(--bt-border);
+  border-radius: 10px;
+  color: var(--bt-muted);
+  background: #f8fbfa;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.daily-report-feed {
+  align-content: start;
+}
+
+.report-feed-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--bt-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fbfa;
+}
+
+.report-feed-item strong {
+  color: var(--bt-navy);
+  font-size: 13px;
+}
+
+.report-feed-item span {
+  color: var(--bt-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ai-assistant-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 50;
+  width: 54px;
+  height: 54px;
+  border: 0;
+  background: linear-gradient(135deg, var(--bt-green), var(--bt-blue));
+  box-shadow: 0 14px 34px rgba(0, 72, 63, 0.28);
+}
+
+.ai-assistant-button .ant-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-assistant-button svg {
+  filter: drop-shadow(0 2px 4px rgba(0, 36, 32, 0.22));
+}
+
+.assistant-panel {
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+
+.assistant-prompts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.assistant-prompts button {
+  min-height: 44px;
+  border: 1px solid var(--bt-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--bt-navy);
+  background: #f8fbfa;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-prompts button:hover {
+  border-color: var(--bt-green);
+  color: var(--bt-green);
+}
+
+.assistant-messages {
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.assistant-message {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--bt-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.assistant-message.user {
+  background: #f7fbff;
+}
+
+.assistant-message.assistant {
+  background: #f8fbfa;
+}
+
+.assistant-message p {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--bt-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.assistant-input {
+  width: 100%;
+}
+
+.assistant-input .ant-input {
+  min-height: 40px;
+}
 @media (max-width: 1200px) {
   .kpi-grid,
   .kpi-grid.five {

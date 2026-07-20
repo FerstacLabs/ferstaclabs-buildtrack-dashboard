@@ -2,56 +2,89 @@ import { BarChartOutlined, ClockCircleOutlined, DollarCircleOutlined, DownloadOu
 import { Progress } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { BarChartCard } from '../../components/charts/BarChartCard'
-import { FilterBar } from '../../components/layout/FilterBar'
+import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { PageTitle } from '../../components/ui/PageTitle'
-import { siteHoursRows } from '../../services/data/reportCalculations'
-import { useBuildTrackStore } from '../../services/data/dataService'
 import { exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
-import type { SiteHoursRow } from '../../types/reports'
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '../../utils/formatters'
+import { ALL_OBJECTS_ID, getObjects, getPayrollRowsByObject, getStagesByObject, getWorkersByObject } from '../projectProgress/projectSelectors'
+import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+
+interface SiteHoursPanelRow {
+  id: string
+  objectName: string
+  plannedWorkers: number
+  actualWorkers: number
+  absentWorkers: number
+  normalHours: number
+  overtimeHours: number
+  riskyHours: number
+  autoGeofence: number
+  laborCost: number
+  executionPercent: number
+}
 
 export const SiteHoursPage = () => {
-  const { data, filters } = useBuildTrackStore()
-  if (!data) return null
-
-  const rows = siteHoursRows(data, filters)
+  const store = useProjectProgressStore()
+  const selectedObjectId = store.selectedObjectIdByPage.siteHours ?? ALL_OBJECTS_ID
+  const objects = selectedObjectId === ALL_OBJECTS_ID ? getObjects(store) : getObjects(store).filter((object) => object.id === selectedObjectId)
+  const rows: SiteHoursPanelRow[] = objects.map((object) => {
+    const workers = getWorkersByObject(store, object.id)
+    const payrollRows = getPayrollRowsByObject(store, object.id)
+    const stages = getStagesByObject(store, object.id)
+    const plannedHours = stages.reduce((sum, stage) => sum + stage.plannedHours, 0)
+    const actualHours = payrollRows.reduce((sum, row) => sum + row.approvedHours, 0)
+    const riskyHours = payrollRows.reduce((sum, row) => sum + row.riskHours, 0)
+    return {
+      id: object.id,
+      objectName: object.name,
+      plannedWorkers: workers.length,
+      actualWorkers: workers.filter((worker) => worker.status === 'active').length,
+      absentWorkers: workers.filter((worker) => worker.status === 'inactive').length,
+      normalHours: payrollRows.reduce((sum, row) => sum + row.normalHours, 0),
+      overtimeHours: payrollRows.reduce((sum, row) => sum + row.overtimeHours, 0),
+      riskyHours,
+      autoGeofence: Math.max(70, Math.min(99, 95 - riskyHours / Math.max(1, actualHours) * 20)),
+      laborCost: payrollRows.reduce((sum, row) => sum + row.finalAmount, 0),
+      executionPercent: Math.round(Math.min(100, (actualHours / Math.max(1, plannedHours)) * 100)),
+    }
+  })
   const totals = rows.reduce(
     (acc, row) => ({
-      planned: acc.planned + row.planned_workers,
-      actual: acc.actual + row.actual_workers,
-      hours: acc.hours + row.normal_hours + row.overtime_hours,
-      cost: acc.cost + row.labor_cost,
+      planned: acc.planned + row.plannedWorkers,
+      actual: acc.actual + row.actualWorkers,
+      hours: acc.hours + row.normalHours + row.overtimeHours,
+      cost: acc.cost + row.laborCost,
     }),
     { planned: 0, actual: 0, hours: 0, cost: 0 },
   )
-  const chartData = rows.map((row) => ({ name: row.site_name, plan: row.normal_hours + row.overtime_hours + row.risky_hours, faktiki: row.normal_hours + row.overtime_hours }))
-  const columns: TableColumnsType<SiteHoursRow> = [
-    { title: 'Obyekt', dataIndex: 'site_name', sorter: (a, b) => a.site_name.localeCompare(b.site_name) },
-    { title: 'Plan İşçi', dataIndex: 'planned_workers', sorter: (a, b) => a.planned_workers - b.planned_workers },
-    { title: 'Faktiki İşçi', dataIndex: 'actual_workers', sorter: (a, b) => a.actual_workers - b.actual_workers },
-    { title: 'Gəlməyən', dataIndex: 'absent_workers' },
-    { title: 'Normal Saat', dataIndex: 'normal_hours' },
-    { title: 'Overtime', dataIndex: 'overtime_hours' },
-    { title: 'Riskli Saat', dataIndex: 'risky_hours' },
-    { title: 'Auto Geofence', dataIndex: 'auto_geofence', render: (value) => formatPercent(value, 0) },
-    { title: 'Əmək Xərci', dataIndex: 'labor_cost', render: (value) => formatCurrency(value) },
-    { title: 'İcra Faizi', dataIndex: 'execution_percent', render: (value) => <Progress percent={value} size="small" strokeColor="#078b55" /> },
+  const chartData = rows.map((row) => ({ name: row.objectName, plan: row.normalHours + row.overtimeHours + row.riskyHours, faktiki: row.normalHours + row.overtimeHours }))
+
+  const columns: TableColumnsType<SiteHoursPanelRow> = [
+    { title: 'Obyekt', dataIndex: 'objectName', sorter: (a, b) => a.objectName.localeCompare(b.objectName) },
+    { title: 'Plan İşçi', dataIndex: 'plannedWorkers', sorter: (a, b) => a.plannedWorkers - b.plannedWorkers },
+    { title: 'Faktiki İşçi', dataIndex: 'actualWorkers', sorter: (a, b) => a.actualWorkers - b.actualWorkers },
+    { title: 'Gəlməyən', dataIndex: 'absentWorkers' },
+    { title: 'Normal Saat', dataIndex: 'normalHours', render: (value) => formatHours(Number(value), 1) },
+    { title: 'Overtime', dataIndex: 'overtimeHours', render: (value) => formatHours(Number(value), 1) },
+    { title: 'Riskli Saat', dataIndex: 'riskyHours', render: (value) => formatHours(Number(value), 1) },
+    { title: 'Auto Geofence', dataIndex: 'autoGeofence', render: (value) => formatPercent(Number(value), 0) },
+    { title: 'Əmək Xərci', dataIndex: 'laborCost', render: (value) => formatCurrency(Number(value)) },
+    { title: 'İcra Faizi', dataIndex: 'executionPercent', render: (value) => <Progress percent={Number(value)} size="small" strokeColor="#078b55" /> },
   ]
 
   return (
     <div className="page-stack">
-      <PageTitle title="2. Obyekt Üzrə İş Saatı və Əmək Yükü" />
-      <FilterBar data={data} showPosition sitePlaceholder="Bütün Obyekt Qrupları" />
+      <PageTitle title="2. Obyekt Üzrə İş Saatı və Əmək Yükü" extra={<ObjectFilter pageKey="siteHours" />} />
 
       <section className="kpi-grid">
-        <KpiCard icon={<TeamOutlined />} title="Plan İşçi" value={formatNumber(totals.planned)} trend="8 (öncəki aya nisbətən)" tone="green" />
-        <KpiCard icon={<TeamOutlined />} title="Faktiki İşçi" value={formatNumber(totals.actual)} trend="12 (öncəki aya nisbətən)" tone="blue" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Toplam Saat" value={formatHours(totals.hours, 0)} trend="6% (öncəki aya nisbətən)" tone="blue" />
-        <KpiCard icon={<DollarCircleOutlined />} title="Əmək Xərci" value={formatCurrency(totals.cost)} trend="6% (öncəki aya nisbətən)" tone="green" />
+        <KpiCard icon={<TeamOutlined />} title="Plan İşçi" value={formatNumber(totals.planned)} trend="central worker planı" tone="green" />
+        <KpiCard icon={<TeamOutlined />} title="Faktiki İşçi" value={formatNumber(totals.actual)} trend="aktiv işçilər" tone="blue" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Toplam Saat" value={formatHours(totals.hours, 0)} trend="payroll saatları" tone="blue" />
+        <KpiCard icon={<DollarCircleOutlined />} title="Əmək Xərci" value={formatCurrency(totals.cost)} trend="worker tarifləri" tone="green" />
       </section>
 
       <DataTable
@@ -77,8 +110,8 @@ export const SiteHoursPage = () => {
       <section className="explanation-grid">
         <ExplanationCard icon={<BarChartOutlined />} title="Əsas sütunlar" tone="blue">
           <ul>
-            <li>Plan İşçi və Faktiki İşçi sahədəki resurs fərqini göstərir.</li>
-            <li>Overtime və riskli saatlar xərc nəzarəti üçün ayrılır.</li>
+            <li>Plan və faktiki işçi sayı central worker assignments-dan gəlir.</li>
+            <li>Overtime və riskli saatlar payroll selectorunda hesablanır.</li>
             <li>İcra faizi plan saatına görə operativ göstəricidir.</li>
           </ul>
         </ExplanationCard>

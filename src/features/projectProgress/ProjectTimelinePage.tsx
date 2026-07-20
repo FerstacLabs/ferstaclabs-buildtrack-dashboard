@@ -1,27 +1,29 @@
 import { CalendarOutlined, ClockCircleOutlined, DollarCircleOutlined } from '@ant-design/icons'
 import { Progress, Tag } from 'antd'
+import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
-import { formatHours, formatNumber } from '../../utils/formatters'
-import { calculateProjectMetrics, calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
-
-const formatAzn = (value: number) => `${formatNumber(value, value % 1 === 0 ? 0 : 2)} AZN`
+import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
+import { ALL_OBJECTS_ID, getDashboardSummary, getStageActualHours, getStagesByObject } from './projectSelectors'
+import { calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
 
 export const ProjectTimelinePage = () => {
   const data = useProjectProgressStore()
-  const metrics = calculateProjectMetrics(data)
+  const selectedObjectId = data.selectedObjectIdByPage.timeline ?? ALL_OBJECTS_ID
+  const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const crewNameById = new Map(data.crews.map((crew) => [crew.id, crew.name]))
-  const stages = data.stages.slice().sort((a, b) => a.order - b.order)
+  const stages = getStagesByObject(data, selectedObjectId)
+  const estimateTotal = stages.reduce((sum, stage) => sum + stage.totalCost, 0)
 
   return (
     <div className="page-stack project-progress-page">
-      <PageTitle title="Təqvim / Gedişat" subtitle="Villa tikintisi üzrə etapların plan və faktiki gedişat xəritəsi" />
+      <PageTitle title="Təqvim / Gedişat" subtitle={`${data.project.name} üzrə etapların plan və faktiki gedişat xəritəsi`} extra={<ObjectFilter pageKey="timeline" />} />
 
       <section className="kpi-grid four">
         <KpiCard icon={<CalendarOutlined />} title="Etap sayı" value={formatNumber(stages.length)} tone="blue" />
         <KpiCard icon={<ClockCircleOutlined />} title="Plan saat" value={formatHours(metrics.plannedHours, 0)} tone="green" />
         <KpiCard icon={<ClockCircleOutlined />} title="Faktiki saat" value={formatHours(metrics.actualHours, 0)} tone="orange" />
-        <KpiCard icon={<DollarCircleOutlined />} title="Smeta dəyəri" value={formatAzn(data.summary.totalAmount)} tone="purple" />
+        <KpiCard icon={<DollarCircleOutlined />} title="Smeta dəyəri" value={formatCurrency(estimateTotal)} tone="purple" />
       </section>
 
       <section className="table-card">
@@ -45,8 +47,8 @@ export const ProjectTimelinePage = () => {
                   <Progress percent={progress} />
                   <div className="project-timeline-meta">
                     <span>Briqada: {stage.assignedCrewId ? crewNameById.get(stage.assignedCrewId) : 'Təyin edilməyib'}</span>
-                    <span>Plan/Fakt: {formatHours(stage.plannedHours, 0)} / {formatHours(stage.actualHours, 0)}</span>
-                    <span>Məbləğ: {formatAzn(stage.totalCost)}</span>
+                    <span>Plan/Fakt: {formatHours(stage.plannedHours, 0)} / {formatHours(getStageActualHours(data, stage.id) || stage.actualHours, 0)}</span>
+                    <span>Məbləğ: {formatCurrency(stage.totalCost)}</span>
                   </div>
                   {stage.notes ? <p className="project-timeline-note">{stage.notes}</p> : null}
                 </div>

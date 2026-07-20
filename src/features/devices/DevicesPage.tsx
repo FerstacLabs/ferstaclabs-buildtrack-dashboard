@@ -45,9 +45,15 @@ const statusLabel: Record<DeviceStatus, string> = {
 
 const modeOptions = [
   { label: 'Active Register', value: 'ActiveRegister' },
-  { label: 'CGI polling fallback', value: 'CgiPollingFallback' },
+  { label: 'CGI polling', value: 'CgiPollingFallback' },
   { label: 'Simulator', value: 'Simulator' },
 ]
+
+const modeLabel: Record<DeviceMode, string> = {
+  ActiveRegister: 'Active Register',
+  CgiPollingFallback: 'CGI polling',
+  Simulator: 'Simulator',
+}
 
 const formatDateTime = (value?: string) => value ? new Date(value).toLocaleString() : '-'
 
@@ -106,9 +112,9 @@ export const DevicesPage = () => {
   const createDemoSite = async () => {
     setLoading(true)
     try {
-      const site = await buildTrackBackendApi.createSite({ name: 'Demo Tikinti Obyekti', address: 'Bakı, test meydançası', timeZone: 'Asia/Baku' })
-      await buildTrackBackendApi.createWorker({ siteId: site.id, externalWorkerCode: '1', fullName: 'Ilham Demo', status: 'Active' })
-      message.success('Demo obyekt və test işçi yaradıldı')
+      const site = await buildTrackBackendApi.createSite({ name: 'Villa tikintisi', address: 'Bakı, tikinti sahəsi', timeZone: 'Asia/Baku' })
+      await buildTrackBackendApi.createWorker({ siteId: site.id, externalWorkerCode: '1', fullName: 'İlham Əliyev', status: 'Active' })
+      message.success('Test obyekti və işçi yaradıldı')
       await loadData()
     } catch (err) {
       message.error(getActionErrorMessage(err))
@@ -138,7 +144,7 @@ export const DevicesPage = () => {
       if (action === 'register') await buildTrackBackendApi.simulateRegister(deviceId)
       if (action === 'event') {
         const event = await buildTrackBackendApi.simulateEvent(deviceId)
-        message.success(`Test davamiyyət hadisəsi yaradıldı: ${event.workerName ?? 'Simulator Worker'}`)
+        message.success(`Test davamiyyət hadisəsi yaradıldı: ${event.workerName ?? 'test işçi'}`)
         window.dispatchEvent(new CustomEvent('buildtrack:attendance-event-created', { detail: { siteId: event.siteId, deviceId } }))
       } else {
         message.success('Cihaz statusu yeniləndi')
@@ -158,7 +164,7 @@ export const DevicesPage = () => {
     { title: 'Cihaz', dataIndex: 'name', sorter: (a, b) => a.name.localeCompare(b.name) },
     { title: 'Obyekt', dataIndex: 'siteId', render: (value) => siteNameById.get(value) ?? value },
     { title: 'Model', dataIndex: 'model' },
-    { title: 'Rejim', dataIndex: 'mode', render: (value) => <Tag color="blue">{value}</Tag> },
+    { title: 'Rejim', dataIndex: 'mode', render: (value: DeviceMode) => <Tag color="blue">{modeLabel[value] ?? value}</Tag> },
     { title: 'Device ID', dataIndex: 'registerDeviceId' },
     { title: 'Register port', dataIndex: 'registerPort' },
     { title: 'Status', dataIndex: 'status', render: (value: DeviceStatus) => <Tag color={statusColor[value] ?? 'default'}>{statusLabel[value] ?? value}</Tag> },
@@ -204,7 +210,7 @@ export const DevicesPage = () => {
           type="warning"
           showIcon
           message="Backend bağlantısı yoxdur"
-          description={`API ünvanı: ${buildTrackBackendApi.baseUrl}. Docker backend işləmirsə, cihaz siyahısı boş görünəcək və mövcud demo app təsirlənməyəcək.`}
+        description="Cihaz modulu backend bağlantısı tələb edir. Bağlantı bərpa olunanda siyahı avtomatik yenilənə bilər."
         />
       )}
 
@@ -217,7 +223,7 @@ export const DevicesPage = () => {
           <div className="card-heading">
             <h2>Cihaz siyahısı</h2>
             <Space>
-              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createDemoSite}>Demo obyekt yarat</ToolbarButton>
+              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createDemoSite}>Test obyekt yarat</ToolbarButton>
               <ToolbarButton icon={<ReloadOutlined />} onClick={loadData}>Yenilə</ToolbarButton>
             </Space>
           </div>
@@ -228,7 +234,7 @@ export const DevicesPage = () => {
             rowKey="id"
             pagination={{ pageSize: 8 }}
             scroll={{ x: 'max-content' }}
-            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl demo obyekt yaradın və Dahua terminal əlavə edin.' }}
+            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl test obyekti yaradın və Dahua terminal əlavə edin.' }}
           />
         </section>
 
@@ -282,14 +288,14 @@ export const DevicesPage = () => {
         </aside>
         <aside className="panel-card instruction-panel">
           <h2>Active Register diagnostics</h2>
-          <div className="summary-metric"><span>API</span><strong>{buildTrackBackendApi.baseUrl}</strong></div>
+          <div className="summary-metric"><span>Backend</span><strong>Konfiqurasiya edilib</strong></div>
           <div className="summary-metric"><span>TCP portlar</span><strong>{activeRegisterStatus?.ports?.join(', ') ?? listenerStatus?.ports?.join(', ') ?? '7000, 9500'}</strong></div>
           <div className="summary-metric"><span>Listener</span><strong>{activeRegisterStatus?.listenerActive ? 'Aktiv' : activeRegisterStatus?.enabled ? 'Gözləyir' : 'Söndürülüb'}</strong></div>
           <div className="summary-metric"><span>Son callback</span><strong>{formatDateTime(activeRegisterStatus?.lastCallbackTime)}</strong></div>
           <div className="summary-metric"><span>Son command</span><strong>{activeRegisterStatus?.lastCommand ?? '-'}</strong></div>
           <div className="summary-metric"><span>Payload bytes</span><strong>{activeRegisterStatus?.lastPayloadBytes ?? 0}</strong></div>
           <div className="summary-metric"><span>Raw / decoded / ingested</span><strong>{activeRegisterStatus ? `${activeRegisterStatus.rawEventCount} / ${activeRegisterStatus.decodedEventCount} / ${activeRegisterStatus.ingestedEventCount}` : '-'}</strong></div>
-          <div className="summary-metric"><span>Ingestion</span><strong>{activeRegisterStatus?.ingestionEnabled ? 'Aktiv' : 'Diagnostics only'}</strong></div>
+          <div className="summary-metric"><span>Ingestion</span><strong>{activeRegisterStatus?.ingestionEnabled ? 'Aktiv' : 'Yalnız diaqnostika'}</strong></div>
           {!activeRegisterStatus?.ingestionEnabled && <Alert type="warning" showIcon message="Active Register ingestion söndürülüb" description="Callback-lər raw diagnostics kimi saxlanır. Attendance/security yaratmaq üçün backend-də DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED=true edin." />}
         </aside>
       </section>

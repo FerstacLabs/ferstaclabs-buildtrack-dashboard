@@ -1,51 +1,50 @@
 import { CloudSyncOutlined, DownloadOutlined, SafetyCertificateOutlined, TabletOutlined, WarningOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { Button } from 'antd'
-import { FilterBar } from '../../components/layout/FilterBar'
+import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { RiskBadge } from '../../components/ui/RiskBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { riskWorkerRows } from '../../services/data/reportCalculations'
-import { useBuildTrackStore } from '../../services/data/dataService'
 import { exportRowsToExcel } from '../../services/data/exportService'
-import type { RiskWorkerRow } from '../../types/reports'
 import { formatNumber } from '../../utils/formatters'
+import { ALL_OBJECTS_ID, getRiskRowsByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
+import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 
 export const RiskWorkersPage = () => {
-  const { data, filters } = useBuildTrackStore()
-  if (!data) return null
+  const store = useProjectProgressStore()
+  const selectedObjectId = store.selectedObjectIdByPage.riskWorkers ?? ALL_OBJECTS_ID
+  const rows = getRiskRowsByObject(store, selectedObjectId)
+  const critical = rows.filter((row) => row.riskLevel === 'Kritik').length
+  const high = rows.filter((row) => row.riskLevel === 'Yüksək').length
+  const attendanceSource = rows.filter((row) => row.source === 'attendance').length
+  const reportSource = rows.filter((row) => row.source === 'daily-report').length
 
-  const rows = riskWorkerRows(data, filters)
-  const critical = rows.filter((row) => row.risk_level === 'Kritik').length
-  const tablet = rows.filter((row) => row.entry_method === 'Prorab Tablet').length
-  const offline = rows.filter((row) => row.entry_method === 'Offline').length
-  const columns: TableColumnsType<RiskWorkerRow> = [
-    { title: 'İşçi adı', dataIndex: 'full_name', sorter: (a, b) => a.full_name.localeCompare(b.full_name) },
-    { title: 'Obyekt', dataIndex: 'site_name' },
-    { title: 'Vəzifə', dataIndex: 'position' },
-    { title: 'Risk Balı', dataIndex: 'risk_score', sorter: (a, b) => a.risk_score - b.risk_score },
-    { title: 'Risk Səviyyəsi', dataIndex: 'risk_level', render: (_, row) => <RiskBadge level={row.risk_level} /> },
-    { title: 'Risk Səbəbi', dataIndex: 'risk_reason' },
-    { title: 'Təkrar Sayı', dataIndex: 'repeat_count' },
-    { title: 'Son Risk Tarixi', dataIndex: 'date' },
-    { title: 'Giriş Metodu', dataIndex: 'entry_method' },
-    { title: 'Təsdiq edən', dataIndex: 'approved_by' },
-    { title: 'Tövsiyə', dataIndex: 'recommendation', render: (value) => <Button size="small">{value}</Button> },
+  const columns: TableColumnsType<DelayRiskRow> = [
+    { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
+    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Vəzifə', dataIndex: 'role' },
+    { title: 'Briqada', dataIndex: 'crewName' },
+    { title: 'Risk Balı', dataIndex: 'riskScore', sorter: (a, b) => a.riskScore - b.riskScore },
+    { title: 'Risk Səviyyəsi', dataIndex: 'riskLevel', render: (_, row) => <RiskBadge level={row.riskLevel} /> },
+    { title: 'Risk Səbəbi', dataIndex: 'reason' },
+    { title: 'Təkrar Sayı', dataIndex: 'delayCount' },
+    { title: 'Ümumi gecikmə', dataIndex: 'totalDelayMinutes', render: (value) => `${value} dəq` },
+    { title: 'Mənbə', dataIndex: 'source' },
+    { title: 'Tövsiyə', render: () => <Button size="small">Yoxla</Button> },
   ]
 
   return (
     <div className="page-stack">
-      <PageTitle title="3. Riskli İşçilər və Şübhəli Davamiyyət" />
-      <FilterBar data={data} showRisk showSupervisor advancedFields={['dateRange', 'siteId', 'brigade', 'position', 'riskLevel', 'entryMethod', 'supervisor']} />
+      <PageTitle title="3. Riskli İşçilər və Şübhəli Davamiyyət" extra={<ObjectFilter pageKey="riskWorkers" />} />
 
       <section className="kpi-grid">
-        <KpiCard icon={<SafetyCertificateOutlined />} title="Riskli İşçi" value={formatNumber(rows.length)} trend="16 (öncəki aya nisbətən)" tone="green" />
-        <KpiCard icon={<WarningOutlined />} title="Kritik Risk" value={formatNumber(critical)} trend="2 (öncəki aya nisbətən)" tone="red" />
-        <KpiCard icon={<TabletOutlined />} title="Tablet Giriş Təkrarı" value={formatNumber(tablet)} trend="14 (öncəki aya nisbətən)" tone="blue" />
-        <KpiCard icon={<CloudSyncOutlined />} title="Offline Sync Risk" value={formatNumber(offline)} trend="9 (öncəki aya nisbətən)" tone="orange" />
+        <KpiCard icon={<SafetyCertificateOutlined />} title="Riskli İşçi" value={formatNumber(rows.length)} trend="central worker datası" tone="green" />
+        <KpiCard icon={<WarningOutlined />} title="Kritik Risk" value={formatNumber(critical)} trend={`${high} yüksək risk`} tone="red" />
+        <KpiCard icon={<TabletOutlined />} title="Davamiyyət riski" value={formatNumber(attendanceSource)} trend="kamera/prorab qeydləri" tone="blue" />
+        <KpiCard icon={<CloudSyncOutlined />} title="Gündəlik hesabat riski" value={formatNumber(reportSource)} trend="prorab qeydləri" tone="orange" />
       </section>
 
       <DataTable
@@ -63,7 +62,7 @@ export const RiskWorkersPage = () => {
           {[
             ['Giriş davranışı', 'Təkrar giriş, gecikmə və çıxış siqnalı.'],
             ['Zaman uyğunsuzluğu', 'Uzun fasilə, hərəkətsizlik və erkən çıxış.'],
-            ['Offline risk', 'Offline giriş, gec sync və saat fərqi.'],
+            ['Gündəlik hesabat', 'Prorab qeydləri və gecikmə səbəbləri.'],
             ['Tarixçə və nümunə', 'Keçmiş pozuntular və riskli davranış.'],
           ].map(([title, text], index) => (
             <div className="panel-card" key={title}>
@@ -77,7 +76,7 @@ export const RiskWorkersPage = () => {
 
       <section className="explanation-grid">
         <ExplanationCard icon={<WarningOutlined />} title="Bu tablo niyə lazımdır?" tone="red">
-          <p>Bu hesabat şübhəli davamiyyət nümunələrini aşkarlayır və müdaxiləni vaxtında etməyə kömək edir.</p>
+          <p>Bu hesabat eyni obyekt-worker-briqada modelində riskli davamiyyət və prorab qeydlərini göstərir.</p>
         </ExplanationCard>
         <ExplanationCard icon={<SafetyCertificateOutlined />} title="Risk balı necə oxunur?" tone="orange">
           <ul>
