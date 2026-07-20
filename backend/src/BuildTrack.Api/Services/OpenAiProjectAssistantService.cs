@@ -123,7 +123,7 @@ public sealed class OpenAiProjectAssistantService(
                 ["input"] = text,
                 ["response_format"] = options.TtsFormat,
                 ["speed"] = 1.0,
-                ["instructions"] = "Speak naturally in Azerbaijani. Use a calm, professional assistant voice for construction project management. Keep pronunciation clear.",
+                ["instructions"] = "Azərbaycan dilində təbii, aydın və sakit qadın səsinə yaxın peşəkar köməkçi tonu ilə danış. Tikinti layihəsi rəhbərinə hesabat verirmiş kimi danış. İngilis və rus aksentindən uzaq, mümkün qədər təbii Azərbaycan tələffüzü istifadə et.",
             };
 
             requestMessage.Content = JsonContent.Create(payload);

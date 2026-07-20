@@ -817,8 +817,8 @@ static AiOptions BuildAiOptions(IConfiguration configuration)
             ? "gpt-4o-mini-tts"
             : (configuration["OPENAI_TTS_MODEL"] ?? configuration["Ai:TtsModel"] ?? "gpt-4o-mini-tts").Trim(),
         TtsVoice = string.IsNullOrWhiteSpace(configuration["OPENAI_TTS_VOICE"] ?? configuration["Ai:TtsVoice"])
-            ? "alloy"
-            : (configuration["OPENAI_TTS_VOICE"] ?? configuration["Ai:TtsVoice"] ?? "alloy").Trim(),
+            ? "shimmer"
+            : (configuration["OPENAI_TTS_VOICE"] ?? configuration["Ai:TtsVoice"] ?? "shimmer").Trim(),
         TtsFormat = string.IsNullOrWhiteSpace(configuration["OPENAI_TTS_FORMAT"] ?? configuration["Ai:TtsFormat"])
             ? "mp3"
             : (configuration["OPENAI_TTS_FORMAT"] ?? configuration["Ai:TtsFormat"] ?? "mp3").Trim(),

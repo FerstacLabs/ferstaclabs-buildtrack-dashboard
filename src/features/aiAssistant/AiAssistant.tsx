@@ -1,11 +1,12 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
-import { Button, Drawer, Input, Space, Tag, Tooltip } from 'antd'
+import { Button, Drawer, Input, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { API_BASE_URL, tryApiRequest } from '../../shared/api/client'
+import { tryApiRequest } from '../../shared/api/client'
 import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { getAssistantAnswer } from './aiAssistantEngine'
+import { fetchTtsAudio } from './api/ttsApi'
 import { buildAiProjectContext, type AiProjectContext } from './aiContextBuilder'
 
 interface AssistantApiResponse {
@@ -133,8 +134,7 @@ export const AiAssistant = () => {
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [fallbackNote, setFallbackNote] = useState<string | null>(null)
-  const [voiceNote, setVoiceNote] = useState<string | null>(null)
+  const [voiceNoteByMessageId, setVoiceNoteByMessageId] = useState<Record<string, string>>({})
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
   const [preparingMessageId, setPreparingMessageId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -170,8 +170,7 @@ export const AiAssistant = () => {
 
   const addLocalAnswer = (question: string) => {
     const localAnswer = getAssistantAnswer(question, buildAiProjectContext({ data, objectId: selectedObjectId }))
-    addAssistantMessage({ role: 'assistant', content: localAnswer.answer })
-    setFallbackNote('Lokal analiz istifadə olundu.')
+    addAssistantMessage({ role: 'assistant', content: localAnswer.answer, source: 'local-fallback' })
   }
 
   const submitQuestion = async (question: string) => {
@@ -181,7 +180,7 @@ export const AiAssistant = () => {
     stopSpeaking()
     setInput('')
     setLoading(true)
-    setFallbackNote(null)
+    setVoiceNoteByMessageId({})
     addAssistantMessage({ role: 'user', content: trimmed })
 
     const history = messages
@@ -199,8 +198,7 @@ export const AiAssistant = () => {
 
     stopSpeaking()
     if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
-      addAssistantMessage({ role: 'assistant', content: apiAnswer.answer })
-      setFallbackNote(null)
+      addAssistantMessage({ role: 'assistant', content: apiAnswer.answer, source: 'openai' })
     } else {
       addLocalAnswer(trimmed)
     }
@@ -221,7 +219,7 @@ export const AiAssistant = () => {
 
   const speakWithBrowserFallback = async (messageId: string, text: string) => {
     if (!('speechSynthesis' in window)) {
-      setVoiceNote('Səsli oxuma bu brauzerdə dəstəklənmir.')
+      setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'Səsli oxuma bu brauzerdə dəstəklənmir.' }))
       return
     }
 
@@ -253,20 +251,15 @@ export const AiAssistant = () => {
     }
 
     stopSpeaking()
-    setVoiceNote(null)
+    setVoiceNoteByMessageId((state) => {
+      const next = { ...state }
+      delete next[messageId]
+      return next
+    })
     setPreparingMessageId(messageId)
-    devLog('TTS request started')
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/ai/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language: 'az-AZ', voice: 'alloy' }),
-      })
-
-      if (!response.ok) throw new Error(`TTS HTTP ${response.status}`)
-      const blob = await response.blob()
-      devLog('TTS audio received', { size: blob.size, type: blob.type })
+      const blob = await fetchTtsAudio(text)
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       audioRef.current = audio
@@ -274,22 +267,22 @@ export const AiAssistant = () => {
       audio.onplay = () => {
         setPreparingMessageId(null)
         setSpeakingMessageId(messageId)
-        devLog('TTS playback started')
+        devLog('OpenAI TTS playback started')
       }
       audio.onended = () => {
-        devLog('TTS playback ended')
+        devLog('OpenAI TTS playback ended')
         stopSpeaking()
       }
       audio.onerror = () => {
         stopSpeaking()
-        setVoiceNote('Səsli oxuma alınmadı. Browser səsi ilə yoxlanılır.')
+        setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi alınmadı, browser səsi ilə yoxlanılır.' }))
         void speakWithBrowserFallback(messageId, text)
       }
       await audio.play()
     } catch (error) {
-      devLog('TTS error fallback used', error)
+      devLog('Browser fallback used', error)
       stopSpeaking()
-      setVoiceNote('Səsli oxuma alınmadı. Browser səsi ilə yoxlanılır.')
+      setVoiceNoteByMessageId((state) => ({ ...state, [messageId]: 'OpenAI səsi alınmadı, browser səsi ilə yoxlanılır.' }))
       await speakWithBrowserFallback(messageId, text)
     }
   }
@@ -322,8 +315,6 @@ export const AiAssistant = () => {
       >
         <div className="assistant-panel">
           <div className="assistant-context-line">Kontekst: <strong>{contextLabel}</strong></div>
-          {fallbackNote ? <div className="assistant-note">{fallbackNote}</div> : null}
-          {voiceNote ? <div className="assistant-note warning">{voiceNote}</div> : null}
           <div className="assistant-prompts">
             {quickPrompts.map((prompt) => (
               <button type="button" key={prompt} onClick={() => void submitQuestion(prompt)}>
@@ -335,30 +326,40 @@ export const AiAssistant = () => {
           <div className="assistant-messages">
             {messages.length ? messages.map((item) => (
               <div className={`assistant-message ${item.role}`} key={item.id}>
-                <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
+                <div className="assistant-message-header">
+                  <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
+                  {item.role === 'assistant' ? (
+                    <span className="assistant-source-pill">{item.source === 'openai' ? 'OpenAI cavabı' : 'Lokal analiz'}</span>
+                  ) : null}
+                </div>
                 <p>{item.content}</p>
                 {item.role === 'assistant' ? (
-                  <Button
-                    size="small"
-                    icon={<SoundOutlined />}
-                    disabled={!item.content.trim()}
-                    loading={preparingMessageId === item.id}
-                    onClick={() => void toggleSpeak(item.id, item.content)}
-                  >
-                    {preparingMessageId === item.id ? 'Səs hazırlanır...' : speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
-                  </Button>
+                  <div className="assistant-speech-block">
+                    <Button
+                      block
+                      size="small"
+                      icon={<SoundOutlined />}
+                      disabled={!item.content.trim()}
+                      loading={preparingMessageId === item.id}
+                      onClick={() => void toggleSpeak(item.id, item.content)}
+                    >
+                      {preparingMessageId === item.id ? 'Səs hazırlanır...' : speakingMessageId === item.id ? 'Dayandır' : 'Səsli oxu'}
+                    </Button>
+                    {voiceNoteByMessageId[item.id] ? <span>{voiceNoteByMessageId[item.id]}</span> : null}
+                  </div>
                 ) : null}
               </div>
             )) : <div className="empty-soft">Rəhbər brifinqi üçün sual yazın və ya hazır ssenarilərdən birini seçin.</div>}
           </div>
 
-          <Space.Compact className="assistant-input">
+          <div className="aiComposer">
             {speechRecognition ? (
               <Tooltip title="Səslə soruş">
-                <Button icon={<AudioOutlined />} onClick={startVoiceInput} />
+                <Button className="aiComposerButton" icon={<AudioOutlined />} onClick={startVoiceInput} />
               </Tooltip>
-            ) : null}
+            ) : <span />}
             <Input.TextArea
+              className="aiComposerInput"
               value={input}
               autoSize={{ minRows: 1, maxRows: 3 }}
               onChange={(event) => setInput(event.target.value)}
@@ -370,9 +371,9 @@ export const AiAssistant = () => {
               }}
               placeholder="Sualınızı yazın və ya səsli deyin..."
             />
-            <Button type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
-          </Space.Compact>
-          <Button icon={<DeleteOutlined />} onClick={clearAssistantMessages}>Söhbəti təmizlə</Button>
+            <Button className="aiComposerSendButton" type="primary" loading={loading} icon={<SendOutlined />} onClick={() => void submitQuestion(input)} />
+          </div>
+          <Button icon={<DeleteOutlined />} onClick={() => { stopSpeaking(); clearAssistantMessages() }}>Söhbəti təmizlə</Button>
         </div>
       </Drawer>
     </>

@@ -1142,6 +1142,7 @@ a {
 .assistant-panel {
   height: 100%;
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
 }
 
 .assistant-title {
@@ -1173,23 +1174,10 @@ a {
   color: var(--bt-green);
 }
 
-.assistant-note {
-  padding: 8px 10px;
-  border: 1px solid #d7eadf;
-  border-radius: 8px;
-  background: #f3fbf6;
-  color: #23714a;
-  font-size: 12px;
-}
-
-.assistant-note.warning {
-  border-color: #ffe0a6;
-  background: #fff8e8;
-  color: #9a5a00;
-}
-
 .assistant-prompts {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  position: relative;
+  z-index: 1;
 }
 
 .assistant-prompts button {
@@ -1215,6 +1203,7 @@ a {
 .assistant-messages {
   overflow: auto;
   padding-right: 4px;
+  min-height: 0;
 }
 
 .assistant-message {
@@ -1225,6 +1214,27 @@ a {
   padding: 12px;
   background: #fff;
   box-shadow: 0 8px 18px rgba(12, 36, 54, 0.05);
+}
+
+.assistant-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assistant-source-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid rgba(7, 139, 85, 0.16);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--bt-muted);
+  background: rgba(255, 255, 255, 0.74);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .assistant-message.user {
@@ -1242,15 +1252,48 @@ a {
   white-space: pre-line;
   color: var(--bt-text);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.62;
 }
 
-.assistant-input {
+.assistant-speech-block {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.assistant-speech-block span {
+  color: var(--bt-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.aiComposer {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: center;
   width: 100%;
 }
 
-.assistant-input .ant-input {
+.aiComposerInput {
+  min-width: 0;
+  width: 100%;
+}
+
+.aiComposerInput.ant-input {
   min-height: 40px;
+}
+
+.aiComposerButton {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+}
+
+.aiComposerSendButton {
+  width: 44px;
+  height: 40px;
+  flex: 0 0 auto;
 }
 @media (max-width: 1200px) {
   .kpi-grid,
@@ -1299,6 +1342,10 @@ a {
   }
 
   .timeline-row {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-prompts {
     grid-template-columns: 1fr;
   }
 

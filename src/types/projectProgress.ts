@@ -239,6 +239,7 @@ export interface AiAssistantMessage {
   role: 'user' | 'assistant'
   content: string
   createdAt: string
+  source?: 'openai' | 'local-fallback'
 }
 
 export interface ProjectProgressData {

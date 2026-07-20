@@ -8,6 +8,6 @@ public sealed class AiOptions
     public int TimeoutSeconds { get; init; } = 30;
     public bool TtsEnabled { get; init; }
     public string TtsModel { get; init; } = "gpt-4o-mini-tts";
-    public string TtsVoice { get; init; } = "alloy";
+    public string TtsVoice { get; init; } = "shimmer";
     public string TtsFormat { get; init; } = "mp3";
 }
