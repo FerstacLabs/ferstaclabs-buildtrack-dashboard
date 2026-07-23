@@ -65,6 +65,24 @@ public sealed class NetSdkRuntimeDiagnostics
     public string? LastAlarmPayloadFirst256Hex { get; set; }
     public string? LastAlarmDecodeStatus { get; set; }
     public string? LastDecodedAlarmJson { get; set; }
+    public bool SmartEventEnabled { get; set; }
+    public bool SmartEventNeedPicture { get; set; }
+    public int SmartEventChannel { get; set; } = -1;
+    public bool SmartEventSubscriptionAttempted { get; set; }
+    public bool? SmartEventSubscriptionSuccess { get; set; }
+    public long? SmartEventAttachHandle { get; set; }
+    public int? SmartEventErrorSigned { get; set; }
+    public string? SmartEventErrorHex { get; set; }
+    public int? LastSmartEventType { get; set; }
+    public string? LastSmartEventName { get; set; }
+    public int LastSmartEventPayloadBytes { get; set; }
+    public int LastSmartEventImageBytesLength { get; set; }
+    public string? LastSmartEventParseStatus { get; set; }
+    public string? LastSmartEventUserId { get; set; }
+    public string? LastSmartEventCardName { get; set; }
+    public long? LastSmartEventRecNo { get; set; }
+    public DateTimeOffset? LastSmartEventTime { get; set; }
+    public string? LastSmartEventRawStructSummaryJson { get; set; }
     public bool NetSdkRecordQueryEnabled { get; set; }
     public bool NetSdkRecordQueryDiagnosticMode { get; set; }
     public DateTimeOffset? LastRecordQueryAt { get; set; }

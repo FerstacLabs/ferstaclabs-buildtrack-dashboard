@@ -78,6 +78,24 @@ public sealed class DahuaNetSdkDiagnostics
     public string? LastAlarmPayloadFirst256Hex { get; set; }
     public string? LastAlarmDecodeStatus { get; set; }
     public string? LastDecodedAlarmJson { get; set; }
+    public bool SmartEventEnabled { get; set; }
+    public bool SmartEventNeedPicture { get; set; }
+    public int SmartEventChannel { get; set; } = -1;
+    public bool SmartEventSubscriptionAttempted { get; set; }
+    public bool? SmartEventSubscriptionSuccess { get; set; }
+    public long? SmartEventAttachHandle { get; set; }
+    public int? SmartEventErrorSigned { get; set; }
+    public string? SmartEventErrorHex { get; set; }
+    public int? LastSmartEventType { get; set; }
+    public string? LastSmartEventName { get; set; }
+    public int LastSmartEventPayloadBytes { get; set; }
+    public int LastSmartEventImageBytesLength { get; set; }
+    public string? LastSmartEventParseStatus { get; set; }
+    public string? LastSmartEventUserId { get; set; }
+    public string? LastSmartEventCardName { get; set; }
+    public long? LastSmartEventRecNo { get; set; }
+    public DateTimeOffset? LastSmartEventTime { get; set; }
+    public string? LastSmartEventRawStructSummaryJson { get; set; }
     public bool NetSdkRecordQueryEnabled { get; set; }
     public bool NetSdkRecordQueryDiagnosticMode { get; set; }
     public DateTimeOffset? LastRecordQueryAt { get; set; }
@@ -101,6 +119,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private readonly ConcurrentDictionary<IntPtr, int> _listenPortByHandle = new();
     private readonly ConcurrentDictionary<IntPtr, Guid> _deviceIdByLoginHandle = new();
     private readonly ConcurrentDictionary<Guid, IntPtr> _loginHandleByDeviceId = new();
+    private readonly ConcurrentDictionary<Guid, IntPtr> _smartEventAttachHandleByDeviceId = new();
+    private readonly ConcurrentDictionary<IntPtr, Guid> _deviceIdBySmartEventAttachHandle = new();
     private readonly ConcurrentDictionary<Guid, byte> _subscriptionInProgress = new();
     private readonly ConcurrentDictionary<string, byte> _acceptedRegistrationKeys = new();
     private readonly ConcurrentDictionary<string, byte> _experimentalSubscribeAttemptKeys = new();
@@ -117,6 +137,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private DahuaNetSdkNativeClient.ServiceCallback? _serviceCallback;
     private DahuaNetSdkNativeClient.ServiceCallback? _experimentalStartServiceCallback;
     private DahuaNetSdkNativeClient.AlarmMessageCallback? _alarmCallback;
+    private DahuaNetSdkNativeClient.SmartEventCallback? _smartEventCallback;
     private bool _disposed;
     private bool _singleDeviceFallbackEnabled;
     private string _decodeStatus = nativeLibraryProbe.HasNativeSdk ? "Initialized" : "MissingSdk";
@@ -198,6 +219,24 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     LastAlarmPayloadFirst256Hex = _diagnostics.LastAlarmPayloadFirst256Hex,
                     LastAlarmDecodeStatus = _diagnostics.LastAlarmDecodeStatus,
                     LastDecodedAlarmJson = _diagnostics.LastDecodedAlarmJson,
+                    SmartEventEnabled = _diagnostics.SmartEventEnabled,
+                    SmartEventNeedPicture = _diagnostics.SmartEventNeedPicture,
+                    SmartEventChannel = _diagnostics.SmartEventChannel,
+                    SmartEventSubscriptionAttempted = _diagnostics.SmartEventSubscriptionAttempted,
+                    SmartEventSubscriptionSuccess = _diagnostics.SmartEventSubscriptionSuccess,
+                    SmartEventAttachHandle = _diagnostics.SmartEventAttachHandle,
+                    SmartEventErrorSigned = _diagnostics.SmartEventErrorSigned,
+                    SmartEventErrorHex = _diagnostics.SmartEventErrorHex,
+                    LastSmartEventType = _diagnostics.LastSmartEventType,
+                    LastSmartEventName = _diagnostics.LastSmartEventName,
+                    LastSmartEventPayloadBytes = _diagnostics.LastSmartEventPayloadBytes,
+                    LastSmartEventImageBytesLength = _diagnostics.LastSmartEventImageBytesLength,
+                    LastSmartEventParseStatus = _diagnostics.LastSmartEventParseStatus,
+                    LastSmartEventUserId = _diagnostics.LastSmartEventUserId,
+                    LastSmartEventCardName = _diagnostics.LastSmartEventCardName,
+                    LastSmartEventRecNo = _diagnostics.LastSmartEventRecNo,
+                    LastSmartEventTime = _diagnostics.LastSmartEventTime,
+                    LastSmartEventRawStructSummaryJson = _diagnostics.LastSmartEventRawStructSummaryJson,
                     NetSdkRecordQueryEnabled = _diagnostics.NetSdkRecordQueryEnabled,
                     NetSdkRecordQueryDiagnosticMode = _diagnostics.NetSdkRecordQueryDiagnosticMode,
                     LastRecordQueryAt = _diagnostics.LastRecordQueryAt,
@@ -313,6 +352,19 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 logger.LogWarning("CLIENT_SetDVRMessCallBack export is unavailable. Active Register listener can accept devices, but access events cannot be decoded.");
             }
 
+            _smartEventCallback = OnSmartEventCallback;
+            var smartEventEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED"], defaultValue: true);
+            var smartEventNeedPicture = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_NEED_PICTURE"], defaultValue: true);
+            var smartEventChannel = ParseInt(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_CHANNEL"], -1);
+            lock (_diagnosticsLock)
+            {
+                _diagnostics.SmartEventEnabled = smartEventEnabled;
+                _diagnostics.SmartEventNeedPicture = smartEventNeedPicture;
+                _diagnostics.SmartEventChannel = smartEventChannel;
+            }
+            PersistDiagnostics();
+            logger.LogInformation("Dahua Smart Event subscription config. Enabled={Enabled}, NeedPicture={NeedPicture}, Channel={Channel}, NativeExportsAvailable={ExportsAvailable}", smartEventEnabled, smartEventNeedPicture, smartEventChannel, _nativeClient.HasSmartEventExports);
+
             var distinctPorts = ports.Distinct().ToArray();
             var serviceMode = DahuaActiveRegisterServiceMode.Parse(configuration["DAHUA_ACTIVE_REGISTER_SERVICE_MODE"]);
             var experimentalEnabled = DahuaActiveRegisterServiceMode.IsExperimentalEnabled(configuration["DAHUA_EXPERIMENTAL_START_SERVICE_ENABLED"]);
@@ -415,6 +467,11 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
         if (_nativeClient is not null)
         {
+            foreach (var attachHandle in _smartEventAttachHandleByDeviceId.Values.Distinct())
+            {
+                _nativeClient.TryStopSmartEventSubscription(attachHandle);
+            }
+
             foreach (var loginHandle in _loginHandleByDeviceId.Values.Distinct())
             {
                 _nativeClient.TryStopListen(loginHandle);
@@ -540,9 +597,15 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (command == -1)
             {
-                await PersistActiveRegisterRawEventAsync(db, null, registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
+                var disconnectedDevice = await MatchDeviceAsync(db, registerDeviceId, listenerPort, CancellationToken.None);
+                if (disconnectedDevice is not null)
+                {
+                    StopSmartEventSubscription(disconnectedDevice.Id);
+                }
+
+                await PersistActiveRegisterRawEventAsync(db, disconnectedDevice?.Id, disconnectedDevice?.RegisterDeviceId ?? registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
                 SetStatus("DeviceDisconnected");
-                await connectionLogger.LogAsync(null, registerDeviceId, remoteIp, remotePort, "netsdk_device_disconnected", "Dahua Active Register device disconnected during verification", new { command, registerDeviceId }, CancellationToken.None);
+                await connectionLogger.LogAsync(disconnectedDevice?.Id, disconnectedDevice?.RegisterDeviceId ?? registerDeviceId, remoteIp, remotePort, "netsdk_device_disconnected", "Dahua Active Register device disconnected during verification", new { command, registerDeviceId }, CancellationToken.None);
                 return;
             }
 
@@ -962,6 +1025,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             _deviceIdByLoginHandle[loginHandle] = device.Id;
             _loginHandleByDeviceId[device.Id] = loginHandle;
             StartRecordQueryLoopIfEnabled(device.Id, loginHandle);
+            await StartSmartEventSubscriptionIfEnabledAsync(device, loginHandle, remoteIp, remotePort, connectionLogger, cancellationToken);
             lock (_diagnosticsLock)
             {
                 _diagnostics.StartListenExSuccess = true;
@@ -978,6 +1042,195 @@ public sealed class DahuaNetSdkActiveRegisterService(
         finally
         {
             _subscriptionInProgress.TryRemove(device.Id, out _);
+        }
+    }
+
+    private async Task StartSmartEventSubscriptionIfEnabledAsync(Device device, IntPtr loginHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, CancellationToken cancellationToken)
+    {
+        if (_nativeClient is null || _smartEventCallback is null) return;
+
+        var enabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED"], defaultValue: true);
+        var needPicture = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_NEED_PICTURE"], defaultValue: true);
+        var channel = ParseInt(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_CHANNEL"], -1);
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.SmartEventEnabled = enabled;
+            _diagnostics.SmartEventNeedPicture = needPicture;
+            _diagnostics.SmartEventChannel = channel;
+        }
+        PersistDiagnostics();
+
+        if (!enabled)
+        {
+            logger.LogInformation("Dahua Smart Event subscription disabled by DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED=false");
+            return;
+        }
+
+        if (_smartEventAttachHandleByDeviceId.TryGetValue(device.Id, out var existingAttach) && existingAttach != IntPtr.Zero)
+        {
+            logger.LogDebug("Dahua Smart Event subscription already exists for device {DeviceId}", device.Id);
+            return;
+        }
+
+        logger.LogInformation("Smart event subscription starting. DeviceId={DeviceId}, LoginHandle={LoginHandle}, Channel={Channel}, NeedPicture={NeedPicture}", device.Id, loginHandle.ToInt64(), channel, needPicture);
+        var result = _nativeClient.TryStartSmartEventSubscription(loginHandle, channel, needPicture, _smartEventCallback, out var attachHandle, out var error);
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.SmartEventSubscriptionAttempted = true;
+            _diagnostics.SmartEventSubscriptionSuccess = result;
+            _diagnostics.SmartEventAttachHandle = attachHandle != IntPtr.Zero ? attachHandle.ToInt64() : null;
+            _diagnostics.SmartEventErrorSigned = result ? null : error;
+            _diagnostics.SmartEventErrorHex = result ? null : ToHex(error);
+        }
+        PersistDiagnostics();
+
+        if (!result)
+        {
+            logger.LogError("CLIENT_RealLoadPictureEx failed. DeviceId={DeviceId}, LoginHandle={LoginHandle}, ErrorSigned={ErrorSigned}, ErrorHex={ErrorHex}", device.Id, loginHandle.ToInt64(), error, ToHex(error));
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_smart_event_subscription_failed", "CLIENT_RealLoadPictureEx failed", new { loginHandle = loginHandle.ToInt64(), channel, needPicture, errorSigned = error, errorHex = ToHex(error) }, cancellationToken);
+            return;
+        }
+
+        _smartEventAttachHandleByDeviceId[device.Id] = attachHandle;
+        _deviceIdBySmartEventAttachHandle[attachHandle] = device.Id;
+        logger.LogInformation("CLIENT_RealLoadPictureEx success AttachHandle={AttachHandle}", attachHandle.ToInt64());
+        await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_smart_event_subscribed", "CLIENT_RealLoadPictureEx smart event subscription succeeded", new { loginHandle = loginHandle.ToInt64(), attachHandle = attachHandle.ToInt64(), channel, needPicture }, cancellationToken);
+    }
+
+    private void StopSmartEventSubscription(Guid deviceId)
+    {
+        if (_nativeClient is null) return;
+        if (!_smartEventAttachHandleByDeviceId.TryRemove(deviceId, out var attachHandle) || attachHandle == IntPtr.Zero) return;
+
+        _deviceIdBySmartEventAttachHandle.TryRemove(attachHandle, out _);
+        var stopped = _nativeClient.TryStopSmartEventSubscription(attachHandle);
+        logger.LogInformation("CLIENT_StopLoadPic called for device {DeviceId}. AttachHandle={AttachHandle}, Result={Result}", deviceId, attachHandle.ToInt64(), stopped);
+    }
+
+    private void OnSmartEventCallback(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, int sequence)
+    {
+        logger.LogInformation("Smart event received EventType=0x{EventType:X} {EventName}, AttachHandle={AttachHandle}, ImageBytes={ImageBytes}, Sequence={Sequence}", eventType, DahuaNetSdkSmartEventDecoder.ResolveEventName(eventType), analyzerHandle.ToInt64(), imageBufferSize, sequence);
+        _ = Task.Run(() => HandleSmartEventCallbackAsync(analyzerHandle, eventType, alarmInfo, imageBuffer, imageBufferSize, sequence));
+    }
+
+    private async Task HandleSmartEventCallbackAsync(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, int sequence)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
+        var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
+        var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
+
+        Device? device = null;
+        if (_deviceIdBySmartEventAttachHandle.TryGetValue(analyzerHandle, out var mappedDeviceId))
+        {
+            device = await db.Devices.FirstOrDefaultAsync(x => x.Id == mappedDeviceId, CancellationToken.None);
+        }
+
+        var decoded = DahuaNetSdkSmartEventDecoder.Decode(eventType, alarmInfo, imageBuffer, imageBufferSize, sequence);
+        var imagePath = TrySaveSmartEventImage(device?.Id, decoded.Record?.RecNo, imageBuffer, imageBufferSize);
+        if (!string.IsNullOrWhiteSpace(imagePath) && decoded.Record is not null)
+        {
+            decoded.Record.Url = imagePath;
+            decoded.Record.RawFields["StoredSnapshotPath"] = imagePath;
+            decoded.Record.RawFields["SnapshotSource"] = "NetSdkSmartEventImageBuffer";
+        }
+
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.LastSmartEventType = unchecked((int)eventType);
+            _diagnostics.LastSmartEventName = decoded.EventName;
+            _diagnostics.LastSmartEventPayloadBytes = 0;
+            _diagnostics.LastSmartEventImageBytesLength = (int)Math.Min(int.MaxValue, imageBufferSize);
+            _diagnostics.LastSmartEventParseStatus = decoded.ParseStatus;
+            _diagnostics.LastSmartEventUserId = decoded.Record?.UserId;
+            _diagnostics.LastSmartEventCardName = decoded.Record?.CardName;
+            _diagnostics.LastSmartEventRecNo = decoded.Record?.RecNo;
+            _diagnostics.LastSmartEventTime = decoded.Record?.CreateTime;
+            _diagnostics.LastSmartEventRawStructSummaryJson = decoded.RawStructSummaryJson;
+            _diagnostics.LastDecodeError = decoded.FailureReason;
+        }
+        PersistDiagnostics();
+
+        await PersistActiveRegisterRawEventAsync(
+            db,
+            device?.Id,
+            device?.RegisterDeviceId,
+            device?.LastKnownIp,
+            null,
+            0,
+            unchecked((int)eventType),
+            decoded.EventName,
+            [],
+            decoded.ParseStatus,
+            decoded.RawStructSummaryJson,
+            null,
+            CancellationToken.None);
+
+        logger.LogInformation("Smart event diagnostic. EventType=0x{EventType:X}, EventName={EventName}, Struct={Struct}, ParseStatus={ParseStatus}, UserID={UserID}, CardName={CardName}, RecNo={RecNo}, ImageSize={ImageSize}, Reason={Reason}",
+            eventType,
+            decoded.EventName,
+            decoded.StructName,
+            decoded.ParseStatus,
+            decoded.Record?.UserId,
+            decoded.Record?.CardName,
+            decoded.Record?.RecNo,
+            imageBufferSize,
+            decoded.FailureReason);
+
+        if (eventType == DahuaNetSdkSmartEventDecoder.EventIvsAccessControl)
+        {
+            logger.LogInformation("Smart event received EventType=0x204 EVENT_IVS_ACCESS_CTL");
+        }
+
+        if (device is null)
+        {
+            await connectionLogger.LogAsync(null, null, null, null, "netsdk_smart_event_unmatched", "Smart Event callback could not be matched to a BuildTrack device", new { decoded.EventName, decoded.ParseStatus, decoded.RawStructSummaryJson }, CancellationToken.None);
+            return;
+        }
+
+        if (decoded.Record is null)
+        {
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_skipped", decoded.FailureReason ?? "Smart Event did not decode into a Dahua access record", new { decoded.EventName, decoded.ParseStatus, decoded.RawStructSummaryJson }, CancellationToken.None);
+            return;
+        }
+
+        logger.LogInformation("Access smart event parsed UserID={UserID}, CardName={CardName}, RecNo={RecNo}, ImageSize={ImageSize}", decoded.Record.UserId, decoded.Record.CardName, decoded.Record.RecNo, imageBufferSize);
+
+        if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
+        {
+            logger.LogWarning("Decoded Dahua Smart Event skipped because DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED is false");
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_ingestion_disabled", "Decoded Smart Event skipped because Active Register ingestion is disabled", new { decoded.EventName, decoded.ParseStatus, decoded.RawStructSummaryJson }, CancellationToken.None);
+            return;
+        }
+
+        await pipeline.IngestAsync(device.Id, decoded.Record, DahuaEventSource.ActiveRegister, CancellationToken.None);
+        logger.LogInformation("Attendance/security event submitted to shared pipeline from Dahua Smart Event");
+    }
+
+    private string? TrySaveSmartEventImage(Guid? deviceId, long? recNo, IntPtr imageBuffer, uint imageBufferSize)
+    {
+        if (imageBuffer == IntPtr.Zero || imageBufferSize < 4) return null;
+
+        try
+        {
+            var length = (int)Math.Min(imageBufferSize, 10 * 1024 * 1024);
+            var bytes = new byte[length];
+            Marshal.Copy(imageBuffer, bytes, 0, bytes.Length);
+            if (bytes.Length < 1000 || bytes[0] != 0xFF || bytes[1] != 0xD8 || bytes[2] != 0xFF) return null;
+
+            var root = configuration["SECURITY_SNAPSHOT_STORAGE_PATH"];
+            if (string.IsNullOrWhiteSpace(root)) root = Path.Combine(AppContext.BaseDirectory, "data", "security-snapshots");
+            var directory = Path.Combine(root, "smart-events");
+            Directory.CreateDirectory(directory);
+            var fileName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{deviceId?.ToString("N") ?? "unknown"}_{recNo?.ToString() ?? Guid.NewGuid().ToString("N")}.jpg";
+            var path = Path.Combine(directory, fileName);
+            File.WriteAllBytes(path, bytes);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to save Dahua Smart Event image buffer");
+            return null;
         }
     }
 
@@ -1406,6 +1659,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private static int ParsePositiveInt(string? value, int defaultValue) =>
         int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
 
+    private static int ParseInt(string? value, int defaultValue) =>
+        int.TryParse(value, out var parsed) ? parsed : defaultValue;
+
     private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
     {
         try
@@ -1529,6 +1785,24 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.LastAlarmPayloadFirst256Hex = snapshot.LastAlarmPayloadFirst256Hex;
                 entity.LastAlarmDecodeStatus = snapshot.LastAlarmDecodeStatus;
                 entity.LastDecodedAlarmJson = snapshot.LastDecodedAlarmJson;
+                entity.SmartEventEnabled = snapshot.SmartEventEnabled;
+                entity.SmartEventNeedPicture = snapshot.SmartEventNeedPicture;
+                entity.SmartEventChannel = snapshot.SmartEventChannel;
+                entity.SmartEventSubscriptionAttempted = snapshot.SmartEventSubscriptionAttempted;
+                entity.SmartEventSubscriptionSuccess = snapshot.SmartEventSubscriptionSuccess;
+                entity.SmartEventAttachHandle = snapshot.SmartEventAttachHandle;
+                entity.SmartEventErrorSigned = snapshot.SmartEventErrorSigned;
+                entity.SmartEventErrorHex = snapshot.SmartEventErrorHex;
+                entity.LastSmartEventType = snapshot.LastSmartEventType;
+                entity.LastSmartEventName = snapshot.LastSmartEventName;
+                entity.LastSmartEventPayloadBytes = snapshot.LastSmartEventPayloadBytes;
+                entity.LastSmartEventImageBytesLength = snapshot.LastSmartEventImageBytesLength;
+                entity.LastSmartEventParseStatus = snapshot.LastSmartEventParseStatus;
+                entity.LastSmartEventUserId = snapshot.LastSmartEventUserId;
+                entity.LastSmartEventCardName = snapshot.LastSmartEventCardName;
+                entity.LastSmartEventRecNo = snapshot.LastSmartEventRecNo;
+                entity.LastSmartEventTime = snapshot.LastSmartEventTime;
+                entity.LastSmartEventRawStructSummaryJson = snapshot.LastSmartEventRawStructSummaryJson;
                 entity.NetSdkRecordQueryEnabled = snapshot.NetSdkRecordQueryEnabled;
                 entity.NetSdkRecordQueryDiagnosticMode = snapshot.NetSdkRecordQueryDiagnosticMode;
                 entity.LastRecordQueryAt = snapshot.LastRecordQueryAt;

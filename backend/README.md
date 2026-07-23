@@ -231,6 +231,28 @@ Backfill should remain optional and separate from Active Register. A future job 
 - `POST /api/devices/{id}/simulate-active-register`
 - `POST /api/devices/{id}/simulate-event`
 
+## Dahua Smart Event subscription
+
+Dahua official support confirmed that access/face events with images should be received through Smart Event subscription in addition to the existing Active Register alarm listener.
+
+Device-side setting:
+
+1. Open the Dahua terminal web interface.
+2. Go to `Access Control Settings -> Privacy Settings`.
+3. Enable `Image Capture Enablement`.
+
+Worker-side settings:
+
+```env
+DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED=true
+DAHUA_ACTIVE_REGISTER_SMART_EVENT_NEED_PICTURE=true
+DAHUA_ACTIVE_REGISTER_SMART_EVENT_CHANNEL=-1
+```
+
+After the Active Register server-connection login succeeds, the worker keeps the existing `CLIENT_StartListenEx` alarm subscription and also calls `CLIENT_RealLoadPictureEx` with the same login handle. The Smart Event callback filters `EVENT_IVS_ACCESS_CTL = 0x00000204` (`DEV_EVENT_ACCESS_CTL_INFO`), stores diagnostics, saves a JPEG image buffer when one is returned, and routes decoded access records through the same BuildTrack Dahua ingestion pipeline used by CGI polling.
+
+If `CLIENT_RealLoadPictureEx` fails, check `/api/dahua/active-register/status` for `smartEventSubscriptionSuccess`, `smartEventErrorSigned`, and `smartEventErrorHex`.
+
 ## Security notes
 
 - Device passwords are encrypted at rest with `BUILDTRACK_SECRET_KEY`.

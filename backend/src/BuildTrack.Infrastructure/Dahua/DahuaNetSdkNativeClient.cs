@@ -25,12 +25,16 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private readonly ClientResponseDevRegDelegate? _clientResponseDevReg;
     private readonly ClientStartListenExDelegate? _clientStartListenEx;
     private readonly ClientStopListenDelegate? _clientStopListen;
+    private readonly ClientRealLoadPictureExDelegate? _clientRealLoadPictureEx;
+    private readonly ClientStopLoadPicDelegate? _clientStopLoadPic;
     private readonly ClientFindRecordDelegate? _clientFindRecord;
     private readonly ClientFindNextRecordDelegate? _clientFindNextRecord;
     private readonly ClientFindRecordCloseDelegate? _clientFindRecordClose;
     private readonly DisconnectCallback _disconnectCallback;
     private readonly ReconnectCallback _reconnectCallback;
+    private readonly AnalyzerDataCallback _analyzerDataCallback;
     private AlarmMessageCallback? _alarmMessageCallback;
+    private SmartEventCallback? _smartEventCallback;
     private bool _initialized;
 
     public DahuaNetSdkNativeClient(IntPtr libraryHandle, ILogger logger)
@@ -52,11 +56,14 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         _clientResponseDevReg = TryGetDelegate<ClientResponseDevRegDelegate>("CLIENT_ResponseDevReg");
         _clientStartListenEx = TryGetDelegate<ClientStartListenExDelegate>("CLIENT_StartListenEx");
         _clientStopListen = TryGetDelegate<ClientStopListenDelegate>("CLIENT_StopListen");
+        _clientRealLoadPictureEx = TryGetDelegate<ClientRealLoadPictureExDelegate>("CLIENT_RealLoadPictureEx");
+        _clientStopLoadPic = TryGetDelegate<ClientStopLoadPicDelegate>("CLIENT_StopLoadPic");
         _clientFindRecord = TryGetDelegate<ClientFindRecordDelegate>("CLIENT_FindRecord");
         _clientFindNextRecord = TryGetDelegate<ClientFindNextRecordDelegate>("CLIENT_FindNextRecord");
         _clientFindRecordClose = TryGetDelegate<ClientFindRecordCloseDelegate>("CLIENT_FindRecordClose");
         _disconnectCallback = OnDisconnect;
         _reconnectCallback = OnReconnect;
+        _analyzerDataCallback = OnAnalyzerDataCallback;
     }
 
     public int LastErrorCode => _clientGetLastError?.Invoke() ?? 0;
@@ -68,6 +75,8 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
         && _clientStopListen is not null;
 
     public bool HasRecordQueryExports => _clientFindRecord is not null && _clientFindNextRecord is not null && _clientFindRecordClose is not null;
+
+    public bool HasSmartEventExports => _clientRealLoadPictureEx is not null && _clientStopLoadPic is not null;
 
     public static IReadOnlyDictionary<string, object> GetRecordQueryLayoutDiagnostics() => new Dictionary<string, object>
     {
@@ -222,6 +231,42 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     {
         if (loginHandle == IntPtr.Zero || _clientStopListen is null) return false;
         return _clientStopListen(loginHandle);
+    }
+
+    public bool TryStartSmartEventSubscription(
+        IntPtr loginHandle,
+        int channelId,
+        bool needPicture,
+        SmartEventCallback callback,
+        out IntPtr attachHandle,
+        out int errorCode)
+    {
+        attachHandle = IntPtr.Zero;
+        errorCode = 0;
+        _smartEventCallback = callback;
+
+        if (loginHandle == IntPtr.Zero || _clientRealLoadPictureEx is null)
+        {
+            errorCode = LastErrorCode;
+            return false;
+        }
+
+        attachHandle = _clientRealLoadPictureEx(
+            loginHandle,
+            channelId,
+            DahuaNetSdkSmartEventDecoder.EventIvsAccessControl,
+            needPicture,
+            _analyzerDataCallback,
+            IntPtr.Zero,
+            IntPtr.Zero);
+        errorCode = LastErrorCode;
+        return attachHandle != IntPtr.Zero;
+    }
+
+    public bool TryStopSmartEventSubscription(IntPtr attachHandle)
+    {
+        if (attachHandle == IntPtr.Zero || _clientStopLoadPic is null) return false;
+        return _clientStopLoadPic(attachHandle);
     }
 
     public bool TryLogout(IntPtr loginHandle)
@@ -632,6 +677,20 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     private void OnReconnect(IntPtr loginId, string deviceIp, int devicePort, IntPtr userData) =>
         _logger.LogInformation("Dahua device reconnected. LoginHandle {LoginHandle}, Remote {RemoteIp}:{RemotePort}", loginId, deviceIp, devicePort);
 
+    private int OnAnalyzerDataCallback(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, IntPtr userData, int sequence, IntPtr reserved)
+    {
+        try
+        {
+            _smartEventCallback?.Invoke(analyzerHandle, eventType, alarmInfo, imageBuffer, imageBufferSize, sequence);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Dahua NetSDK Smart Event callback failed. Listener continues running.");
+        }
+
+        return 0;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FindRecordAccessCtlCardRecOrder
     {
@@ -876,6 +935,8 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate bool AlarmMessageCallback(int command, IntPtr loginHandle, IntPtr payload, uint payloadLength, string deviceIp, int devicePort, IntPtr userData);
 
+    public delegate void SmartEventCallback(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, int sequence);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientInitDelegate(DisconnectCallback disconnectCallback, IntPtr userData);
 
@@ -945,6 +1006,23 @@ internal sealed class DahuaNetSdkNativeClient : IDisposable
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientStopListenDelegate(IntPtr loginHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ClientRealLoadPictureExDelegate(
+        IntPtr loginHandle,
+        int channelId,
+        uint alarmType,
+        [MarshalAs(UnmanagedType.Bool)] bool needPicture,
+        AnalyzerDataCallback callback,
+        IntPtr userData,
+        IntPtr reserved);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate bool ClientStopLoadPicDelegate(IntPtr analyzerHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int AnalyzerDataCallback(IntPtr analyzerHandle, uint alarmType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, IntPtr userData, int sequence, IntPtr reserved);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate bool ClientFindRecordDelegate(IntPtr loginHandle, ref NetInFindRecordParam input, ref NetOutFindRecordParam output, int waitTime);
 
