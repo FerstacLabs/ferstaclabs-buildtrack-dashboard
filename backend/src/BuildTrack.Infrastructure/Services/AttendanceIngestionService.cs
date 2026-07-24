@@ -81,7 +81,7 @@ public sealed class AttendanceIngestionService(
             DeviceId = device.Id,
             WorkerId = worker?.Id,
             WorkerExternalId = string.IsNullOrWhiteSpace(record.UserId) ? null : record.UserId,
-            WorkerName = !string.IsNullOrWhiteSpace(record.CardName) ? record.CardName : worker?.FullName,
+            WorkerName = worker?.FullName ?? (!string.IsNullOrWhiteSpace(record.CardName) ? record.CardName : null),
             EventTime = record.CreateTime,
             Direction = record.NormalizedDirection,
             Status = record.NormalizedStatus,

@@ -1194,22 +1194,24 @@ public sealed class DahuaNetSdkActiveRegisterService(
             return;
         }
 
+        var decodedTrustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decoded.Record, decoded.RawStructSummaryJson, null);
         var resolvedWorker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(
             x => x.SiteId == device.SiteId
-                 && x.ExternalWorkerCode == decoded.Record.UserId
+                 && x.ExternalWorkerCode == decodedTrustedRecord.UserId
                  && x.Status == WorkerStatus.Active,
             CancellationToken.None);
+        var trustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
         var workerResolved = resolvedWorker is not null;
-        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(decoded.Record, resolvedWorker);
+        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(trustedRecord, resolvedWorker);
 
         logger.LogInformation(
             "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, RecNo={RecNo}, ImageSize={ImageSize}",
-            decoded.Record.UserId,
-            decoded.Record.CardName,
-            decoded.Record.StatusRaw,
-            decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
+            trustedRecord.UserId,
+            trustedRecord.CardName,
+            trustedRecord.StatusRaw,
+            trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
             workerResolved,
-            decoded.Record.RecNo,
+            trustedRecord.RecNo,
             imageBufferSize);
 
         if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
@@ -1220,26 +1222,26 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
 
         var recordToIngest = recognizedAttendance
-            ? decoded.Record
-            : DahuaSmartEventClassification.BuildUnknownFaceRecord(decoded.Record, decoded.RawStructSummaryJson);
+            ? trustedRecord
+            : DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson);
 
         if (recognizedAttendance)
         {
             logger.LogInformation("Smart event classified as recognized attendance. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
-                decoded.Record.StatusRaw,
-                decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
-                decoded.Record.UserId,
-                decoded.Record.CardName,
+                trustedRecord.StatusRaw,
+                trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
+                trustedRecord.UserId,
+                trustedRecord.CardName,
                 workerResolved,
                 imageBufferSize);
         }
         else
         {
             logger.LogWarning("Smart event classified as unknown face. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
-                decoded.Record.StatusRaw,
-                decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
-                decoded.Record.UserId,
-                decoded.Record.CardName,
+                trustedRecord.StatusRaw,
+                trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
+                trustedRecord.UserId,
+                trustedRecord.CardName,
                 workerResolved,
                 imageBufferSize);
         }
