@@ -45,7 +45,7 @@ services:
       - "8080:8080"
     volumes:
       - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
-      - ./data/security-snapshots:/app/data/security-snapshots
+      - ./data:/app/data
 
   buildtrack-dahua-worker:
     build:
@@ -108,7 +108,7 @@ services:
       # - "7001:7001/tcp"
     volumes:
       - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
-      - ./data/security-snapshots:/app/data/security-snapshots
+      - ./data:/app/data
 
 volumes:
   buildtrack-postgres:

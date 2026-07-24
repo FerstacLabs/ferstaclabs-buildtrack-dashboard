@@ -266,6 +266,23 @@ app.MapGet("/api/sites/{siteId:guid}/attendance-live", async (Guid siteId, int? 
     return await MapAttendanceEventsAsync(db, events, ct);
 });
 
+app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, IConfiguration configuration, CancellationToken ct) =>
+{
+    var attendanceEvent = await db.AttendanceEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    if (attendanceEvent is null || string.IsNullOrWhiteSpace(attendanceEvent.SnapshotPath)) return Results.NotFound();
+
+    var storageRoot = configuration["SECURITY_SNAPSHOT_STORAGE_PATH"];
+    if (string.IsNullOrWhiteSpace(storageRoot)) storageRoot = "/app/data/security-snapshots";
+    var root = Path.GetFullPath(storageRoot);
+    var candidate = Path.GetFullPath(attendanceEvent.SnapshotPath);
+
+    if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return Results.NotFound();
+    if (!File.Exists(candidate)) return Results.NotFound();
+
+    var bytes = await File.ReadAllBytesAsync(candidate, ct);
+    return Results.File(bytes, "image/jpeg");
+});
+
 
 app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId, BuildTrackDbContext db, CancellationToken ct) =>
 {
@@ -324,6 +341,60 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         .OrderBy(x => x.CheckInTime)
         .ToListAsync(ct);
 
+    if (sessions.Count == 0)
+    {
+        var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
+        var events = await db.AttendanceEvents.AsNoTracking()
+            .Where(x => x.SiteId == siteId
+                        && x.EventTime >= dayStartUtc
+                        && x.EventTime < dayEndUtc
+                        && x.Status == AttendanceEventStatus.Ok
+                        && x.WorkerExternalId != null)
+            .OrderBy(x => x.EventTime)
+            .ToListAsync(ct);
+
+        var fallbackRows = events
+            .GroupBy(x => x.WorkerExternalId!)
+            .Select(group =>
+            {
+                var ordered = group.OrderBy(x => x.EventTime).ToArray();
+                var first = ordered.First();
+                var last = ordered.Last();
+                var workedMinutes = Math.Max(0, (int)Math.Floor((last.EventTime - first.EventTime).TotalMinutes));
+                return new AttendanceSessionResponse(
+                    first.Id,
+                    first.WorkerExternalId ?? string.Empty,
+                    ordered.LastOrDefault(x => !string.IsNullOrWhiteSpace(x.WorkerName))?.WorkerName ?? first.WorkerName,
+                    first.EventTime,
+                    null,
+                    FormatLocalTime(first.EventTime, timeZone),
+                    null,
+                    last.EventTime,
+                    FormatLocalTime(last.EventTime, timeZone),
+                    null,
+                    null,
+                    null,
+                    last.EventTime >= DateTimeOffset.UtcNow.AddMinutes(-15) ? "Az əvvəl göründü" : "Bugün görünüb",
+                    false,
+                    workedMinutes,
+                    AttendanceSessionStatus.Open,
+                    last.Source,
+                    last.Method,
+                    last.SnapshotPath,
+                    string.IsNullOrWhiteSpace(last.SnapshotPath) ? null : $"/api/attendance-events/{last.Id}/snapshot");
+            })
+            .OrderBy(x => x.CheckInTime)
+            .ToArray();
+
+        return Results.Ok(new AttendanceDailyResponse(
+            workDate,
+            fallbackRows.Length,
+            fallbackRows.Length,
+            0,
+            Math.Round(fallbackRows.Sum(x => x.WorkedMinutes) / 60d, 2),
+            fallbackRows));
+    }
+
     var now = DateTimeOffset.UtcNow;
     var dailySessions = sessions
         .GroupBy(session => new { session.SiteId, session.DeviceId, session.WorkerExternalId, session.WorkDate })
@@ -351,12 +422,27 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         .OrderBy(row => row.CheckInTime)
         .ToArray();
 
+    var eventIds = dailySessions
+        .SelectMany(row => new[] { row.Session.LastSeenEventId, row.Session.CheckOutEventId, row.Session.CheckInEventId })
+        .Where(id => id is not null)
+        .Select(id => id!.Value)
+        .Distinct()
+        .ToArray();
+    var eventsById = eventIds.Length == 0
+        ? new Dictionary<Guid, AttendanceEvent>()
+        : await db.AttendanceEvents.AsNoTracking().Where(x => eventIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+
     var sessionRows = dailySessions.Select(row =>
     {
         var confirmedCheckoutTime = IsCheckoutConfirmed(row.Session) ? row.CheckOutTime : null;
         var lastSeenTime = row.LastSeenTime;
         var effectiveEnd = confirmedCheckoutTime ?? lastSeenTime;
         var workedMinutes = Math.Max(0, (int)Math.Floor((effectiveEnd - row.CheckInTime).TotalMinutes));
+        var snapshotEvent = row.Session.LastSeenEventId is not null && eventsById.TryGetValue(row.Session.LastSeenEventId.Value, out var lastSeenEvent)
+            ? lastSeenEvent
+            : row.Session.CheckOutEventId is not null && eventsById.TryGetValue(row.Session.CheckOutEventId.Value, out var checkoutEvent)
+                ? checkoutEvent
+                : eventsById.GetValueOrDefault(row.Session.CheckInEventId);
         return new AttendanceSessionResponse(
             row.Session.Id,
             row.Session.WorkerExternalId,
@@ -374,7 +460,10 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
             confirmedCheckoutTime is not null,
             workedMinutes,
             row.Status,
-            row.Source);
+            row.Source,
+            snapshotEvent?.Method,
+            snapshotEvent?.SnapshotPath,
+            snapshotEvent is null || string.IsNullOrWhiteSpace(snapshotEvent.SnapshotPath) ? null : $"/api/attendance-events/{snapshotEvent.Id}/snapshot");
     }).ToArray();
 
     return Results.Ok(new AttendanceDailyResponse(
@@ -899,6 +988,15 @@ static TimeZoneInfo ResolveApiTimeZone(string? timeZoneId)
 static bool IsCheckoutConfirmed(AttendanceSession session) => session.CheckOutTime is not null && session.CloseReason is not null && new[] { "Manual", "AutoEndOfDay", "ExitDevice", "DeviceDirection" }.Contains(session.CloseReason);
 static string FormatLocalTime(DateTimeOffset value, TimeZoneInfo timeZone) =>
     TimeZoneInfo.ConvertTime(value, timeZone).ToString("yyyy-MM-dd HH:mm:ss");
+
+static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(DateOnly workDate, TimeZoneInfo timeZone)
+{
+    var localStart = workDate.ToDateTime(TimeOnly.MinValue);
+    var startOffset = timeZone.GetUtcOffset(localStart);
+    var startUtc = new DateTimeOffset(localStart, startOffset).ToUniversalTime();
+    return (startUtc, startUtc.AddDays(1));
+}
+
 static async Task<AttendanceEventResponse[]> MapAttendanceEventsAsync(
     BuildTrackDbContext db,
     IReadOnlyCollection<AttendanceEvent> events,

@@ -39,6 +39,8 @@ public static class ApiResponseMapper
         attendanceEvent.Status,
         attendanceEvent.Method,
         attendanceEvent.RawRecNo,
+        attendanceEvent.SnapshotPath,
+        string.IsNullOrWhiteSpace(attendanceEvent.SnapshotPath) ? null : $"/api/attendance-events/{attendanceEvent.Id}/snapshot",
         attendanceEvent.Source,
         attendanceEvent.CreatedAt);
 }

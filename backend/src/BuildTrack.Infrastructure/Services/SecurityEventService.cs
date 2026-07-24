@@ -68,6 +68,10 @@ public sealed class SecurityEventService(
             Method = record.NormalizedMethod.ToString(),
             Direction = record.NormalizedDirection.ToString(),
             SnapshotPath = record.Url,
+            StoredSnapshotPath = IsLocalSmartEventSnapshot(record) ? record.Url : null,
+            StoredSnapshotContentType = IsLocalSmartEventSnapshot(record) ? "image/jpeg" : null,
+            SnapshotDownloadStatus = IsLocalSmartEventSnapshot(record) ? "Stored" : null,
+            SnapshotSource = IsLocalSmartEventSnapshot(record) ? "NetSdkSmartEventImageBuffer" : null,
             ErrorCode = record.RawFields.GetValueOrDefault("ErrorCode"),
             Message = "Tanınmayan üz aşkarlandı",
             Source = source,
@@ -90,6 +94,12 @@ public sealed class SecurityEventService(
         logger.LogWarning("Created unknown face security event. Event {EventId}, Device {DeviceId}, RecNo {RecNo}, SnapshotPath {SnapshotPath}", securityEvent.Id, deviceId, record.RecNo, record.Url);
         logger.LogInformation("Unknown face snapshot path: {SnapshotPath}", record.Url);
 
+        if (IsLocalSmartEventSnapshot(record))
+        {
+            logger.LogInformation("UnknownFace Smart Event snapshot already stored locally. SecurityEventId={SecurityEventId}, StoredSnapshotPath={StoredSnapshotPath}", securityEvent.Id, securityEvent.StoredSnapshotPath);
+            return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Created, securityEvent);
+        }
+
         var snapshotResult = await snapshotStore.TryStoreSnapshotAsync(securityEvent, cancellationToken);
         securityEvent.StoredSnapshotPath = snapshotResult.StoredPath;
         securityEvent.StoredSnapshotContentType = snapshotResult.ContentType;
@@ -105,6 +115,12 @@ public sealed class SecurityEventService(
     private static bool IsDuplicateException(DbUpdateException ex) =>
         ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true
         || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsLocalSmartEventSnapshot(DahuaAccessRecord record) =>
+        record.RawFields.TryGetValue("SnapshotSource", out var source)
+        && string.Equals(source, "NetSdkSmartEventImageBuffer", StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(record.Url)
+        && Path.IsPathRooted(record.Url);
 }
 
 

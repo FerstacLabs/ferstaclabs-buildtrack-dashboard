@@ -49,6 +49,8 @@ public sealed record AttendanceEventResponse(
     AttendanceEventStatus Status,
     AttendanceMethod Method,
     long? RawRecNo,
+    string? SnapshotPath,
+    string? SnapshotUrl,
     string Source,
     DateTimeOffset CreatedAt);
 
@@ -106,7 +108,10 @@ public sealed record AttendanceSessionResponse(
     bool IsCheckoutConfirmed,
     int WorkedMinutes,
     AttendanceSessionStatus Status,
-    string Source);
+    string Source,
+    AttendanceMethod? Method = null,
+    string? SnapshotPath = null,
+    string? SnapshotUrl = null);
 public sealed record SecurityEventResponse(
     Guid Id,
     DateTimeOffset EventTime,

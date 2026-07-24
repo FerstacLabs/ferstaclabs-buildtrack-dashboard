@@ -60,6 +60,7 @@ export interface AttendanceLiveEvent {
   method: AttendanceMethod
   rawRecNo?: number
   snapshotPath?: string
+  snapshotUrl?: string
   source: string
   createdAt: string
 }
@@ -105,6 +106,9 @@ export interface AttendanceSessionRow {
   workedMinutes: number
   status: 'Open' | 'Closed'
   source: string
+  method?: AttendanceMethod
+  snapshotPath?: string
+  snapshotUrl?: string
 }
 
 export interface AttendanceDailySummary {
@@ -293,6 +297,7 @@ export const buildTrackBackendApi = {
   getSecurityEvents: async (siteId: string, date?: string) => unwrapArray<SecurityEventRow>(await request<unknown>(`/api/sites/${siteId}/security-events${date ? `?date=${date}` : ''}`)),
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   securitySnapshotUrl: (snapshotUrl: string) => `${API_BASE}${snapshotUrl}`,
+  attendanceSnapshotUrl: (snapshotUrl?: string) => snapshotUrl ? `${API_BASE}${snapshotUrl}` : '',
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
   getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),
   getActiveRegisterRawEvents: async (limit = 100) => unwrapArray<ActiveRegisterRawEventRow>(await request<unknown>(`/api/dahua/active-register/raw-events?limit=${limit}`)),

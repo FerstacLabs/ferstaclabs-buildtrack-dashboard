@@ -22,12 +22,35 @@ const statusLabel: Record<string, string> = {
 
 const showDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
 
+const sourceLabel = (source: string) => {
+  if (source === 'dahua_active_register') return 'Active Register'
+  if (source === 'dahua_cgi_polling') return 'CGI polling'
+  if (source === 'attendance_live_status') return 'Live status'
+  return source
+}
+
 const formatDuration = (minutes: number) => {
   const safeMinutes = Math.max(0, Math.floor(minutes))
   const hours = Math.floor(safeMinutes / 60)
   const rest = safeMinutes % 60
   if (hours === 0) return `${rest} dəq`
   return `${hours}s ${rest}dəq`
+}
+
+const SnapshotThumbnail = ({ row }: { row: AttendanceSessionRow }) => {
+  const [failed, setFailed] = useState(false)
+  if (!row.snapshotUrl || failed) return <span className="snapshot-placeholder">Şəkil yoxdur</span>
+
+  return (
+    <img
+      src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
+      alt="Davamiyyət snapshot"
+      width={84}
+      height={54}
+      className="snapshot-thumb-image"
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 const bakuIsoDate = (date = new Date()) => {
@@ -150,7 +173,7 @@ export const AttendanceLivePage = () => {
     source: 'attendance_live_status',
   }))
   const sessions = summary?.sessions.length ? summary.sessions : liveWorkerRows
-  const activeWorkersCount = liveStatus?.activeWorkersCount ?? summary?.activeWorkersCount ?? 0
+  const activeWorkersCount = summary?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0
   const totalCheckedIn = summary?.totalWorkersCheckedIn || sessions.length
   const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
   const totalWorkedHours = summary?.totalWorkedHours ?? Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
@@ -162,8 +185,10 @@ export const AttendanceLivePage = () => {
     { title: 'Son görülmə', dataIndex: 'lastSeenTimeLocal', render: (value, row) => value ?? row.checkInTimeLocal ?? '-' },
     { title: 'Təsdiqli çıxış', dataIndex: 'confirmedCheckOutTimeLocal', render: (value) => value ?? 'Yoxdur' },
     { title: 'Status', dataIndex: 'displayStatus', render: (value, row) => <Tag color={statusColor[row.status] ?? 'default'}>{value ?? statusLabel[row.status] ?? row.status}</Tag> },
+    { title: 'Metod', dataIndex: 'method', render: (value) => value ? <Tag color={value === 'Face' ? 'green' : 'blue'}>{value}</Tag> : '-' },
+    { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} /> },
     { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (value) => formatDuration(value) },
-    { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('cgi') ? 'cyan' : 'purple'}>{value}</Tag> },
+    { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
 
   return (
@@ -218,7 +243,7 @@ export const AttendanceLivePage = () => {
           rowKey="id"
           pagination={{ pageSize: 12 }}
           scroll={{ x: 'max-content' }}
-          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün davamiyyət sessiyası tapılmadı. Real Dahua CGI event gəldikdən sonra burada giriş sessiyası görünəcək.' }}
+          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün davamiyyət sessiyası tapılmadı. Real Dahua Active Register / Smart Event gəldikdən sonra burada davamiyyət görünəcək.' }}
         />
       </section>
     </div>
