@@ -9,11 +9,14 @@ public static class DahuaSmartEventClassification
     public static DahuaAccessRecord BuildTrustedRecord(DahuaAccessRecord source, string rawStructSummaryJson, Worker? resolvedWorker)
     {
         var summary = TrustedSmartEventSummary.Parse(rawStructSummaryJson);
-        var trustedUserId = FirstNotBlank(summary.UserId, source.UserId);
-        var trustedStatus = FirstNotBlank(summary.Status, source.StatusRaw);
+        var sourceUserIdConfidence = source.RawFields.GetValueOrDefault("UserIdConfidence");
+        var sourceStatusConfidence = source.RawFields.GetValueOrDefault("StatusConfidence");
+        var sourceCardNameConfidence = source.RawFields.GetValueOrDefault("CardNameConfidence");
+        var trustedUserId = FirstNotBlank(summary.UserIdIfHighConfidence, IsHighConfidence(sourceUserIdConfidence) ? source.UserId : null);
+        var trustedStatus = FirstNotBlank(summary.StatusIfHighConfidence, IsHighConfidence(sourceStatusConfidence) ? source.StatusRaw : null);
         var trustedMethod = NormalizeMethod(FirstNotBlank(summary.Method, source.MethodRaw));
         var trustedDirection = FirstNotBlank(summary.Direction, source.Type);
-        var trustedCardName = FirstNotBlank(summary.CardName, source.CardName);
+        var trustedCardName = FirstNotBlank(summary.CardNameIfHighConfidence, IsHighConfidence(sourceCardNameConfidence) ? source.CardName : null);
 
         var workerMatches = resolvedWorker is not null
                             && !string.IsNullOrWhiteSpace(trustedUserId)
@@ -35,6 +38,15 @@ public static class DahuaSmartEventClassification
             ["CardName"] = displayName,
             ["TrustedCardName"] = trustedCardName,
             ["WorkerResolutionStatus"] = workerResolutionStatus,
+            ["Classification"] = "Pending",
+            ["ClassificationReason"] = "Smart Event classification pending",
+            ["UserIdSource"] = FirstNotBlank(summary.UserIdSource, source.RawFields.GetValueOrDefault("UserIdSource"), "Unknown"),
+            ["CardNameSource"] = FirstNotBlank(summary.CardNameSource, source.RawFields.GetValueOrDefault("CardNameSource"), "Unknown"),
+            ["StatusSource"] = FirstNotBlank(summary.StatusSource, source.RawFields.GetValueOrDefault("StatusSource"), "Unknown"),
+            ["UserIdConfidence"] = FirstNotBlank(summary.UserIdConfidence, sourceUserIdConfidence, "Low"),
+            ["CardNameConfidence"] = FirstNotBlank(summary.CardNameConfidence, sourceCardNameConfidence, "Low"),
+            ["StatusConfidence"] = FirstNotBlank(summary.StatusConfidence, sourceStatusConfidence, "Low"),
+            ["UsedDecodedStringCandidatesForClassification"] = "false",
             ["Method"] = trustedMethod,
             ["Type"] = string.IsNullOrWhiteSpace(trustedDirection) ? "Entry" : trustedDirection,
         };
@@ -62,6 +74,9 @@ public static class DahuaSmartEventClassification
         && string.Equals(record.StatusRaw, "1", StringComparison.OrdinalIgnoreCase)
         && !string.IsNullOrWhiteSpace(record.UserId)
         && !string.IsNullOrWhiteSpace(record.CardName)
+        && HasHighConfidence(record, "StatusConfidence")
+        && HasHighConfidence(record, "UserIdConfidence")
+        && HasHighConfidence(record, "CardNameConfidence")
         && !HasFailureErrorCode(record);
 
     public static DahuaAccessRecord BuildUnknownFaceRecord(DahuaAccessRecord source, string rawStructSummaryJson)
@@ -75,6 +90,13 @@ public static class DahuaSmartEventClassification
             ["UserId"] = null,
             ["CardName"] = null,
             ["Status"] = "0",
+            ["UserIdConfidence"] = source.RawFields.GetValueOrDefault("UserIdConfidence") ?? "Low",
+            ["CardNameConfidence"] = source.RawFields.GetValueOrDefault("CardNameConfidence") ?? "Low",
+            ["StatusConfidence"] = source.RawFields.GetValueOrDefault("StatusConfidence") ?? "Low",
+            ["UserIdSource"] = source.RawFields.GetValueOrDefault("UserIdSource") ?? "Unknown",
+            ["CardNameSource"] = source.RawFields.GetValueOrDefault("CardNameSource") ?? "Unknown",
+            ["StatusSource"] = source.RawFields.GetValueOrDefault("StatusSource") ?? "Unknown",
+            ["UsedDecodedStringCandidatesForClassification"] = "false",
             ["Method"] = "15",
             ["Type"] = string.IsNullOrWhiteSpace(source.Type) ? "Entry" : source.Type,
         };
@@ -99,6 +121,19 @@ public static class DahuaSmartEventClassification
         return !string.IsNullOrWhiteSpace(errorCode) && errorCode != "0";
     }
 
+    public static void MarkRecognizedAttendance(DahuaAccessRecord record)
+    {
+        record.RawFields["Classification"] = "RecognizedAttendance";
+        record.RawFields["ClassificationReason"] = "High-confidence Smart Event access fields passed attendance rules";
+        record.RawFields["UsedDecodedStringCandidatesForClassification"] = "false";
+    }
+
+    private static bool HasHighConfidence(DahuaAccessRecord record, string key) =>
+        IsHighConfidence(record.RawFields.GetValueOrDefault(key));
+
+    private static bool IsHighConfidence(string? value) =>
+        string.Equals(value, "High", StringComparison.OrdinalIgnoreCase);
+
     private static string? FirstNotBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
@@ -119,6 +154,17 @@ public static class DahuaSmartEventClassification
         string? ErrorCode,
         int? ImageBytesLength)
     {
+        public string? UserIdIfHighConfidence => IsHighConfidence(UserIdConfidence) ? UserId : null;
+        public string? CardNameIfHighConfidence => IsHighConfidence(CardNameConfidence) ? CardName : null;
+        public string? StatusIfHighConfidence => IsHighConfidence(StatusConfidence) ? Status : null;
+
+        public string? UserIdSource { get; init; }
+        public string? CardNameSource { get; init; }
+        public string? StatusSource { get; init; }
+        public string? UserIdConfidence { get; init; }
+        public string? CardNameConfidence { get; init; }
+        public string? StatusConfidence { get; init; }
+
         public static TrustedSmartEventSummary Parse(string rawStructSummaryJson)
         {
             if (string.IsNullOrWhiteSpace(rawStructSummaryJson))
@@ -139,7 +185,15 @@ public static class DahuaSmartEventClassification
                     DateTimeOffset.TryParse(GetString(root, "EventTime"), out var eventTime) ? eventTime : null,
                     GetString(root, "SnapshotPath"),
                     GetString(root, "ErrorCode"),
-                    GetInt(root, "ImageBytesLength"));
+                    GetInt(root, "ImageBytesLength"))
+                {
+                    UserIdSource = GetString(root, "UserIdSource"),
+                    CardNameSource = GetString(root, "CardNameSource"),
+                    StatusSource = GetString(root, "StatusSource"),
+                    UserIdConfidence = GetString(root, "UserIdConfidence"),
+                    CardNameConfidence = GetString(root, "CardNameConfidence"),
+                    StatusConfidence = GetString(root, "StatusConfidence"),
+                };
             }
             catch (JsonException)
             {

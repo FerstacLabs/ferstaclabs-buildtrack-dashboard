@@ -295,15 +295,25 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid siteId, string worker
         : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
     var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
 
+    var mappedWorker = await db.Workers.AsNoTracking()
+        .FirstOrDefaultAsync(x => x.SiteId == siteId && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct);
+
     var events = await db.AttendanceEvents.AsNoTracking()
         .Where(x => x.SiteId == siteId
                     && x.WorkerExternalId == workerExternalId
                     && x.EventTime >= dayStartUtc
                     && x.EventTime < dayEndUtc
                     && x.Status == AttendanceEventStatus.Ok
+                    && x.Method == AttendanceMethod.Face
+                    && x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
                     && x.SnapshotPath != null)
         .OrderBy(x => x.EventTime)
         .ToListAsync(ct);
+
+    events = events
+        .Where(IsRecognizedAttendancePayload)
+        .Where(x => mappedWorker is null || string.Equals(x.WorkerName, mappedWorker.FullName, StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
     return Results.Ok(events.Select(attendanceEvent => new AttendanceSnapshotResponse(
         attendanceEvent.Id,
@@ -329,6 +339,12 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
         .ToListAsync(ct);
     var staleOpenSessionsCount = await db.AttendanceSessions.AsNoTracking()
         .CountAsync(x => x.SiteId == siteId && x.WorkDate < workDate && x.Status == AttendanceSessionStatus.Open, ct);
+    var liveWorkerCodes = sessions.Select(x => x.WorkerExternalId).Distinct().ToArray();
+    var liveWorkersByCode = liveWorkerCodes.Length == 0
+        ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        : await db.Workers.AsNoTracking()
+            .Where(x => x.SiteId == siteId && liveWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
 
     var workers = AttendanceSessionPlanner.SelectCurrentOpenSessions(sessions, workDate)
         .GroupBy(session => new { session.DeviceId, session.WorkerExternalId, session.WorkDate })
@@ -339,7 +355,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
             var lastSeenTime = session.LastSeenTime ?? session.CheckInTime;
             return new AttendanceLiveWorkerResponse(
                 session.WorkerExternalId,
-                session.WorkerName,
+                liveWorkersByCode.TryGetValue(session.WorkerExternalId, out var mappedName) ? mappedName : session.WorkerName,
                 session.CheckInTime,
                 FormatLocalTime(session.CheckInTime, timeZone),
                 lastSeenTime,
@@ -383,6 +399,19 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
                         && x.WorkerExternalId != null)
             .OrderBy(x => x.EventTime)
             .ToListAsync(ct);
+        var fallbackWorkerCodes = events.Select(x => x.WorkerExternalId).Where(x => x is not null).Distinct().ToArray();
+        var fallbackWorkers = fallbackWorkerCodes.Length == 0
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : await db.Workers.AsNoTracking()
+                .Where(x => x.SiteId == siteId && fallbackWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+                .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
+        events = events
+            .Where(x => x.Source != DahuaEventSourceExtensions.ActiveRegisterSource || IsRecognizedAttendancePayload(x))
+            .Where(x => x.Source != DahuaEventSourceExtensions.ActiveRegisterSource
+                        || x.WorkerExternalId is null
+                        || !fallbackWorkers.TryGetValue(x.WorkerExternalId, out var canonicalName)
+                        || string.Equals(x.WorkerName, canonicalName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         var fallbackRows = events
             .GroupBy(x => x.WorkerExternalId!)
@@ -395,7 +424,9 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
                 return new AttendanceSessionResponse(
                     first.Id,
                     first.WorkerExternalId ?? string.Empty,
-                    ordered.LastOrDefault(x => !string.IsNullOrWhiteSpace(x.WorkerName))?.WorkerName ?? first.WorkerName,
+                    first.WorkerExternalId is not null && fallbackWorkers.TryGetValue(first.WorkerExternalId, out var mappedName)
+                        ? mappedName
+                        : ordered.LastOrDefault(x => !string.IsNullOrWhiteSpace(x.WorkerName))?.WorkerName ?? first.WorkerName,
                     first.EventTime,
                     null,
                     FormatLocalTime(first.EventTime, timeZone),
@@ -452,6 +483,12 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         })
         .OrderBy(row => row.CheckInTime)
         .ToArray();
+    var dailyWorkerCodes = dailySessions.Select(x => x.Session.WorkerExternalId).Distinct().ToArray();
+    var dailyWorkersByCode = dailyWorkerCodes.Length == 0
+        ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        : await db.Workers.AsNoTracking()
+            .Where(x => x.SiteId == siteId && dailyWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
 
     var eventIds = dailySessions
         .SelectMany(row => new[] { row.Session.LastSeenEventId, row.Session.CheckOutEventId, row.Session.CheckInEventId })
@@ -475,7 +512,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         return new AttendanceSessionResponse(
             row.Session.Id,
             row.Session.WorkerExternalId,
-            row.WorkerName,
+            dailyWorkersByCode.TryGetValue(row.Session.WorkerExternalId, out var mappedName) ? mappedName : row.WorkerName,
             row.CheckInTime,
             confirmedCheckoutTime,
             FormatLocalTime(row.CheckInTime, timeZone),
@@ -1024,6 +1061,37 @@ static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(D
     var startOffset = timeZone.GetUtcOffset(localStart);
     var startUtc = new DateTimeOffset(localStart, startOffset).ToUniversalTime();
     return (startUtc, startUtc.AddDays(1));
+}
+
+static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
+{
+    if (string.IsNullOrWhiteSpace(attendanceEvent.RawPayloadJson)) return false;
+    try
+    {
+        using var document = JsonDocument.Parse(attendanceEvent.RawPayloadJson);
+        var root = document.RootElement;
+        var classification = root.TryGetProperty("Classification", out var classificationElement)
+            ? classificationElement.GetString()
+            : null;
+        var userIdConfidence = root.TryGetProperty("UserIdConfidence", out var userIdConfidenceElement)
+            ? userIdConfidenceElement.GetString()
+            : null;
+        var cardNameConfidence = root.TryGetProperty("CardNameConfidence", out var cardNameConfidenceElement)
+            ? cardNameConfidenceElement.GetString()
+            : null;
+        var statusConfidence = root.TryGetProperty("StatusConfidence", out var statusConfidenceElement)
+            ? statusConfidenceElement.GetString()
+            : null;
+
+        return string.Equals(classification, "RecognizedAttendance", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(userIdConfidence, "High", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(cardNameConfidence, "High", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(statusConfidence, "High", StringComparison.OrdinalIgnoreCase);
+    }
+    catch (JsonException)
+    {
+        return false;
+    }
 }
 
 static async Task<AttendanceEventResponse[]> MapAttendanceEventsAsync(

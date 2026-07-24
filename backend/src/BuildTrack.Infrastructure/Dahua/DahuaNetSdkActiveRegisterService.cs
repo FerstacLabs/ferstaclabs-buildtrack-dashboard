@@ -1224,6 +1224,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var recordToIngest = recognizedAttendance
             ? trustedRecord
             : DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson);
+        if (recognizedAttendance)
+        {
+            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest);
+        }
 
         if (recognizedAttendance)
         {
