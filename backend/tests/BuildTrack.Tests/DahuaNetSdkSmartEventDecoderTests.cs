@@ -150,6 +150,35 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     }
 
     [Fact]
+    public void SmartEventClassification_CanonicalDecodedRecordKeepsDiagnosticUserAndName()
+    {
+        var decodedRecord = KnownFaceRecord("1", "ilham");
+        decodedRecord.RawFields["UserIdSource"] = "CanonicalSmartEventParser";
+        decodedRecord.RawFields["CardNameSource"] = "CanonicalSmartEventParser";
+        decodedRecord.RawFields["StatusSource"] = "CanonicalSmartEventParser";
+        decodedRecord.RawFields["UserIdConfidence"] = "High";
+        decodedRecord.RawFields["CardNameConfidence"] = "High";
+        decodedRecord.RawFields["StatusConfidence"] = "High";
+        var worker = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "1",
+            FullName = "Ilham",
+            Status = WorkerStatus.Active,
+        };
+
+        var trusted = DahuaSmartEventClassification.BuildTrustedRecord(decodedRecord, TrustedSummary("1", "ilham", "1", confidence: "High", source: "CanonicalSmartEventParser"), worker);
+        DahuaSmartEventClassification.MarkRecognizedAttendance(trusted);
+
+        Assert.True(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker));
+        Assert.Equal("1", trusted.UserId);
+        Assert.Equal("Ilham", trusted.CardName);
+        Assert.Equal("RecognizedAttendance", trusted.RawFields["Classification"]);
+        Assert.Equal("CanonicalSmartEventParser", trusted.RawFields["UserIdSource"]);
+        Assert.Equal("CanonicalSmartEventParser", trusted.RawFields["CardNameSource"]);
+    }
+
+    [Fact]
     public void SmartEventClassification_LowConfidenceCandidateIlhamStaysUnknown()
     {
         var brokenTopLevel = UnknownTopLevelRecord();

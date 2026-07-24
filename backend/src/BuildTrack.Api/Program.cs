@@ -283,32 +283,35 @@ app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId
     return Results.File(bytes, "image/jpeg");
 });
 
-app.MapGet("/api/attendance-events/snapshots", async (Guid siteId, string workerExternalId, string date, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? deviceId, string? workerExternalId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
 {
-    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
-    if (site is null) return Results.NotFound();
     if (string.IsNullOrWhiteSpace(workerExternalId)) return Results.BadRequest(new { error = "workerExternalId is required" });
+    if (string.IsNullOrWhiteSpace(date)) return Results.BadRequest(new { error = "date is required" });
 
-    var timeZone = ResolveApiTimeZone(site.TimeZone);
+    var site = siteId is null ? null : await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId.Value, ct);
+    if (siteId is not null && site is null) return Results.NotFound(new { error = "site not found" });
+    var timeZone = ResolveApiTimeZone(site?.TimeZone ?? "Asia/Baku");
     var workDate = DateOnly.TryParse(date, out var parsedDate)
         ? parsedDate
         : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
     var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
 
-    var mappedWorker = await db.Workers.AsNoTracking()
-        .FirstOrDefaultAsync(x => x.SiteId == siteId && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct);
+    var mappedWorker = siteId is null
+        ? await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct)
+        : await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.SiteId == siteId.Value && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct);
 
-    var events = await db.AttendanceEvents.AsNoTracking()
-        .Where(x => x.SiteId == siteId
-                    && x.WorkerExternalId == workerExternalId
+    var query = db.AttendanceEvents.AsNoTracking()
+        .Where(x => x.WorkerExternalId == workerExternalId
                     && x.EventTime >= dayStartUtc
                     && x.EventTime < dayEndUtc
                     && x.Status == AttendanceEventStatus.Ok
                     && x.Method == AttendanceMethod.Face
                     && x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
-                    && x.SnapshotPath != null)
-        .OrderBy(x => x.EventTime)
-        .ToListAsync(ct);
+                    && x.SnapshotPath != null);
+    if (siteId is not null) query = query.Where(x => x.SiteId == siteId.Value);
+    if (deviceId is not null) query = query.Where(x => x.DeviceId == deviceId.Value);
+
+    var events = await query.OrderBy(x => x.EventTime).ToListAsync(ct);
 
     events = events
         .Where(IsRecognizedAttendancePayload)
@@ -1065,7 +1068,7 @@ static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(D
 
 static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
 {
-    if (string.IsNullOrWhiteSpace(attendanceEvent.RawPayloadJson)) return false;
+    if (string.IsNullOrWhiteSpace(attendanceEvent.RawPayloadJson)) return true;
     try
     {
         using var document = JsonDocument.Parse(attendanceEvent.RawPayloadJson);
@@ -1083,6 +1086,9 @@ static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
             ? statusConfidenceElement.GetString()
             : null;
 
+        if (string.Equals(classification, "UnknownFace", StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.IsNullOrWhiteSpace(classification)) return true;
+
         return string.Equals(classification, "RecognizedAttendance", StringComparison.OrdinalIgnoreCase)
                && string.Equals(userIdConfidence, "High", StringComparison.OrdinalIgnoreCase)
                && string.Equals(cardNameConfidence, "High", StringComparison.OrdinalIgnoreCase)
@@ -1090,7 +1096,7 @@ static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
     }
     catch (JsonException)
     {
-        return false;
+        return true;
     }
 }
 

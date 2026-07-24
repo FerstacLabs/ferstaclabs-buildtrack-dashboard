@@ -72,6 +72,9 @@ public static class DahuaNetSdkSmartEventDecoder
         var cardName = ChooseLikelyName(strings);
         var userId = ChooseLikelyUserId(strings, cardName);
         var status = string.IsNullOrWhiteSpace(userId) && string.IsNullOrWhiteSpace(cardName) ? "0" : "1";
+        var hasPersonSignal = !string.IsNullOrWhiteSpace(userId) && !string.IsNullOrWhiteSpace(cardName);
+        var fieldSource = hasPersonSignal ? "CanonicalSmartEventParser" : "DecodedStringCandidates";
+        var fieldConfidence = hasPersonSignal ? "High" : "Low";
 
         return new DahuaSdkAccessEvent
         {
@@ -93,12 +96,12 @@ public static class DahuaNetSdkSmartEventDecoder
                 ["UserID"] = userId,
                 ["CardName"] = cardName,
                 ["Status"] = status,
-                ["UserIdSource"] = "DecodedStringCandidates",
-                ["CardNameSource"] = "DecodedStringCandidates",
-                ["StatusSource"] = "DecodedStringCandidates",
-                ["UserIdConfidence"] = "Low",
-                ["CardNameConfidence"] = "Low",
-                ["StatusConfidence"] = "Low",
+                ["UserIdSource"] = fieldSource,
+                ["CardNameSource"] = fieldSource,
+                ["StatusSource"] = fieldSource,
+                ["UserIdConfidence"] = fieldConfidence,
+                ["CardNameConfidence"] = fieldConfidence,
+                ["StatusConfidence"] = fieldConfidence,
                 ["UsedDecodedStringCandidatesForClassification"] = "false",
                 ["Method"] = "15",
                 ["Type"] = "Entry",
@@ -248,12 +251,12 @@ public static class DahuaNetSdkSmartEventDecoder
             sdkEvent.RecNo,
             sdkEvent.EventTime,
             sdkEvent.Status,
-            UserIdSource = "DecodedStringCandidates",
-            CardNameSource = "DecodedStringCandidates",
-            StatusSource = "DecodedStringCandidates",
-            UserIdConfidence = "Low",
-            CardNameConfidence = "Low",
-            StatusConfidence = "Low",
+            UserIdSource = sdkEvent.RawFields.GetValueOrDefault("UserIdSource"),
+            CardNameSource = sdkEvent.RawFields.GetValueOrDefault("CardNameSource"),
+            StatusSource = sdkEvent.RawFields.GetValueOrDefault("StatusSource"),
+            UserIdConfidence = sdkEvent.RawFields.GetValueOrDefault("UserIdConfidence"),
+            CardNameConfidence = sdkEvent.RawFields.GetValueOrDefault("CardNameConfidence"),
+            StatusConfidence = sdkEvent.RawFields.GetValueOrDefault("StatusConfidence"),
             UsedDecodedStringCandidatesForClassification = false,
             sdkEvent.Method,
             sdkEvent.Direction,

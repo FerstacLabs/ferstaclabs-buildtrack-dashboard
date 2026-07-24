@@ -1205,6 +1205,17 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(trustedRecord, resolvedWorker);
 
         logger.LogInformation(
+            "Canonical smart event decoded: Status={Status}, UserID={UserID}, CardName={CardName}, Method={Method}, Confidence={StatusConfidence}/{UserIdConfidence}/{CardNameConfidence}, ImageSize={ImageSize}",
+            trustedRecord.StatusRaw,
+            trustedRecord.UserId,
+            trustedRecord.CardName,
+            trustedRecord.NormalizedMethod,
+            trustedRecord.RawFields.GetValueOrDefault("StatusConfidence"),
+            trustedRecord.RawFields.GetValueOrDefault("UserIdConfidence"),
+            trustedRecord.RawFields.GetValueOrDefault("CardNameConfidence"),
+            imageBufferSize);
+
+        logger.LogInformation(
             "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, RecNo={RecNo}, ImageSize={ImageSize}",
             trustedRecord.UserId,
             trustedRecord.CardName,
