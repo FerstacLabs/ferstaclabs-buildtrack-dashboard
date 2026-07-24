@@ -283,6 +283,37 @@ app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId
     return Results.File(bytes, "image/jpeg");
 });
 
+app.MapGet("/api/attendance-events/snapshots", async (Guid siteId, string workerExternalId, string date, BuildTrackDbContext db, CancellationToken ct) =>
+{
+    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
+    if (site is null) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(workerExternalId)) return Results.BadRequest(new { error = "workerExternalId is required" });
+
+    var timeZone = ResolveApiTimeZone(site.TimeZone);
+    var workDate = DateOnly.TryParse(date, out var parsedDate)
+        ? parsedDate
+        : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
+    var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
+
+    var events = await db.AttendanceEvents.AsNoTracking()
+        .Where(x => x.SiteId == siteId
+                    && x.WorkerExternalId == workerExternalId
+                    && x.EventTime >= dayStartUtc
+                    && x.EventTime < dayEndUtc
+                    && x.Status == AttendanceEventStatus.Ok
+                    && x.SnapshotPath != null)
+        .OrderBy(x => x.EventTime)
+        .ToListAsync(ct);
+
+    return Results.Ok(events.Select(attendanceEvent => new AttendanceSnapshotResponse(
+        attendanceEvent.Id,
+        attendanceEvent.EventTime,
+        FormatLocalTime(attendanceEvent.EventTime, timeZone),
+        $"/api/attendance-events/{attendanceEvent.Id}/snapshot",
+        attendanceEvent.Method,
+        attendanceEvent.Source)).ToArray());
+});
+
 
 app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId, BuildTrackDbContext db, CancellationToken ct) =>
 {
@@ -378,10 +409,10 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
                     false,
                     workedMinutes,
                     AttendanceSessionStatus.Open,
-                    last.Source,
-                    last.Method,
-                    last.SnapshotPath,
-                    string.IsNullOrWhiteSpace(last.SnapshotPath) ? null : $"/api/attendance-events/{last.Id}/snapshot");
+                    first.Source,
+                    first.Method,
+                    first.SnapshotPath,
+                    string.IsNullOrWhiteSpace(first.SnapshotPath) ? null : $"/api/attendance-events/{first.Id}/snapshot");
             })
             .OrderBy(x => x.CheckInTime)
             .ToArray();
@@ -438,11 +469,9 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         var lastSeenTime = row.LastSeenTime;
         var effectiveEnd = confirmedCheckoutTime ?? lastSeenTime;
         var workedMinutes = Math.Max(0, (int)Math.Floor((effectiveEnd - row.CheckInTime).TotalMinutes));
-        var snapshotEvent = row.Session.LastSeenEventId is not null && eventsById.TryGetValue(row.Session.LastSeenEventId.Value, out var lastSeenEvent)
-            ? lastSeenEvent
-            : row.Session.CheckOutEventId is not null && eventsById.TryGetValue(row.Session.CheckOutEventId.Value, out var checkoutEvent)
-                ? checkoutEvent
-                : eventsById.GetValueOrDefault(row.Session.CheckInEventId);
+        var snapshotEvent = eventsById.GetValueOrDefault(row.Session.CheckInEventId)
+            ?? (row.Session.CheckOutEventId is not null && eventsById.TryGetValue(row.Session.CheckOutEventId.Value, out var checkoutEvent) ? checkoutEvent : null)
+            ?? (row.Session.LastSeenEventId is not null && eventsById.TryGetValue(row.Session.LastSeenEventId.Value, out var lastSeenEvent) ? lastSeenEvent : null);
         return new AttendanceSessionResponse(
             row.Session.Id,
             row.Session.WorkerExternalId,

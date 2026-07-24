@@ -120,6 +120,15 @@ export interface AttendanceDailySummary {
   sessions: AttendanceSessionRow[]
 }
 
+export interface AttendanceSnapshotRow {
+  id: string
+  eventTime: string
+  eventTimeLocal: string
+  snapshotUrl: string
+  method: AttendanceMethod
+  source: string
+}
+
 export type SecurityEventStatus = 'Open' | 'Reviewed' | 'Ignored'
 
 export interface SecurityEventRow {
@@ -294,6 +303,7 @@ export const buildTrackBackendApi = {
   getAttendanceLive: async (siteId: string) => unwrapArray<AttendanceLiveEvent>(await request<unknown>(`/api/sites/${siteId}/attendance-live?limit=100`)),
   getAttendanceLiveStatus: async (siteId: string) => normalizeAttendanceLiveStatus(await request<unknown>(`/api/sites/${siteId}/attendance/live-status`)),
   getAttendanceDaily: async (siteId: string, date?: string) => normalizeAttendanceDaily(await request<unknown>(`/api/sites/${siteId}/attendance/daily${date ? `?date=${date}` : ''}`)),
+  getAttendanceSnapshots: async (siteId: string, workerExternalId: string, date: string) => unwrapArray<AttendanceSnapshotRow>(await request<unknown>(`/api/attendance-events/snapshots?siteId=${encodeURIComponent(siteId)}&workerExternalId=${encodeURIComponent(workerExternalId)}&date=${encodeURIComponent(date)}`)),
   getSecurityEvents: async (siteId: string, date?: string) => unwrapArray<SecurityEventRow>(await request<unknown>(`/api/sites/${siteId}/security-events${date ? `?date=${date}` : ''}`)),
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
   securitySnapshotUrl: (snapshotUrl: string) => `${API_BASE}${snapshotUrl}`,

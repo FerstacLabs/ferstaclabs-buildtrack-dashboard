@@ -1,3 +1,5 @@
+using BuildTrack.Domain.Dahua;
+using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Dahua;
 
 namespace BuildTrack.Tests;
@@ -63,6 +65,44 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         }
     }
 
+    [Fact]
+    public void SmartEventClassification_RecognizesOnlyResolvedMatchingWorker()
+    {
+        var record = KnownFaceRecord("1", "ilham");
+        var worker = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "1",
+            FullName = "Ilham",
+            Status = WorkerStatus.Active,
+        };
+
+        var recognized = DahuaSmartEventClassification.IsRecognizedAttendance(record, worker);
+
+        Assert.True(recognized);
+    }
+
+    [Fact]
+    public void SmartEventClassification_NameMismatchBecomesUnknownFace()
+    {
+        var record = KnownFaceRecord("1", "Random Candidate");
+        var worker = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "1",
+            FullName = "Ilham",
+            Status = WorkerStatus.Active,
+        };
+
+        var recognized = DahuaSmartEventClassification.IsRecognizedAttendance(record, worker);
+        var unknown = DahuaSmartEventClassification.BuildUnknownFaceRecord(record, "{}");
+
+        Assert.False(recognized);
+        Assert.True(DahuaUnknownFacePolicy.IsUnknownFace(unknown));
+        Assert.Null(unknown.UserId);
+        Assert.Null(unknown.CardName);
+    }
+
     private static void WriteInt(byte[] buffer, int offset, int value)
     {
         BitConverter.GetBytes(value).CopyTo(buffer, offset);
@@ -73,4 +113,22 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         var bytes = System.Text.Encoding.ASCII.GetBytes(value);
         Array.Copy(bytes, 0, buffer, offset, Math.Min(length, bytes.Length));
     }
+
+    private static DahuaAccessRecord KnownFaceRecord(string userId, string cardName) => new()
+    {
+        RecNo = 701,
+        CreateTime = DateTimeOffset.Parse("2026-07-24T06:15:00+00:00"),
+        UserId = userId,
+        CardName = cardName,
+        StatusRaw = "1",
+        MethodRaw = "15",
+        Type = "Entry",
+        Url = "/app/data/security-snapshots/smart-events/known.jpg",
+        RawFields = new Dictionary<string, string?>
+        {
+            ["Status"] = "1",
+            ["Method"] = "15",
+            ["ErrorCode"] = "0",
+        },
+    };
 }

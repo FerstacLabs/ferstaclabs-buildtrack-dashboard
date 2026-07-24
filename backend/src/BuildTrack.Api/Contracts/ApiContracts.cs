@@ -112,6 +112,15 @@ public sealed record AttendanceSessionResponse(
     AttendanceMethod? Method = null,
     string? SnapshotPath = null,
     string? SnapshotUrl = null);
+
+public sealed record AttendanceSnapshotResponse(
+    Guid Id,
+    DateTimeOffset EventTime,
+    string EventTimeLocal,
+    string SnapshotUrl,
+    AttendanceMethod Method,
+    string Source);
+
 public sealed record SecurityEventResponse(
     Guid Id,
     DateTimeOffset EventTime,

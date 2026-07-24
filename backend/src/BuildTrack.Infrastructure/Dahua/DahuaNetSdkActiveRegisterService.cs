@@ -1194,7 +1194,23 @@ public sealed class DahuaNetSdkActiveRegisterService(
             return;
         }
 
-        logger.LogInformation("Access smart event parsed UserID={UserID}, CardName={CardName}, RecNo={RecNo}, ImageSize={ImageSize}", decoded.Record.UserId, decoded.Record.CardName, decoded.Record.RecNo, imageBufferSize);
+        var resolvedWorker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(
+            x => x.SiteId == device.SiteId
+                 && x.ExternalWorkerCode == decoded.Record.UserId
+                 && x.Status == WorkerStatus.Active,
+            CancellationToken.None);
+        var workerResolved = resolvedWorker is not null;
+        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(decoded.Record, resolvedWorker);
+
+        logger.LogInformation(
+            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, RecNo={RecNo}, ImageSize={ImageSize}",
+            decoded.Record.UserId,
+            decoded.Record.CardName,
+            decoded.Record.StatusRaw,
+            decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
+            workerResolved,
+            decoded.Record.RecNo,
+            imageBufferSize);
 
         if (!IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_INGESTION_ENABLED"]))
         {
@@ -1203,7 +1219,32 @@ public sealed class DahuaNetSdkActiveRegisterService(
             return;
         }
 
-        await pipeline.IngestAsync(device.Id, decoded.Record, DahuaEventSource.ActiveRegister, CancellationToken.None);
+        var recordToIngest = recognizedAttendance
+            ? decoded.Record
+            : DahuaSmartEventClassification.BuildUnknownFaceRecord(decoded.Record, decoded.RawStructSummaryJson);
+
+        if (recognizedAttendance)
+        {
+            logger.LogInformation("Smart event classified as recognized attendance. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
+                decoded.Record.StatusRaw,
+                decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
+                decoded.Record.UserId,
+                decoded.Record.CardName,
+                workerResolved,
+                imageBufferSize);
+        }
+        else
+        {
+            logger.LogWarning("Smart event classified as unknown face. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
+                decoded.Record.StatusRaw,
+                decoded.Record.RawFields.GetValueOrDefault("ErrorCode"),
+                decoded.Record.UserId,
+                decoded.Record.CardName,
+                workerResolved,
+                imageBufferSize);
+        }
+
+        await pipeline.IngestAsync(device.Id, recordToIngest, DahuaEventSource.ActiveRegister, CancellationToken.None);
         logger.LogInformation("Attendance/security event submitted to shared pipeline from Dahua Smart Event");
     }
 

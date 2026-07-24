@@ -1,11 +1,11 @@
 ﻿import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
-import { Alert, Select, Space, Table, Tag } from 'antd'
+import { Alert, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
+import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type AttendanceSnapshotRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
 
 const API_TEST_SITE_ID = 'c235fd3e-2f5b-4cac-bb1d-92a94dd54b23'
 const API_TEST_SITE_NAME = 'API Test Obyekti'
@@ -37,19 +37,22 @@ const formatDuration = (minutes: number) => {
   return `${hours}s ${rest}dəq`
 }
 
-const SnapshotThumbnail = ({ row }: { row: AttendanceSessionRow }) => {
+const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPreview: (row: AttendanceSessionRow) => void }) => {
   const [failed, setFailed] = useState(false)
   if (!row.snapshotUrl || failed) return <span className="snapshot-placeholder">Şəkil yoxdur</span>
 
   return (
-    <img
-      src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
-      alt="Davamiyyət snapshot"
-      width={84}
-      height={54}
-      className="snapshot-thumb-image"
-      onError={() => setFailed(true)}
-    />
+    <button type="button" className="snapshot-thumb-button" onClick={() => onPreview(row)} aria-label="Davamiyyət şəkillərini aç">
+      <img
+        src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
+        alt="Davamiyyət snapshot"
+        width={84}
+        height={54}
+        className="snapshot-thumb-image"
+        onError={() => setFailed(true)}
+      />
+      <span className="snapshot-zoom-label">Qalereya</span>
+    </button>
   )
 }
 
@@ -84,6 +87,10 @@ export const AttendanceLivePage = () => {
   const [securityEventsCount, setSecurityEventsCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [galleryWorker, setGalleryWorker] = useState<AttendanceSessionRow | null>(null)
+  const [gallerySnapshots, setGallerySnapshots] = useState<AttendanceSnapshotRow[]>([])
 
   const loadSites = async () => {
     try {
@@ -178,6 +185,29 @@ export const AttendanceLivePage = () => {
   const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
   const totalWorkedHours = summary?.totalWorkedHours ?? Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
 
+  const openSnapshotGallery = async (row: AttendanceSessionRow) => {
+    if (!siteId || !requestedDate) return
+    setGalleryWorker(row)
+    setGalleryOpen(true)
+    setGalleryLoading(true)
+    setGallerySnapshots([])
+    try {
+      const snapshots = await buildTrackBackendApi.getAttendanceSnapshots(siteId, row.workerExternalId, requestedDate)
+      setGallerySnapshots(snapshots)
+    } catch (err) {
+      setGallerySnapshots([])
+      message.error(err instanceof Error ? err.message : 'Snapshot qalereyası yüklənmədi')
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  const closeSnapshotGallery = () => {
+    setGalleryOpen(false)
+    setGalleryWorker(null)
+    setGallerySnapshots([])
+  }
+
   const columns: TableColumnsType<AttendanceSessionRow> = [
     { title: 'İşçi', dataIndex: 'workerName', render: (value, row) => value ?? row.workerExternalId },
     { title: 'Worker ID', dataIndex: 'workerExternalId' },
@@ -186,7 +216,7 @@ export const AttendanceLivePage = () => {
     { title: 'Təsdiqli çıxış', dataIndex: 'confirmedCheckOutTimeLocal', render: (value) => value ?? 'Yoxdur' },
     { title: 'Status', dataIndex: 'displayStatus', render: (value, row) => <Tag color={statusColor[row.status] ?? 'default'}>{value ?? statusLabel[row.status] ?? row.status}</Tag> },
     { title: 'Metod', dataIndex: 'method', render: (value) => value ? <Tag color={value === 'Face' ? 'green' : 'blue'}>{value}</Tag> : '-' },
-    { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} /> },
+    { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} onPreview={openSnapshotGallery} /> },
     { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (value) => formatDuration(value) },
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
@@ -246,6 +276,38 @@ export const AttendanceLivePage = () => {
           locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün davamiyyət sessiyası tapılmadı. Real Dahua Active Register / Smart Event gəldikdən sonra burada davamiyyət görünəcək.' }}
         />
       </section>
+
+      <Modal
+        title="Davamiyyət şəkilləri"
+        open={galleryOpen}
+        onCancel={closeSnapshotGallery}
+        footer={null}
+        width={960}
+        centered
+      >
+        <div className="snapshot-preview-meta">
+          <span>İşçi: {galleryWorker?.workerName ?? galleryWorker?.workerExternalId ?? '-'}</span>
+          <span>Worker ID: {galleryWorker?.workerExternalId ?? '-'}</span>
+          <span>Tarix: {requestedDate || '-'}</span>
+        </div>
+        {galleryLoading ? (
+          <Alert type="info" showIcon message="Şəkillər yüklənir..." />
+        ) : gallerySnapshots.length ? (
+          <div className="snapshot-gallery-grid">
+            {gallerySnapshots.map((snapshot) => (
+              <figure key={snapshot.id} className="snapshot-gallery-item">
+                <img src={buildTrackBackendApi.attendanceSnapshotUrl(snapshot.snapshotUrl)} alt="Davamiyyət snapshot" />
+                <figcaption>
+                  <span>{snapshot.eventTimeLocal}</span>
+                  <Tag color={snapshot.source.includes('active_register') ? 'purple' : 'cyan'}>{sourceLabel(snapshot.source)}</Tag>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : (
+          <Alert type="warning" showIcon message="Bu işçi üçün snapshot tapılmadı" />
+        )}
+      </Modal>
     </div>
   )
 }
