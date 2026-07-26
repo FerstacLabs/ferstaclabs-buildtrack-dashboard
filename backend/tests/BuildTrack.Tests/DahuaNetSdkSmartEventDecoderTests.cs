@@ -90,7 +90,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     }
 
     [Fact]
-    public void SmartEventClassification_MappedWorkerNameWinsOverRandomCandidate()
+    public void SmartEventClassification_MappedWorkerNameRejectsRandomCandidate()
     {
         var record = KnownFaceRecord("1", "pp");
         var worker = new Worker
@@ -104,13 +104,13 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         var trusted = DahuaSmartEventClassification.BuildTrustedRecord(record, TrustedSummary("1", "pp", "1", confidence: "High", source: "FixedStructField"), worker);
         var recognized = DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker);
 
-        Assert.True(recognized);
+        Assert.False(recognized);
         Assert.Equal("Ilham", trusted.CardName);
         Assert.Equal("Ilham", trusted.RawFields["CardName"]);
     }
 
     [Fact]
-    public void SmartEventClassification_MappedWorkerNameWinsOverAnotherRandomCandidate()
+    public void SmartEventClassification_MappedWorkerNameRejectsAnotherRandomCandidate()
     {
         var record = KnownFaceRecord("1", "cj");
         var worker = new Worker
@@ -123,7 +123,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
 
         var trusted = DahuaSmartEventClassification.BuildTrustedRecord(record, TrustedSummary("1", "cj", "1", confidence: "High", source: "FixedStructField"), worker);
 
-        Assert.True(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker));
+        Assert.False(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker));
         Assert.Equal("Ilham", trusted.CardName);
     }
 
@@ -132,9 +132,22 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     {
         var unknown = DahuaSmartEventClassification.BuildUnknownFaceRecord(
             UnknownTopLevelRecord(),
-            TrustedSummary(null, null, "0", confidence: "High", source: "FixedStructField"));
+            TrustedSummary(null, null, "0", confidence: "High", source: "FixedStructField", errorCode: "16"));
 
         Assert.True(DahuaUnknownFacePolicy.IsUnknownFace(unknown));
+        Assert.True(DahuaSmartEventClassification.IsConfirmedUnknownFace(unknown));
+    }
+
+    [Fact]
+    public void SmartEventClassification_NoPersonFieldsWithoutFailureIsParserUncertain()
+    {
+        var uncertain = DahuaSmartEventClassification.BuildParserUncertainRecord(
+            UnknownTopLevelRecord(),
+            TrustedSummary(null, null, "0", confidence: "Low", source: "DecodedStringCandidates"));
+
+        Assert.False(DahuaUnknownFacePolicy.IsUnknownFace(uncertain));
+        Assert.False(DahuaSmartEventClassification.IsConfirmedUnknownFace(uncertain));
+        Assert.Equal("ParserUncertainSmartEvent", uncertain.RawFields["Classification"]);
     }
 
     [Fact]
@@ -256,7 +269,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         },
     };
 
-    private static string TrustedSummary(string? userId, string? cardName, string status, string confidence, string source) =>
+    private static string TrustedSummary(string? userId, string? cardName, string status, string confidence, string source, string errorCode = "0") =>
         $$"""
           {
             "SmartEventName": "EVENT_IVS_ACCESS_CTL",
@@ -275,7 +288,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
             "Direction": "Entry",
             "EventTime": "2026-07-24T06:15:00+00:00",
             "ImageBytesLength": 47701,
-            "ErrorCode": "0"
+            "ErrorCode": "{{errorCode}}"
           }
           """;
 

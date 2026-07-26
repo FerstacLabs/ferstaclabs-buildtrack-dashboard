@@ -1076,23 +1076,10 @@ static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
         var classification = root.TryGetProperty("Classification", out var classificationElement)
             ? classificationElement.GetString()
             : null;
-        var userIdConfidence = root.TryGetProperty("UserIdConfidence", out var userIdConfidenceElement)
-            ? userIdConfidenceElement.GetString()
-            : null;
-        var cardNameConfidence = root.TryGetProperty("CardNameConfidence", out var cardNameConfidenceElement)
-            ? cardNameConfidenceElement.GetString()
-            : null;
-        var statusConfidence = root.TryGetProperty("StatusConfidence", out var statusConfidenceElement)
-            ? statusConfidenceElement.GetString()
-            : null;
-
         if (string.Equals(classification, "UnknownFace", StringComparison.OrdinalIgnoreCase)) return false;
         if (string.IsNullOrWhiteSpace(classification)) return true;
 
-        return string.Equals(classification, "RecognizedAttendance", StringComparison.OrdinalIgnoreCase)
-               && string.Equals(userIdConfidence, "High", StringComparison.OrdinalIgnoreCase)
-               && string.Equals(cardNameConfidence, "High", StringComparison.OrdinalIgnoreCase)
-               && string.Equals(statusConfidence, "High", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(classification, "RecognizedAttendance", StringComparison.OrdinalIgnoreCase);
     }
     catch (JsonException)
     {

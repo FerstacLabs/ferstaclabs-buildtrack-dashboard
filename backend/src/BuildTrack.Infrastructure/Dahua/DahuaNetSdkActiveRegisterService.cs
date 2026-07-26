@@ -1232,9 +1232,12 @@ public sealed class DahuaNetSdkActiveRegisterService(
             return;
         }
 
+        var confirmedUnknownFace = !recognizedAttendance && DahuaSmartEventClassification.IsConfirmedUnknownFace(trustedRecord);
         var recordToIngest = recognizedAttendance
             ? trustedRecord
-            : DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson);
+            : confirmedUnknownFace
+                ? DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson)
+                : DahuaSmartEventClassification.BuildParserUncertainRecord(trustedRecord, decoded.RawStructSummaryJson);
         if (recognizedAttendance)
         {
             DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest);
@@ -1250,7 +1253,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 workerResolved,
                 imageBufferSize);
         }
-        else
+        else if (confirmedUnknownFace)
         {
             logger.LogWarning("Smart event classified as unknown face. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
                 trustedRecord.StatusRaw,
@@ -1259,6 +1262,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 trustedRecord.CardName,
                 workerResolved,
                 imageBufferSize);
+        }
+        else
+        {
+            logger.LogWarning("Smart event classified as parser uncertain. Status={Status}, ErrorCode={ErrorCode}, UserID={UserID}, CardName={CardName}, WorkerResolved={WorkerResolved}, ImageBytesLength={ImageBytesLength}",
+                trustedRecord.StatusRaw,
+                trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
+                trustedRecord.UserId,
+                trustedRecord.CardName,
+                workerResolved,
+                imageBufferSize);
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_parser_uncertain", "Smart Event was not decoded confidently enough for attendance or confirmed unknown face", recordToIngest.RawFields, CancellationToken.None);
+            return;
         }
 
         await pipeline.IngestAsync(device.Id, recordToIngest, DahuaEventSource.ActiveRegister, CancellationToken.None);
