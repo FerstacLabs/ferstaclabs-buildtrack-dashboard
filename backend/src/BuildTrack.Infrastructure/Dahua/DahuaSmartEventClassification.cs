@@ -27,6 +27,7 @@ public static class DahuaSmartEventClassification
                 ? "MissingExternalWorker"
                 : "UnresolvedExternalWorker";
         var displayName = workerMatches ? resolvedWorker!.FullName : trustedCardName;
+        var cardNameMismatch = workerMatches && resolvedWorker is not null && IsMappedWorkerNameMismatch(trustedCardName, resolvedWorker);
 
         var rawFields = new Dictionary<string, string?>(source.RawFields, StringComparer.OrdinalIgnoreCase)
         {
@@ -37,6 +38,10 @@ public static class DahuaSmartEventClassification
             ["UserId"] = trustedUserId,
             ["CardName"] = displayName,
             ["TrustedCardName"] = trustedCardName,
+            ["ReceivedCardName"] = trustedCardName,
+            ["ExpectedWorkerName"] = workerMatches ? resolvedWorker!.FullName : null,
+            ["WorkerResolved"] = workerMatches ? "true" : "false",
+            ["CardNameMismatch"] = cardNameMismatch ? "true" : "false",
             ["WorkerResolutionStatus"] = workerResolutionStatus,
             ["Classification"] = "Pending",
             ["ClassificationReason"] = "Smart Event classification pending",
@@ -70,11 +75,15 @@ public static class DahuaSmartEventClassification
     }
 
     public static bool IsRecognizedAttendance(DahuaAccessRecord record, Worker? resolvedWorker) =>
+        IsRecognizedAttendance(record, resolvedWorker, DahuaIdentityMatchPolicy.Strict);
+
+    public static bool IsRecognizedAttendance(DahuaAccessRecord record, Worker? resolvedWorker, DahuaIdentityMatchPolicy identityPolicy) =>
         DahuaSdkAccessEventNormalizer.ShouldInsertPayrollAttendance(record)
         && string.Equals(record.StatusRaw, "1", StringComparison.OrdinalIgnoreCase)
         && !string.IsNullOrWhiteSpace(record.UserId)
         && !string.IsNullOrWhiteSpace(record.CardName)
-        && HasCompatibleMappedWorkerName(record, resolvedWorker)
+        && (identityPolicy == DahuaIdentityMatchPolicy.UserIdPrimary && HasResolvedWorkerUserId(record, resolvedWorker)
+            || HasCompatibleMappedWorkerName(record, resolvedWorker))
         && !HasFailureErrorCode(record);
 
     public static bool IsConfirmedUnknownFace(DahuaAccessRecord record) =>
@@ -85,9 +94,9 @@ public static class DahuaSmartEventClassification
 
     public static DahuaAccessRecord BuildParserUncertainRecord(DahuaAccessRecord source, string rawStructSummaryJson)
     {
-        var observedCardName = FirstNotBlank(source.RawFields.GetValueOrDefault("TrustedCardName"), source.CardName);
+        var observedCardName = FirstNotBlank(source.RawFields.GetValueOrDefault("ReceivedCardName"), source.RawFields.GetValueOrDefault("TrustedCardName"), source.CardName);
         var workerResolved = string.Equals(source.RawFields.GetValueOrDefault("WorkerResolutionStatus"), "ResolvedWorker", StringComparison.OrdinalIgnoreCase);
-        var expectedWorkerName = workerResolved ? source.CardName : null;
+        var expectedWorkerName = workerResolved ? FirstNotBlank(source.RawFields.GetValueOrDefault("ExpectedWorkerName"), source.CardName) : null;
         var safeStatus = string.Equals(source.StatusRaw, "1", StringComparison.OrdinalIgnoreCase) ? source.StatusRaw : null;
         var rawFields = new Dictionary<string, string?>(source.RawFields, StringComparer.OrdinalIgnoreCase)
         {
@@ -102,6 +111,7 @@ public static class DahuaSmartEventClassification
             ["CardName"] = observedCardName,
             ["ExpectedWorkerName"] = expectedWorkerName,
             ["WorkerResolved"] = workerResolved ? "true" : "false",
+            ["CardNameMismatch"] = workerResolved && !ArePersonNamesCompatible(observedCardName, expectedWorkerName) ? "true" : "false",
         };
 
         return new DahuaAccessRecord
@@ -163,12 +173,26 @@ public static class DahuaSmartEventClassification
     private static bool HasUnknownClassification(DahuaAccessRecord record) =>
         string.Equals(record.RawFields.GetValueOrDefault("Classification"), "UnknownFace", StringComparison.OrdinalIgnoreCase);
 
+    private static bool HasResolvedWorkerUserId(DahuaAccessRecord record, Worker? resolvedWorker) =>
+        resolvedWorker is not null
+        && !string.IsNullOrWhiteSpace(record.UserId)
+        && string.Equals(record.UserId, resolvedWorker.ExternalWorkerCode, StringComparison.OrdinalIgnoreCase);
+
     private static bool HasCompatibleMappedWorkerName(DahuaAccessRecord record, Worker? resolvedWorker)
     {
         if (resolvedWorker is null) return !LooksLikeRandomCandidate(record.CardName);
 
-        var originalCardName = NormalizePersonName(FirstNotBlank(record.RawFields.GetValueOrDefault("TrustedCardName"), record.CardName));
-        var workerName = NormalizePersonName(resolvedWorker.FullName);
+        var originalCardName = FirstNotBlank(record.RawFields.GetValueOrDefault("ReceivedCardName"), record.RawFields.GetValueOrDefault("TrustedCardName"), record.CardName);
+        return ArePersonNamesCompatible(originalCardName, resolvedWorker.FullName);
+    }
+
+    private static bool IsMappedWorkerNameMismatch(string? receivedCardName, Worker resolvedWorker) =>
+        !ArePersonNamesCompatible(receivedCardName, resolvedWorker.FullName);
+
+    private static bool ArePersonNamesCompatible(string? receivedName, string? expectedName)
+    {
+        var originalCardName = NormalizePersonName(receivedName);
+        var workerName = NormalizePersonName(expectedName);
         return originalCardName.Length > 0
                && workerName.Length > 0
                && (string.Equals(originalCardName, workerName, StringComparison.OrdinalIgnoreCase)
@@ -184,11 +208,24 @@ public static class DahuaSmartEventClassification
                || string.Equals(normalized, "KF", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static void MarkRecognizedAttendance(DahuaAccessRecord record)
+    public static void MarkRecognizedAttendance(DahuaAccessRecord record, Worker? resolvedWorker = null, DahuaIdentityMatchPolicy identityPolicy = DahuaIdentityMatchPolicy.Strict)
     {
         record.RawFields["Classification"] = "RecognizedAttendance";
         record.RawFields["ClassificationReason"] = "High-confidence Smart Event access fields passed attendance rules";
         record.RawFields["UsedDecodedStringCandidatesForClassification"] = "false";
+        if (resolvedWorker is null) return;
+
+        var receivedCardName = FirstNotBlank(record.RawFields.GetValueOrDefault("ReceivedCardName"), record.RawFields.GetValueOrDefault("TrustedCardName"));
+        var cardNameMismatch = IsMappedWorkerNameMismatch(receivedCardName, resolvedWorker);
+        record.RawFields["ExpectedWorkerName"] = resolvedWorker.FullName;
+        record.RawFields["ReceivedCardName"] = receivedCardName;
+        record.RawFields["WorkerResolved"] = "true";
+        record.RawFields["CardNameMismatch"] = cardNameMismatch ? "true" : "false";
+        if (identityPolicy == DahuaIdentityMatchPolicy.UserIdPrimary && cardNameMismatch)
+        {
+            record.RawFields["ClassificationReason"] = "UserID matched canonical worker while Smart Event CardName was inconsistent";
+            record.RawFields["IdentityMatchPolicy"] = "user_id_primary";
+        }
     }
 
     private static bool HasHighConfidence(DahuaAccessRecord record, string key) =>

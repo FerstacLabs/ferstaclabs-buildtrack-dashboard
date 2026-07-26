@@ -107,6 +107,36 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         Assert.False(recognized);
         Assert.Equal("Ilham", trusted.CardName);
         Assert.Equal("Ilham", trusted.RawFields["CardName"]);
+        Assert.Equal("pp", trusted.RawFields["ReceivedCardName"]);
+        Assert.Equal("Ilham", trusted.RawFields["ExpectedWorkerName"]);
+        Assert.Equal("true", trusted.RawFields["CardNameMismatch"]);
+    }
+
+    [Fact]
+    public void SmartEventClassification_UserIdPrimaryAllowsMappedWorkerDespiteCardNameMismatch()
+    {
+        var record = KnownFaceRecord("1", "fj");
+        var worker = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "1",
+            FullName = "Ilham",
+            Status = WorkerStatus.Active,
+        };
+
+        var trusted = DahuaSmartEventClassification.BuildTrustedRecord(record, TrustedSummary("1", "fj", "1", confidence: "High", source: "CanonicalSmartEventParser"), worker);
+
+        Assert.False(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker));
+        Assert.True(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker, DahuaIdentityMatchPolicy.UserIdPrimary));
+
+        DahuaSmartEventClassification.MarkRecognizedAttendance(trusted, worker, DahuaIdentityMatchPolicy.UserIdPrimary);
+
+        Assert.Equal("RecognizedAttendance", trusted.RawFields["Classification"]);
+        Assert.Equal("true", trusted.RawFields["CardNameMismatch"]);
+        Assert.Equal("fj", trusted.RawFields["ReceivedCardName"]);
+        Assert.Equal("Ilham", trusted.RawFields["ExpectedWorkerName"]);
+        Assert.Equal("user_id_primary", trusted.RawFields["IdentityMatchPolicy"]);
+        Assert.Equal("Ilham", trusted.CardName);
     }
 
     [Fact]

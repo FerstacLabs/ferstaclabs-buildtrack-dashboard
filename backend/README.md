@@ -247,9 +247,12 @@ Worker-side settings:
 DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED=true
 DAHUA_ACTIVE_REGISTER_SMART_EVENT_NEED_PICTURE=true
 DAHUA_ACTIVE_REGISTER_SMART_EVENT_CHANNEL=-1
+DAHUA_IDENTITY_MATCH_POLICY=strict
 ```
 
 After the Active Register server-connection login succeeds, the worker keeps the existing `CLIENT_StartListenEx` alarm subscription and also calls `CLIENT_RealLoadPictureEx` with the same login handle. The Smart Event callback filters `EVENT_IVS_ACCESS_CTL = 0x00000204` (`DEV_EVENT_ACCESS_CTL_INFO`), stores diagnostics, saves a JPEG image buffer when one is returned, and routes decoded access records through the same BuildTrack Dahua ingestion pipeline used by CGI polling.
+
+`DAHUA_IDENTITY_MATCH_POLICY` defaults to `strict`. In `strict` mode, a mapped `UserID` must also have a compatible Smart Event `CardName`; mismatches are stored as security review events. Set `DAHUA_IDENTITY_MATCH_POLICY=user_id_primary` only for demos/devices where Smart Event `CardName` is unstable but `UserID` is reliable; attendance then uses the canonical DB worker name and records `CardNameMismatch`, `ReceivedCardName`, and `ExpectedWorkerName` in `RawPayloadJson`.
 
 If `CLIENT_RealLoadPictureEx` fails, check `/api/dahua/active-register/status` for `smartEventSubscriptionSuccess`, `smartEventErrorSigned`, and `smartEventErrorHex`.
 

@@ -1202,7 +1202,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
             CancellationToken.None);
         var trustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
         var workerResolved = resolvedWorker is not null;
-        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(trustedRecord, resolvedWorker);
+        var identityPolicy = DahuaIdentityMatchPolicyParser.Parse(configuration["DAHUA_IDENTITY_MATCH_POLICY"]);
+        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(trustedRecord, resolvedWorker, identityPolicy);
 
         logger.LogInformation(
             "Canonical smart event decoded: Status={Status}, UserID={UserID}, CardName={CardName}, Method={Method}, Confidence={StatusConfidence}/{UserIdConfidence}/{CardNameConfidence}, ImageSize={ImageSize}",
@@ -1216,12 +1217,14 @@ public sealed class DahuaNetSdkActiveRegisterService(
             imageBufferSize);
 
         logger.LogInformation(
-            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, RecNo={RecNo}, ImageSize={ImageSize}",
+            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, IdentityPolicy={IdentityPolicy}, CardNameMismatch={CardNameMismatch}, RecNo={RecNo}, ImageSize={ImageSize}",
             trustedRecord.UserId,
             trustedRecord.CardName,
             trustedRecord.StatusRaw,
             trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
             workerResolved,
+            identityPolicy,
+            trustedRecord.RawFields.GetValueOrDefault("CardNameMismatch"),
             trustedRecord.RecNo,
             imageBufferSize);
 
@@ -1240,7 +1243,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 : DahuaSmartEventClassification.BuildParserUncertainRecord(trustedRecord, decoded.RawStructSummaryJson);
         if (recognizedAttendance)
         {
-            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest);
+            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest, resolvedWorker, identityPolicy);
         }
 
         if (recognizedAttendance)

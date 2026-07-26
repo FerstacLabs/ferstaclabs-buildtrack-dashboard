@@ -26,7 +26,7 @@ const eventLabel: Record<string, string> = {
   UnknownFace: 'Tanınmayan üz',
   SuspiciousRecognition: 'Şübhəli tanıma',
   IdentityMismatch: 'Şübhəli tanıma',
-  ParserUncertainSmartEvent: 'Yoxlanılmalı hadisə',
+  ParserUncertainSmartEvent: 'Şübhəli tanıma',
 }
 
 const eventColor: Record<string, string> = {
