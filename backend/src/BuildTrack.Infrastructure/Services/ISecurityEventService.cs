@@ -16,4 +16,5 @@ public sealed record SecurityEventIngestionResult(SecurityEventIngestionResultSt
 public interface ISecurityEventService
 {
     Task<SecurityEventIngestionResult> IngestUnknownFaceAsync(Guid deviceId, DahuaAccessRecord record, TimeSpan debounceWindow, TimeZoneInfo eventTimeZone, string source = "dahua_cgi_polling", CancellationToken cancellationToken = default);
+    Task<SecurityEventIngestionResult> IngestFaceReviewEventAsync(Guid deviceId, DahuaAccessRecord record, TimeSpan debounceWindow, TimeZoneInfo eventTimeZone, string source = "dahua_cgi_polling", CancellationToken cancellationToken = default);
 }

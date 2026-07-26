@@ -128,6 +128,34 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     }
 
     [Fact]
+    public void SmartEventClassification_ParserUncertainKeepsMismatchDiagnosticsButPreventsAttendance()
+    {
+        var record = KnownFaceRecord("1", "fj");
+        var worker = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "1",
+            FullName = "Ilham",
+            Status = WorkerStatus.Active,
+        };
+
+        var trusted = DahuaSmartEventClassification.BuildTrustedRecord(record, TrustedSummary("1", "fj", "1", confidence: "High", source: "CanonicalSmartEventParser"), worker);
+        var uncertain = DahuaSmartEventClassification.BuildParserUncertainRecord(trusted, TrustedSummary("1", "fj", "1", confidence: "High", source: "CanonicalSmartEventParser"));
+
+        Assert.False(DahuaSmartEventClassification.IsRecognizedAttendance(trusted, worker));
+        Assert.Equal("ParserUncertainSmartEvent", uncertain.RawFields["Classification"]);
+        Assert.Equal("1", uncertain.RawFields["Status"]);
+        Assert.Equal("1", uncertain.RawFields["UserID"]);
+        Assert.Equal("fj", uncertain.RawFields["CardName"]);
+        Assert.Equal("Ilham", uncertain.RawFields["ExpectedWorkerName"]);
+        Assert.Equal("true", uncertain.RawFields["WorkerResolved"]);
+        Assert.Null(uncertain.UserId);
+        Assert.Null(uncertain.CardName);
+        Assert.True(DahuaSecurityReviewEventPolicy.IsFaceReviewEvent(uncertain));
+        Assert.False(DahuaSdkAccessEventNormalizer.ShouldInsertPayrollAttendance(uncertain));
+    }
+
+    [Fact]
     public void SmartEventClassification_UnknownFaceRequiresFailedOrMissingTrustedPersonFields()
     {
         var unknown = DahuaSmartEventClassification.BuildUnknownFaceRecord(

@@ -14,12 +14,12 @@ public sealed class DahuaAccessRecordIngestionPipeline(
     public async Task IngestAsync(Guid deviceId, DahuaAccessRecord record, DahuaEventSource source, CancellationToken cancellationToken)
     {
         var sourceName = source.ToSourceString();
-        if (DahuaUnknownFacePolicy.IsUnknownFace(record))
+        if (DahuaSecurityReviewEventPolicy.IsFaceReviewEvent(record))
         {
             var debounceWindow = TimeSpan.FromSeconds(ParsePositiveInt(configuration["DAHUA_UNKNOWN_FACE_DEBOUNCE_SECONDS"], 30));
             var eventTimeZone = ResolveTimeZone(configuration["DAHUA_CGI_DEVICE_TIMEZONE"] ?? configuration["DAHUA_ATTENDANCE_TIMEZONE"] ?? "Asia/Baku");
-            var result = await securityEvents.IngestUnknownFaceAsync(deviceId, record, debounceWindow, eventTimeZone, sourceName, cancellationToken);
-            logger.LogInformation("Dahua access record pipeline processed unknown face. Source {Source}, Device {DeviceId}, RecNo {RecNo}, Result {Result}, Reason {Reason}", sourceName, deviceId, record.RecNo, result.Status, result.Reason);
+            var result = await securityEvents.IngestFaceReviewEventAsync(deviceId, record, debounceWindow, eventTimeZone, sourceName, cancellationToken);
+            logger.LogInformation("Dahua access record pipeline processed face review event. Source {Source}, Device {DeviceId}, EventType {EventType}, RecNo {RecNo}, Result {Result}, Reason {Reason}", sourceName, deviceId, DahuaSecurityReviewEventPolicy.ResolveEventType(record), record.RecNo, result.Status, result.Reason);
             return;
         }
 

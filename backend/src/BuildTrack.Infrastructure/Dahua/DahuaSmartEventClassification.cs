@@ -85,16 +85,23 @@ public static class DahuaSmartEventClassification
 
     public static DahuaAccessRecord BuildParserUncertainRecord(DahuaAccessRecord source, string rawStructSummaryJson)
     {
+        var observedCardName = FirstNotBlank(source.RawFields.GetValueOrDefault("TrustedCardName"), source.CardName);
+        var workerResolved = string.Equals(source.RawFields.GetValueOrDefault("WorkerResolutionStatus"), "ResolvedWorker", StringComparison.OrdinalIgnoreCase);
+        var expectedWorkerName = workerResolved ? source.CardName : null;
+        var safeStatus = string.Equals(source.StatusRaw, "1", StringComparison.OrdinalIgnoreCase) ? source.StatusRaw : null;
         var rawFields = new Dictionary<string, string?>(source.RawFields, StringComparer.OrdinalIgnoreCase)
         {
             ["Classification"] = "ParserUncertainSmartEvent",
-            ["ClassificationReason"] = "Smart Event image arrived, but access/person fields were not decoded confidently enough for attendance or confirmed unknown-face classification",
+            ["ClassificationReason"] = "Smart Event image arrived, but access/person fields were inconsistent with the worker mapping or not decoded confidently enough for attendance",
             ["RawStructSummaryJson"] = rawStructSummaryJson,
             ["UsedDecodedStringCandidatesForClassification"] = "false",
-            ["Status"] = null,
-            ["UserID"] = null,
-            ["UserId"] = null,
-            ["CardName"] = null,
+            ["Status"] = safeStatus,
+            ["UserID"] = source.UserId,
+            ["UserId"] = source.UserId,
+            ["WorkerExternalId"] = source.UserId,
+            ["CardName"] = observedCardName,
+            ["ExpectedWorkerName"] = expectedWorkerName,
+            ["WorkerResolved"] = workerResolved ? "true" : "false",
         };
 
         return new DahuaAccessRecord
@@ -103,7 +110,7 @@ public static class DahuaSmartEventClassification
             CreateTime = source.CreateTime,
             UserId = null,
             CardName = null,
-            StatusRaw = null,
+            StatusRaw = safeStatus,
             MethodRaw = "15",
             Type = string.IsNullOrWhiteSpace(source.Type) ? "Entry" : source.Type,
             Url = source.Url,

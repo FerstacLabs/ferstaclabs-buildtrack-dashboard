@@ -24,6 +24,16 @@ const statusLabel: Record<SecurityEventStatus, string> = {
 
 const eventLabel: Record<string, string> = {
   UnknownFace: 'Tanınmayan üz',
+  SuspiciousRecognition: 'Şübhəli tanıma',
+  IdentityMismatch: 'Şübhəli tanıma',
+  ParserUncertainSmartEvent: 'Yoxlanılmalı hadisə',
+}
+
+const eventColor: Record<string, string> = {
+  UnknownFace: 'orange',
+  SuspiciousRecognition: 'red',
+  IdentityMismatch: 'red',
+  ParserUncertainSmartEvent: 'purple',
 }
 
 const showDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
@@ -161,12 +171,13 @@ export const SecurityEventsPage = () => {
 
   const openCount = rows.filter((row) => row.status === 'Open').length
   const reviewedCount = rows.filter((row) => row.status === 'Reviewed').length
-  const ignoredCount = rows.filter((row) => row.status === 'Ignored').length
+  const unknownCount = rows.filter((row) => row.eventType === 'UnknownFace').length
+  const suspiciousCount = rows.filter((row) => row.eventType !== 'UnknownFace').length
 
   const columns: TableColumnsType<SecurityEventRow> = [
     { title: 'Vaxt', dataIndex: 'eventTimeLocal', sorter: (a, b) => a.eventTime.localeCompare(b.eventTime) },
     { title: 'Cihaz', dataIndex: 'deviceName', render: (value) => value ?? '-' },
-    { title: 'Hadisə', dataIndex: 'eventType', render: (value, row) => <Tag color={row.severity === 'Warning' ? 'orange' : 'red'}>{eventLabel[value] ?? value}</Tag> },
+    { title: 'Hadisə', dataIndex: 'eventType', render: (value) => <Tag color={eventColor[value] ?? 'orange'}>{eventLabel[value] ?? value}</Tag> },
     {
       title: 'Şəkil',
       dataIndex: 'snapshotUrl',
@@ -197,7 +208,7 @@ export const SecurityEventsPage = () => {
         type="warning"
         showIcon
         message="Yad şəxslər və tanınmayan üzlər"
-        description="Bu səhifə əməkhaqqı davamiyyətinə təsir etmir. Uğursuz və ya boş UserID/CardName ilə gələn face hadisələri yalnız security_events cədvəlində saxlanılır. Snapshot backend storage-dan göstərilir, Dahua admin məlumatları frontend-ə çıxmır."
+        description="Bu səhifə əməkhaqqı davamiyyətinə təsir etmir. Tanınmayan üzlər və identity mismatch kimi yoxlanılmalı face hadisələri yalnız security_events cədvəlində saxlanılır. Snapshot backend storage-dan göstərilir, Dahua admin məlumatları frontend-ə çıxmır."
       />
 
       <section className="filter-bar live-filter-bar">
@@ -216,10 +227,10 @@ export const SecurityEventsPage = () => {
       )}
 
       <section className="kpi-grid">
-        <KpiCard icon={<EyeInvisibleOutlined />} title="Tanınmayan üzlər" value={rows.length.toString()} trend={date} tone="orange" />
+        <KpiCard icon={<EyeInvisibleOutlined />} title="Tanınmayan üzlər" value={unknownCount.toString()} trend={date} tone="orange" />
+        <KpiCard icon={<WarningOutlined />} title="Yoxlanılmalı" value={suspiciousCount.toString()} trend="şübhəli tanıma" tone="purple" />
         <KpiCard icon={<WarningOutlined />} title="Açıq hadisə" value={openCount.toString()} trend="baxış gözləyir" tone="red" />
         <KpiCard icon={<SafetyCertificateOutlined />} title="Baxılıb" value={reviewedCount.toString()} trend="security review" tone="green" />
-        <KpiCard icon={<SafetyCertificateOutlined />} title="Yox sayılıb" value={ignoredCount.toString()} trend="cari filtr" tone="purple" />
       </section>
 
       <section className="table-card">
@@ -234,7 +245,7 @@ export const SecurityEventsPage = () => {
           rowKey="id"
           pagination={{ pageSize: 10 }}
           scroll={{ x: 'max-content' }}
-          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün tanınmayan üz hadisəsi tapılmadı.' }}
+          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün tanınmayan və ya yoxlanılmalı üz hadisəsi tapılmadı.' }}
         />
       </section>
       <Modal

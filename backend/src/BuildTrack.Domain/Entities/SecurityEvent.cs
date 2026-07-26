@@ -2,7 +2,10 @@
 
 public enum SecurityEventType
 {
-    UnknownFace
+    UnknownFace,
+    SuspiciousRecognition,
+    IdentityMismatch,
+    ParserUncertainSmartEvent
 }
 
 public enum SecurityEventSeverity

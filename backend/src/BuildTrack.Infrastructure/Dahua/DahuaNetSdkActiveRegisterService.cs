@@ -1273,7 +1273,6 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 workerResolved,
                 imageBufferSize);
             await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_parser_uncertain", "Smart Event was not decoded confidently enough for attendance or confirmed unknown face", recordToIngest.RawFields, CancellationToken.None);
-            return;
         }
 
         await pipeline.IngestAsync(device.Id, recordToIngest, DahuaEventSource.ActiveRegister, CancellationToken.None);

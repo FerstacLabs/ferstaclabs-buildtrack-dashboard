@@ -1,5 +1,6 @@
 ﻿using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
+using BuildTrack.Infrastructure.Dahua;
 using BuildTrack.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -36,6 +37,22 @@ public sealed class DahuaAccessRecordIngestionPipelineTests
         Assert.Equal(0, attendance.Calls);
         Assert.Equal(1, security.Calls);
         Assert.Equal(DahuaEventSourceExtensions.CgiPollingSource, security.LastSource);
+    }
+
+    [Fact]
+    public async Task ActiveRegisterParserUncertainRecordGoesToSecurityNotAttendance()
+    {
+        var attendance = new FakeAttendanceIngestionService();
+        var security = new FakeSecurityEventService();
+        var pipeline = CreatePipeline(attendance, security);
+        var record = ParserUncertainRecord();
+
+        await pipeline.IngestAsync(Guid.NewGuid(), record, DahuaEventSource.ActiveRegister, CancellationToken.None);
+
+        Assert.Equal(0, attendance.Calls);
+        Assert.Equal(1, security.Calls);
+        Assert.Equal(DahuaEventSourceExtensions.ActiveRegisterSource, security.LastSource);
+        Assert.Equal(SecurityEventType.ParserUncertainSmartEvent, security.LastEventType);
     }
 
     [Fact]
@@ -121,6 +138,32 @@ public sealed class DahuaAccessRecordIngestionPipelineTests
         },
     };
 
+    private static DahuaAccessRecord ParserUncertainRecord() => new()
+    {
+        RecNo = 103,
+        CreateTime = DateTimeOffset.Parse("2026-07-14T05:02:00+00:00"),
+        UserId = null,
+        CardName = null,
+        StatusRaw = "1",
+        MethodRaw = "15",
+        Type = "Entry",
+        Url = "/app/data/security-snapshots/smart-events/suspicious.jpg",
+        RawFields = new Dictionary<string, string?>
+        {
+            ["Classification"] = "ParserUncertainSmartEvent",
+            ["ClassificationReason"] = "Smart Event identity mismatch",
+            ["Status"] = "1",
+            ["UserID"] = "1",
+            ["CardName"] = "fj",
+            ["ExpectedWorkerName"] = "Ilham",
+            ["WorkerExternalId"] = "1",
+            ["WorkerResolved"] = "true",
+            ["Method"] = "15",
+            ["Type"] = "Entry",
+            ["SnapshotSource"] = "NetSdkSmartEventImageBuffer",
+        },
+    };
+
     private sealed class FakeAttendanceIngestionService : IAttendanceIngestionService
     {
         public int Calls { get; private set; }
@@ -144,11 +187,18 @@ public sealed class DahuaAccessRecordIngestionPipelineTests
     {
         public int Calls { get; private set; }
         public string? LastSource { get; private set; }
+        public SecurityEventType? LastEventType { get; private set; }
 
         public Task<SecurityEventIngestionResult> IngestUnknownFaceAsync(Guid deviceId, DahuaAccessRecord record, TimeSpan debounceWindow, TimeZoneInfo eventTimeZone, string source = "dahua_cgi_polling", CancellationToken cancellationToken = default)
         {
+            return IngestFaceReviewEventAsync(deviceId, record, debounceWindow, eventTimeZone, source, cancellationToken);
+        }
+
+        public Task<SecurityEventIngestionResult> IngestFaceReviewEventAsync(Guid deviceId, DahuaAccessRecord record, TimeSpan debounceWindow, TimeZoneInfo eventTimeZone, string source = "dahua_cgi_polling", CancellationToken cancellationToken = default)
+        {
             Calls++;
             LastSource = source;
+            LastEventType = DahuaSecurityReviewEventPolicy.ResolveEventType(record);
             return Task.FromResult(new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Created));
         }
     }

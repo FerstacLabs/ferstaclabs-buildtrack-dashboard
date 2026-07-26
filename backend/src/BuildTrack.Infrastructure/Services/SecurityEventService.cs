@@ -19,17 +19,26 @@ public sealed class SecurityEventService(
         TimeSpan debounceWindow,
         TimeZoneInfo eventTimeZone,
         string source = "dahua_cgi_polling",
+        CancellationToken cancellationToken = default) =>
+        await IngestFaceReviewEventAsync(deviceId, record, debounceWindow, eventTimeZone, source, cancellationToken);
+
+    public async Task<SecurityEventIngestionResult> IngestFaceReviewEventAsync(
+        Guid deviceId,
+        DahuaAccessRecord record,
+        TimeSpan debounceWindow,
+        TimeZoneInfo eventTimeZone,
+        string source = "dahua_cgi_polling",
         CancellationToken cancellationToken = default)
     {
-        if (!DahuaUnknownFacePolicy.IsUnknownFace(record))
+        if (!DahuaSecurityReviewEventPolicy.IsFaceReviewEvent(record))
         {
-            return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Ignored, Reason: "not unknown face");
+            return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Ignored, Reason: "not face review event");
         }
 
         var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken);
         if (device is null)
         {
-            logger.LogWarning("Unknown face security event ignored because device {DeviceId} was not found", deviceId);
+            logger.LogWarning("Face review security event ignored because device {DeviceId} was not found", deviceId);
             return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Ignored, Reason: "device not found");
         }
 
@@ -42,26 +51,30 @@ public sealed class SecurityEventService(
             }
         }
 
-        var windowStart = record.CreateTime - debounceWindow;
+        var eventType = DahuaSecurityReviewEventPolicy.ResolveEventType(record);
+        var eventTime = string.Equals(source, DahuaEventSourceExtensions.ActiveRegisterSource, StringComparison.OrdinalIgnoreCase)
+            ? DateTimeOffset.UtcNow
+            : record.CreateTime;
+        var windowStart = eventTime - debounceWindow;
         var debounced = await db.SecurityEvents.AnyAsync(
             x => x.DeviceId == deviceId
-                 && x.EventType == SecurityEventType.UnknownFace
+                 && x.EventType == eventType
                  && x.EventTime >= windowStart
-                 && x.EventTime <= record.CreateTime,
+                 && x.EventTime <= eventTime,
             cancellationToken);
         if (debounced)
         {
-            logger.LogInformation("Skipped unknown face by debounce. Device {DeviceId}, RecNo {RecNo}, EventTime {EventTime}, SnapshotPath {SnapshotPath}", deviceId, record.RecNo, record.CreateTime, record.Url);
-            return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Debounced, Reason: "unknown face debounce");
+            logger.LogInformation("Skipped face review event by debounce. EventType {EventType}, Device {DeviceId}, RecNo {RecNo}, EventTime {EventTime}, SnapshotPath {SnapshotPath}", eventType, deviceId, record.RecNo, eventTime, record.Url);
+            return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Debounced, Reason: "face review debounce");
         }
 
         var securityEvent = new SecurityEvent
         {
             SiteId = device.SiteId,
             DeviceId = device.Id,
-            EventTime = record.CreateTime,
-            EventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(record.CreateTime, eventTimeZone).DateTime),
-            EventType = SecurityEventType.UnknownFace,
+            EventTime = eventTime,
+            EventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(eventTime, eventTimeZone).DateTime),
+            EventType = eventType,
             Severity = SecurityEventSeverity.Warning,
             Status = SecurityEventStatus.Open,
             RawRecNo = record.RecNo,
@@ -73,7 +86,7 @@ public sealed class SecurityEventService(
             SnapshotDownloadStatus = IsLocalSmartEventSnapshot(record) ? "Stored" : null,
             SnapshotSource = IsLocalSmartEventSnapshot(record) ? "NetSdkSmartEventImageBuffer" : null,
             ErrorCode = record.RawFields.GetValueOrDefault("ErrorCode"),
-            Message = "Tanınmayan üz aşkarlandı",
+            Message = DahuaSecurityReviewEventPolicy.ResolveMessage(eventType),
             Source = source,
             RawPayloadJson = JsonSerializer.Serialize(record.RawFields),
             CreatedAt = DateTimeOffset.UtcNow,
@@ -87,16 +100,16 @@ public sealed class SecurityEventService(
         catch (DbUpdateException ex) when (IsDuplicateException(ex))
         {
             db.Entry(securityEvent).State = EntityState.Detached;
-            logger.LogInformation(ex, "Duplicate unknown face security event ignored. Device {DeviceId}, RecNo {RecNo}", deviceId, record.RecNo);
+            logger.LogInformation(ex, "Duplicate face review security event ignored. EventType {EventType}, Device {DeviceId}, RecNo {RecNo}", eventType, deviceId, record.RecNo);
             return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Duplicate, Reason: "duplicate database constraint");
         }
 
-        logger.LogWarning("Created unknown face security event. Event {EventId}, Device {DeviceId}, RecNo {RecNo}, SnapshotPath {SnapshotPath}", securityEvent.Id, deviceId, record.RecNo, record.Url);
-        logger.LogInformation("Unknown face snapshot path: {SnapshotPath}", record.Url);
+        logger.LogWarning("Created face review security event. Event {EventId}, EventType {EventType}, Device {DeviceId}, RecNo {RecNo}, SnapshotPath {SnapshotPath}", securityEvent.Id, eventType, deviceId, record.RecNo, record.Url);
+        logger.LogInformation("Face review snapshot path: {SnapshotPath}", record.Url);
 
         if (IsLocalSmartEventSnapshot(record))
         {
-            logger.LogInformation("UnknownFace Smart Event snapshot already stored locally. SecurityEventId={SecurityEventId}, StoredSnapshotPath={StoredSnapshotPath}", securityEvent.Id, securityEvent.StoredSnapshotPath);
+            logger.LogInformation("Smart Event face review snapshot already stored locally. SecurityEventId={SecurityEventId}, StoredSnapshotPath={StoredSnapshotPath}", securityEvent.Id, securityEvent.StoredSnapshotPath);
             return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Created, securityEvent);
         }
 
@@ -107,7 +120,7 @@ public sealed class SecurityEventService(
         securityEvent.SnapshotDownloadError = snapshotResult.Error;
         securityEvent.SnapshotSource = snapshotResult.Source;
         await db.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("UnknownFace snapshot final status. SecurityEventId={SecurityEventId}, SnapshotDownloadStatus={SnapshotDownloadStatus}", securityEvent.Id, securityEvent.SnapshotDownloadStatus);
+        logger.LogInformation("Face review snapshot final status. SecurityEventId={SecurityEventId}, SnapshotDownloadStatus={SnapshotDownloadStatus}", securityEvent.Id, securityEvent.SnapshotDownloadStatus);
 
         return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Created, securityEvent);
     }
