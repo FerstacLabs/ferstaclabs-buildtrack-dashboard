@@ -302,8 +302,8 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
 
     var query = db.AttendanceEvents.AsNoTracking()
         .Where(x => x.WorkerExternalId == workerExternalId
-                    && x.EventTime >= dayStartUtc
-                    && x.EventTime < dayEndUtc
+                    && x.CreatedAt >= dayStartUtc
+                    && x.CreatedAt < dayEndUtc
                     && x.Status == AttendanceEventStatus.Ok
                     && x.Method == AttendanceMethod.Face
                     && x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
@@ -311,7 +311,7 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
     if (siteId is not null) query = query.Where(x => x.SiteId == siteId.Value);
     if (deviceId is not null) query = query.Where(x => x.DeviceId == deviceId.Value);
 
-    var events = await query.OrderBy(x => x.EventTime).ToListAsync(ct);
+    var events = await query.OrderBy(x => x.CreatedAt).ToListAsync(ct);
 
     events = events
         .Where(IsRecognizedAttendancePayload)
@@ -320,8 +320,8 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
 
     return Results.Ok(events.Select(attendanceEvent => new AttendanceSnapshotResponse(
         attendanceEvent.Id,
-        attendanceEvent.EventTime,
-        FormatLocalTime(attendanceEvent.EventTime, timeZone),
+        AttendanceEventOperationalClock.Resolve(attendanceEvent),
+        FormatLocalTime(AttendanceEventOperationalClock.Resolve(attendanceEvent), timeZone),
         $"/api/attendance-events/{attendanceEvent.Id}/snapshot",
         attendanceEvent.Method,
         attendanceEvent.Source)).ToArray());
@@ -373,7 +373,66 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
         })
         .ToArray();
 
-    return Results.Ok(new AttendanceLiveStatusResponse(workDate, workers.Length, workers, staleOpenSessionsCount));
+    var sessionWorkerCodes = workers
+        .Select(x => x.WorkerExternalId)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
+    var activeRegisterEvents = await db.AttendanceEvents.AsNoTracking()
+        .Where(x => x.SiteId == siteId
+                    && x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
+                    && x.CreatedAt >= dayStartUtc
+                    && x.CreatedAt < dayEndUtc
+                    && x.Status == AttendanceEventStatus.Ok
+                    && x.Method == AttendanceMethod.Face
+                    && x.WorkerExternalId != null)
+        .OrderBy(x => x.CreatedAt)
+        .ToListAsync(ct);
+    activeRegisterEvents = activeRegisterEvents
+        .Where(IsRecognizedAttendancePayload)
+        .Where(x => !sessionWorkerCodes.Contains(x.WorkerExternalId!))
+        .ToList();
+
+    var activeRegisterWorkerCodes = activeRegisterEvents
+        .Select(x => x.WorkerExternalId!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var activeRegisterWorkersByCode = activeRegisterWorkerCodes.Length == 0
+        ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        : await db.Workers.AsNoTracking()
+            .Where(x => x.SiteId == siteId && activeRegisterWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
+
+    var activeRegisterWorkerRows = activeRegisterEvents
+        .GroupBy(x => x.WorkerExternalId!, StringComparer.OrdinalIgnoreCase)
+        .Select(group =>
+        {
+            var ordered = group.OrderBy(AttendanceEventOperationalClock.Resolve).ToArray();
+            var first = ordered.First();
+            var last = ordered.Last();
+            var firstSeen = AttendanceEventOperationalClock.Resolve(first);
+            var lastSeen = AttendanceEventOperationalClock.Resolve(last);
+            return new AttendanceLiveWorkerResponse(
+                first.WorkerExternalId ?? string.Empty,
+                first.WorkerExternalId is not null && activeRegisterWorkersByCode.TryGetValue(first.WorkerExternalId, out var mappedName)
+                    ? mappedName
+                    : ordered.LastOrDefault(x => !string.IsNullOrWhiteSpace(x.WorkerName))?.WorkerName ?? first.WorkerName,
+                firstSeen,
+                FormatLocalTime(firstSeen, timeZone),
+                lastSeen,
+                FormatLocalTime(lastSeen, timeZone),
+                null,
+                null,
+                null,
+                AttendanceSessionPlanner.BuildDisplayStatus(AttendanceSessionStatus.Open, null, lastSeen, now),
+                false,
+                Math.Max(0, (int)Math.Floor((lastSeen - firstSeen).TotalMinutes)),
+                AttendanceSessionStatus.Open);
+        })
+        .ToArray();
+
+    var combinedWorkers = workers.Concat(activeRegisterWorkerRows).OrderBy(x => x.CheckInTime).ToArray();
+
+    return Results.Ok(new AttendanceLiveStatusResponse(workDate, combinedWorkers.Length, combinedWorkers, staleOpenSessionsCount));
 });
 
 app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
@@ -396,10 +455,14 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
         var events = await db.AttendanceEvents.AsNoTracking()
             .Where(x => x.SiteId == siteId
-                        && x.EventTime >= dayStartUtc
-                        && x.EventTime < dayEndUtc
                         && x.Status == AttendanceEventStatus.Ok
-                        && x.WorkerExternalId != null)
+                        && x.WorkerExternalId != null
+                        && ((x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
+                             && x.CreatedAt >= dayStartUtc
+                             && x.CreatedAt < dayEndUtc)
+                            || (x.Source != DahuaEventSourceExtensions.ActiveRegisterSource
+                                && x.EventTime >= dayStartUtc
+                                && x.EventTime < dayEndUtc)))
             .OrderBy(x => x.EventTime)
             .ToListAsync(ct);
         var fallbackWorkerCodes = events.Select(x => x.WorkerExternalId).Where(x => x is not null).Distinct().ToArray();
@@ -420,26 +483,28 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
             .GroupBy(x => x.WorkerExternalId!)
             .Select(group =>
             {
-                var ordered = group.OrderBy(x => x.EventTime).ToArray();
+                var ordered = group.OrderBy(AttendanceEventOperationalClock.Resolve).ToArray();
                 var first = ordered.First();
                 var last = ordered.Last();
-                var workedMinutes = Math.Max(0, (int)Math.Floor((last.EventTime - first.EventTime).TotalMinutes));
+                var firstSeen = AttendanceEventOperationalClock.Resolve(first);
+                var lastSeen = AttendanceEventOperationalClock.Resolve(last);
+                var workedMinutes = Math.Max(0, (int)Math.Floor((lastSeen - firstSeen).TotalMinutes));
                 return new AttendanceSessionResponse(
                     first.Id,
                     first.WorkerExternalId ?? string.Empty,
                     first.WorkerExternalId is not null && fallbackWorkers.TryGetValue(first.WorkerExternalId, out var mappedName)
                         ? mappedName
                         : ordered.LastOrDefault(x => !string.IsNullOrWhiteSpace(x.WorkerName))?.WorkerName ?? first.WorkerName,
-                    first.EventTime,
+                    firstSeen,
                     null,
-                    FormatLocalTime(first.EventTime, timeZone),
+                    FormatLocalTime(firstSeen, timeZone),
                     null,
-                    last.EventTime,
-                    FormatLocalTime(last.EventTime, timeZone),
+                    lastSeen,
+                    FormatLocalTime(lastSeen, timeZone),
                     null,
                     null,
                     null,
-                    last.EventTime >= DateTimeOffset.UtcNow.AddMinutes(-15) ? "Az əvvəl göründü" : "Bugün görünüb",
+                    lastSeen >= DateTimeOffset.UtcNow.AddMinutes(-15) ? "Az əvvəl göründü" : "Bugün görünüb",
                     false,
                     workedMinutes,
                     AttendanceSessionStatus.Open,

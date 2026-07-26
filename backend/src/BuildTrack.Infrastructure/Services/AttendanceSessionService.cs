@@ -34,7 +34,8 @@ public sealed class AttendanceSessionService(
         }
 
         var timeZone = ResolveTimeZone(configuration["DAHUA_ATTENDANCE_TIMEZONE"] ?? "Asia/Baku");
-        var workDate = AttendanceSessionPlanner.CalculateWorkDate(attendanceEvent.EventTime, timeZone);
+        var operationalEventTime = AttendanceEventOperationalClock.Resolve(attendanceEvent);
+        var workDate = AttendanceEventOperationalClock.ResolveWorkDate(attendanceEvent, timeZone);
         var minCheckoutGap = TimeSpan.FromMinutes(ParsePositiveInt(configuration["DAHUA_ATTENDANCE_MIN_CHECKOUT_AFTER_MINUTES"], 15));
         var mode = configuration["DAHUA_ATTENDANCE_MODE"] ?? "SingleDeviceToggle";
         var singleSessionPerDay = ParseBool(configuration["DAHUA_ATTENDANCE_SINGLE_SESSION_PER_DAY"], defaultValue: true);
@@ -56,8 +57,8 @@ public sealed class AttendanceSessionService(
 
         var openSession = await FindOpenSessionAsync(attendanceEvent.DeviceId, workerExternalId, workDate, cancellationToken);
         var decision = mode.Equals("DeviceDirection", StringComparison.OrdinalIgnoreCase)
-            ? AttendanceSessionPlanner.DecideDeviceDirection(openSession, attendanceEvent.Direction, attendanceEvent.EventTime, minCheckoutGap)
-            : AttendanceSessionPlanner.DecideSingleDeviceToggle(openSession, attendanceEvent.EventTime, minCheckoutGap);
+            ? AttendanceSessionPlanner.DecideDeviceDirection(openSession, attendanceEvent.Direction, operationalEventTime, minCheckoutGap)
+            : AttendanceSessionPlanner.DecideSingleDeviceToggle(openSession, operationalEventTime, minCheckoutGap);
 
         switch (decision.Type)
         {
@@ -93,12 +94,12 @@ public sealed class AttendanceSessionService(
             .ThenBy(x => x.CheckInTime)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var decision = AttendanceSessionPlanner.DecideOneCameraPresence(existingSession, attendanceEvent.EventTime);
+        var decision = AttendanceSessionPlanner.DecideOneCameraPresence(existingSession, AttendanceEventOperationalClock.Resolve(attendanceEvent));
         switch (decision.Type)
         {
             case AttendanceSessionDecisionType.CreateCheckIn:
                 await CreateSessionAsync(attendanceEvent, workerExternalId, workDate, "Created daily presence session", cancellationToken);
-                logger.LogInformation("Created daily presence session. Event {EventId}, WorkerExternalId {WorkerExternalId}, WorkDate {WorkDate}, CheckInTime {CheckInTime}", attendanceEvent.Id, workerExternalId, workDate, attendanceEvent.EventTime);
+                logger.LogInformation("Created daily presence session. Event {EventId}, WorkerExternalId {WorkerExternalId}, WorkDate {WorkDate}, CheckInTime {CheckInTime}", attendanceEvent.Id, workerExternalId, workDate, AttendanceEventOperationalClock.Resolve(attendanceEvent));
                 break;
             case AttendanceSessionDecisionType.UpdateLastSeen when existingSession is not null:
                 await UpdateLastSeenAsync(existingSession, attendanceEvent, cancellationToken);
@@ -126,7 +127,7 @@ public sealed class AttendanceSessionService(
             .ThenBy(x => x.CheckInTime)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var decision = AttendanceSessionPlanner.DecideSingleDeviceDailySession(existingSession, attendanceEvent.EventTime, minCheckoutGap, updateCheckoutToLastSeen);
+        var decision = AttendanceSessionPlanner.DecideSingleDeviceDailySession(existingSession, AttendanceEventOperationalClock.Resolve(attendanceEvent), minCheckoutGap, updateCheckoutToLastSeen);
         switch (decision.Type)
         {
             case AttendanceSessionDecisionType.CreateCheckIn:
@@ -175,9 +176,9 @@ public sealed class AttendanceSessionService(
             WorkerName = attendanceEvent.WorkerName,
             WorkDate = workDate,
             CheckInEventId = attendanceEvent.Id,
-            CheckInTime = attendanceEvent.EventTime,
+            CheckInTime = AttendanceEventOperationalClock.Resolve(attendanceEvent),
             LastSeenEventId = attendanceEvent.Id,
-            LastSeenTime = attendanceEvent.EventTime,
+            LastSeenTime = AttendanceEventOperationalClock.Resolve(attendanceEvent),
             PresenceStatus = "RegisteredToday",
             Status = AttendanceSessionStatus.Open,
             Source = attendanceEvent.Source,
@@ -206,9 +207,9 @@ public sealed class AttendanceSessionService(
     private async Task CloseSessionAsync(AttendanceSession session, AttendanceEvent attendanceEvent, string logMessage, string closeReason, CancellationToken cancellationToken)
     {
         session.CheckOutEventId = attendanceEvent.Id;
-        session.CheckOutTime = attendanceEvent.EventTime;
+        session.CheckOutTime = AttendanceEventOperationalClock.Resolve(attendanceEvent);
         session.LastSeenEventId = attendanceEvent.Id;
-        session.LastSeenTime = attendanceEvent.EventTime;
+        session.LastSeenTime = AttendanceEventOperationalClock.Resolve(attendanceEvent);
         session.CloseReason = closeReason;
         session.PresenceStatus = "Closed";
         session.Status = AttendanceSessionStatus.Closed;
@@ -229,8 +230,9 @@ public sealed class AttendanceSessionService(
     private async Task UpdateLastSeenAsync(AttendanceSession session, AttendanceEvent attendanceEvent, CancellationToken cancellationToken)
     {
         session.LastSeenEventId = attendanceEvent.Id;
-        session.LastSeenTime = attendanceEvent.EventTime;
-        session.PresenceStatus = DateTimeOffset.UtcNow - attendanceEvent.EventTime <= TimeSpan.FromMinutes(15) ? "RecentlySeen" : "RegisteredToday";
+        var operationalEventTime = AttendanceEventOperationalClock.Resolve(attendanceEvent);
+        session.LastSeenTime = operationalEventTime;
+        session.PresenceStatus = DateTimeOffset.UtcNow - operationalEventTime <= TimeSpan.FromMinutes(15) ? "RecentlySeen" : "RegisteredToday";
         session.UpdatedAt = DateTimeOffset.UtcNow;
         if (!string.IsNullOrWhiteSpace(attendanceEvent.WorkerName)) session.WorkerName = attendanceEvent.WorkerName;
         if (session.WorkerId is null && attendanceEvent.WorkerId is not null) session.WorkerId = attendanceEvent.WorkerId;
@@ -247,7 +249,7 @@ public sealed class AttendanceSessionService(
     private async Task UpdateCheckOutToLastSeenAsync(AttendanceSession session, AttendanceEvent attendanceEvent, CancellationToken cancellationToken)
     {
         session.CheckOutEventId = attendanceEvent.Id;
-        session.CheckOutTime = attendanceEvent.EventTime;
+        session.CheckOutTime = AttendanceEventOperationalClock.Resolve(attendanceEvent);
         session.Status = AttendanceSessionStatus.Closed;
         session.UpdatedAt = DateTimeOffset.UtcNow;
         if (!string.IsNullOrWhiteSpace(attendanceEvent.WorkerName)) session.WorkerName = attendanceEvent.WorkerName;
