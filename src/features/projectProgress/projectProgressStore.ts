@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
   AiAssistantMessage,
+  ConstructionObject,
   Crew,
   DailyForemanReport,
   MaterialItem,
@@ -19,10 +20,11 @@ interface ProjectProgressState extends ProjectProgressData {
   refreshSeedData: () => void
   resetDemoData: () => void
   setSelectedObjectForPage: (pageKey: string, objectId: string) => void
+  addObject: (object: Omit<ConstructionObject, 'id' | 'projectId' | 'status'> & Partial<Pick<ConstructionObject, 'projectId' | 'status'>>) => string
   addStage: (stage: Omit<WorkStage, 'id' | 'order'>) => void
   updateStage: (stageId: string, patch: Partial<WorkStage>) => void
   deleteStage: (stageId: string) => void
-  addWorkItem: (item: Omit<WorkItem, 'id'>) => void
+  addWorkItem: (item: Omit<WorkItem, 'id'>) => string
   updateWorkItem: (itemId: string, patch: Partial<WorkItem>) => void
   deleteWorkItem: (itemId: string) => void
   addCrew: (crew: Omit<Crew, 'id'>) => void
@@ -142,6 +144,12 @@ const applyReportProgress = (workItems: WorkItem[], report: DailyForemanReport) 
     })
   })
 
+const removeDummyIlhamWorker = (workers: WorkerAssignment[]) =>
+  workers.filter((worker) => !(
+    worker.workerName.trim().toLocaleLowerCase('az-AZ') === 'ilham əliyev'
+    && ['W-0001', 'W-01-0001'].includes(worker.workerExternalId)
+  ))
+
 export const statusLabel: Record<ProjectWorkStatus, string> = {
   NotStarted: 'Başlamayıb',
   InProgress: 'İcradadır',
@@ -190,6 +198,40 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           [pageKey]: objectId,
         },
       })),
+      addObject: (object) => {
+        const objectId = createId('object')
+        set((state) => ({
+          objects: [
+            ...state.objects,
+            {
+              ...object,
+              id: objectId,
+              projectId: object.projectId ?? state.activeProjectId,
+              status: object.status ?? 'NotStarted',
+            },
+          ],
+          selectedObjectIdByPage: {
+            ...state.selectedObjectIdByPage,
+            dashboard: objectId,
+            estimate: objectId,
+            crews: objectId,
+            workers: objectId,
+            timeline: objectId,
+            dailyReports: objectId,
+            materials: objectId,
+            attendance: objectId,
+            siteHours: objectId,
+            riskWorkers: objectId,
+            dailyAttendance: objectId,
+            delays: objectId,
+            payroll: objectId,
+            audit: objectId,
+            supervisorAudit: objectId,
+            export: objectId,
+          },
+        }))
+        return objectId
+      },
       addStage: (stage) => set((state) => ({
         stages: [
           ...state.stages,
@@ -203,11 +245,15 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         stages: state.stages.filter((stage) => stage.id !== stageId),
         workItems: state.workItems.filter((item) => item.stageId !== stageId),
       })),
-      addWorkItem: (item) => set((state) => {
-        const workItem = recalculateItemTotals({ ...item, id: createId('item') })
-        const workItems = [...state.workItems, workItem]
-        return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
-      }),
+      addWorkItem: (item) => {
+        const itemId = createId('item')
+        set((state) => {
+          const workItem = recalculateItemTotals({ ...item, id: itemId })
+          const workItems = [...state.workItems, workItem]
+          return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
+        })
+        return itemId
+      },
       updateWorkItem: (itemId, patch) => set((state) => {
         const workItems = state.workItems.map((item) => (item.id === itemId ? recalculateItemTotals({ ...item, ...patch }) : item))
         return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
@@ -313,12 +359,16 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         risks: state.risks,
         assistantMessages: state.assistantMessages,
       }),
-      version: 4,
+      version: 5,
       migrate: (persisted) => {
         const saved = persisted as Partial<ProjectProgressData>
         const hasIncompleteSeedWorkers = !saved.workerAssignments?.length || saved.workerAssignments.length < 20
         const hasIncompleteObjects = !saved.objects?.length || saved.objects.length < projectProgressSeed.objects.length
         const shouldRefreshObjectPortfolio = hasIncompleteObjects || hasIncompleteSeedWorkers
+        const workerAssignments = shouldRefreshObjectPortfolio
+          ? projectProgressSeed.workerAssignments
+          : saved.workerAssignments ?? projectProgressSeed.workerAssignments
+
         return {
           ...projectProgressSeed,
           ...saved,
@@ -329,7 +379,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           stages: shouldRefreshObjectPortfolio ? projectProgressSeed.stages : saved.stages ?? projectProgressSeed.stages,
           workItems: shouldRefreshObjectPortfolio ? projectProgressSeed.workItems : saved.workItems ?? projectProgressSeed.workItems,
           crews: shouldRefreshObjectPortfolio ? projectProgressSeed.crews : saved.crews ?? projectProgressSeed.crews,
-          workerAssignments: shouldRefreshObjectPortfolio ? projectProgressSeed.workerAssignments : saved.workerAssignments ?? projectProgressSeed.workerAssignments,
+          workerAssignments: removeDummyIlhamWorker(workerAssignments),
           materials: shouldRefreshObjectPortfolio ? projectProgressSeed.materials : saved.materials ?? projectProgressSeed.materials,
           attendanceSessions: shouldRefreshObjectPortfolio ? projectProgressSeed.attendanceSessions : saved.attendanceSessions ?? projectProgressSeed.attendanceSessions,
           workHourAllocations: shouldRefreshObjectPortfolio ? projectProgressSeed.workHourAllocations : saved.workHourAllocations ?? projectProgressSeed.workHourAllocations,

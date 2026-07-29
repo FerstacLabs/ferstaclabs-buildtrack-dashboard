@@ -7,6 +7,7 @@ import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import type { MaterialItem } from '../../types/projectProgress'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
+import { UnitSelect } from '../projectProgress/constructionUnits'
 import { ALL_OBJECTS_ID, getEstimateRowsByObject, getMaterialsByObject, getStagesByObject } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 
@@ -64,7 +65,7 @@ export const MaterialsPage = () => {
     { title: 'Material', dataIndex: 'name', render: (value, row) => <strong>{value}<br /><span className="muted-text">{row.supplier ?? 'Təchizatçı qeyd edilməyib'}</span></strong> },
     { title: 'Etap', dataIndex: 'stageName' },
     { title: 'Plan miqdar', render: (_, row) => `${formatNumber(row.quantity, 1)} ${row.unit}` },
-    { title: 'İstifadə', render: (_, row) => `${formatNumber(row.usedQuantity, 1)} ${row.unit}` },
+    { title: 'İstifadə olunub', render: (_, row) => `${formatNumber(row.usedQuantity, 1)} ${row.unit}` },
     { title: 'Qalıq', render: (_, row) => <Tag color={row.quantity > 0 && row.remainingQuantity / row.quantity <= 0.15 ? 'red' : 'green'}>{formatNumber(row.remainingQuantity, 1)} {row.unit}</Tag> },
     { title: 'İstifadə %', dataIndex: 'usedPercent', render: (value) => <Progress percent={Number(value)} size="small" /> },
     { title: 'Dəyər', dataIndex: 'totalValue', align: 'right', render: (value) => formatCurrency(Number(value)) },
@@ -86,7 +87,7 @@ export const MaterialsPage = () => {
       <PageTitle
         title="Materiallar"
         subtitle="Smeta materialları, istifadə miqdarı, qalıq və çatdırılma nəzarəti"
-        extra={<Space wrap><ObjectFilter pageKey="materials" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Material əlavə et</Button></Space>}
+        extra={<Space wrap><ObjectFilter pageKey="materials" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Yeni material</Button></Space>}
       />
 
       <section className="kpi-grid four">
@@ -107,7 +108,7 @@ export const MaterialsPage = () => {
         <Form form={form} layout="vertical" onFinish={saveMaterial}>
           <Form.Item name="name" label="Material adı" rules={[{ required: true }]}><Input /></Form.Item>
           <Space.Compact block>
-            <Form.Item name="unit" label="Vahid" className="form-half"><Input /></Form.Item>
+            <Form.Item name="unit" label="Vahid" className="form-half"><UnitSelect /></Form.Item>
             <Form.Item name="unitPrice" label="Vahid qiymət" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
@@ -115,7 +116,7 @@ export const MaterialsPage = () => {
             <Form.Item name="usedQuantity" label="İstifadə olunub" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
           <Form.Item name="linkedStageId" label="Etap"><Select allowClear showSearch options={stageOptions} /></Form.Item>
-          <Form.Item name="linkedWorkItemId" label="İş sətiri"><Select allowClear showSearch options={itemOptions} /></Form.Item>
+          <Form.Item name="linkedWorkItemId" label="İş sətri"><Select allowClear showSearch options={itemOptions} /></Form.Item>
           <Form.Item name="deliveryDate" label="Çatdırılma tarixi"><Input placeholder="YYYY-MM-DD" /></Form.Item>
           <Form.Item name="supplier" label="Təchizatçı"><Input /></Form.Item>
           <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>

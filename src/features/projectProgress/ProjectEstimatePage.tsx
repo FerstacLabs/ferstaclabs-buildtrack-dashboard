@@ -1,12 +1,14 @@
 import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Table, Tag, Upload, message } from 'antd'
+import { Button, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Table, Tag, Upload, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { PageTitle } from '../../components/ui/PageTitle'
+import { buildTrackBackendApi } from '../../services/api/buildTrackBackendApi'
 import type { ProjectWorkStatus, WorkItem } from '../../types/projectProgress'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
+import { UnitSelect } from './constructionUnits'
 import { ALL_OBJECTS_ID, getCrewsByObject, getEstimateRowsByObject, getMaterialsByObject, getStagesByObject } from './projectSelectors'
 import { statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
 
@@ -19,9 +21,11 @@ interface WorkItemFormValues {
   unitPrice?: number
   completedQuantity?: number
   laborUnitPrice: number
+  materialName?: string
   materialUnit?: string
   materialQuantity: number
   materialUnitPrice: number
+  materialSupplier?: string
   plannedHours: number
   actualHours: number
   assignedCrewId?: string
@@ -32,11 +36,46 @@ interface WorkItemFormValues {
   notes?: string
 }
 
+interface ProjectObjectFormValues {
+  name: string
+  address?: string
+  plannedStartDate?: string
+  plannedEndDate?: string
+  clientName?: string
+  notes?: string
+}
+
 const statusOptions = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
+
+const SingleValueSelect = ({
+  options,
+  placeholder,
+  value,
+  onChange,
+}: {
+  options: { value: string; label: string }[]
+  placeholder?: string
+  value?: string
+  onChange?: (value: string) => void
+}) => (
+  <Select
+    allowClear
+    showSearch
+    mode="tags"
+    maxCount={1}
+    value={value ? [value] : []}
+    placeholder={placeholder}
+    options={options}
+    onChange={(values) => onChange?.(values[values.length - 1] ?? '')}
+    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+  />
+)
 
 export const ProjectEstimatePage = () => {
   const store = useProjectProgressStore()
   const {
+    addMaterial,
+    addObject,
     addStage,
     addWorkItem,
     crews,
@@ -46,6 +85,7 @@ export const ProjectEstimatePage = () => {
     project,
     stages,
     summary,
+    updateMaterial,
     updateWorkItem,
   } = store
   const selectedObjectId = store.selectedObjectIdByPage.estimate ?? ALL_OBJECTS_ID
@@ -55,21 +95,32 @@ export const ProjectEstimatePage = () => {
   const scopedMaterials = getMaterialsByObject(store, selectedObjectId)
   const [itemForm] = Form.useForm<WorkItemFormValues>()
   const [stageForm] = Form.useForm<{ name: string; totalCost: number; plannedHours: number; plannedStartDate: string; plannedEndDate: string }>()
+  const [projectForm] = Form.useForm<ProjectObjectFormValues>()
   const [editingItem, setEditingItem] = useState<WorkItem>()
   const [itemDrawerOpen, setItemDrawerOpen] = useState(false)
   const [stageModalOpen, setStageModalOpen] = useState(false)
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewSheetNames, setPreviewSheetNames] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<unknown[][]>([])
 
   const stageOptions = scopedStages.map((stage) => ({ value: stage.id, label: stage.name }))
   const crewOptions = scopedCrews.map((crew) => ({ value: crew.id, label: crew.name }))
+  const materialOptions = scopedMaterials.map((material) => ({ value: material.name, label: material.name }))
   const stageNameById = useMemo(() => new Map(stages.map((stage) => [stage.id, stage.name])), [stages])
   const crewNameById = useMemo(() => new Map(crews.map((crew) => [crew.id, crew.name])), [crews])
 
   const openItemDrawer = (item?: WorkItem) => {
     setEditingItem(item)
-    itemForm.setFieldsValue(item ?? {
+    const linkedMaterial = item ? scopedMaterials.find((material) => material.linkedWorkItemId === item.id) : undefined
+    itemForm.setFieldsValue(item ? {
+      ...item,
+      materialName: linkedMaterial?.name ?? '',
+      materialUnit: linkedMaterial?.unit ?? item.materialUnit ?? 'ədəd',
+      materialQuantity: linkedMaterial?.quantity ?? item.materialQuantity,
+      materialUnitPrice: linkedMaterial?.unitPrice ?? item.materialUnitPrice,
+      materialSupplier: linkedMaterial?.supplier ?? '',
+    } : {
       stageId: scopedStages[0]?.id,
       name: '',
       costCode: '',
@@ -78,9 +129,11 @@ export const ProjectEstimatePage = () => {
       unitPrice: 0,
       completedQuantity: 0,
       laborUnitPrice: 0,
-      materialUnit: 'iş',
+      materialName: '',
+      materialUnit: 'ədəd',
       materialQuantity: 1,
       materialUnitPrice: 0,
+      materialSupplier: '',
       plannedHours: 0,
       actualHours: 0,
       status: 'NotStarted',
@@ -90,6 +143,7 @@ export const ProjectEstimatePage = () => {
   }
 
   const saveWorkItem = (values: WorkItemFormValues) => {
+    const { materialName, materialSupplier, ...workValues } = values
     const laborTotal = values.quantity * values.laborUnitPrice
     const materialTotal = values.materialQuantity * values.materialUnitPrice
     const progressPercent = values.quantity > 0 && typeof values.completedQuantity === 'number'
@@ -98,7 +152,7 @@ export const ProjectEstimatePage = () => {
     const selectedStage = stages.find((stage) => stage.id === values.stageId)
     const objectId = editingItem?.objectId ?? selectedStage?.objectId ?? (selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId)
     const payload = {
-      ...values,
+      ...workValues,
       objectId,
       progressPercent,
       laborTotal,
@@ -106,10 +160,60 @@ export const ProjectEstimatePage = () => {
       totalCost: laborTotal + materialTotal,
       remainingHours: Math.max(0, values.plannedHours - values.actualHours),
     }
+    const savedItemId = editingItem?.id ?? addWorkItem(payload)
     if (editingItem) updateWorkItem(editingItem.id, payload)
-    else addWorkItem(payload)
+
+    const normalizedMaterialName = materialName?.trim()
+    if (normalizedMaterialName && values.materialQuantity > 0) {
+      const materialPayload = {
+        objectId,
+        name: normalizedMaterialName,
+        unit: values.materialUnit || values.unit || 'ədəd',
+        quantity: values.materialQuantity,
+        usedQuantity: Math.min(values.materialQuantity, Math.max(0, values.materialQuantity * (progressPercent / 100))),
+        unitPrice: values.materialUnitPrice,
+        linkedStageId: values.stageId,
+        linkedWorkItemId: savedItemId,
+        supplier: materialSupplier?.trim(),
+        notes: values.notes,
+      }
+      const existingMaterial = scopedMaterials.find((material) =>
+        material.objectId === objectId
+        && material.linkedWorkItemId === savedItemId
+        && material.name.toLocaleLowerCase('az-AZ') === normalizedMaterialName.toLocaleLowerCase('az-AZ'))
+
+      if (existingMaterial) updateMaterial(existingMaterial.id, materialPayload)
+      else addMaterial(materialPayload)
+    }
+
     setItemDrawerOpen(false)
-    void message.success('Smeta sətiri yadda saxlandı')
+    void message.success(normalizedMaterialName ? 'Smeta sətri və bağlı material yadda saxlandı' : 'Smeta sətri yadda saxlandı')
+  }
+
+  const createProjectObject = (values: ProjectObjectFormValues) => {
+    const name = values.name.trim()
+    const objectId = addObject({
+      name,
+      address: values.address?.trim(),
+      zone: values.address?.trim() || 'Yeni obyekt',
+      plannedStartDate: values.plannedStartDate,
+      plannedEndDate: values.plannedEndDate,
+      clientName: values.clientName?.trim(),
+      notes: values.notes?.trim(),
+      status: 'NotStarted',
+    })
+
+    projectForm.resetFields()
+    setProjectModalOpen(false)
+    void message.success('Yeni layihə yaradıldı və obyekt filterlərinə əlavə olundu')
+
+    void buildTrackBackendApi.createSite({
+      name,
+      address: values.address?.trim() ?? '',
+      timeZone: 'Asia/Baku',
+    }).catch(() => {
+      console.info('Backend site mirror skipped; local project object is still saved', { objectId })
+    })
   }
 
   const addNewStage = (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate: string; plannedEndDate: string }) => {
@@ -198,16 +302,16 @@ export const ProjectEstimatePage = () => {
     <div className="page-stack project-progress-page">
       <PageTitle
         title="Smeta"
-        subtitle={`${project.name} üzrə etap, iş sətiri, miqdar, saat və xərc redaktoru`}
+        subtitle={`${project.name} üzrə etap, iş sətri, miqdar, saat və xərc redaktoru`}
         extra={
           <Space wrap>
-            <Button onClick={() => void message.info('Yeni layihə forması növbəti mərhələdə ayrıca aktiv ediləcək')}>Yeni layihə</Button>
+            <Button onClick={() => setProjectModalOpen(true)}>Yeni layihə</Button>
             <ObjectFilter pageKey="estimate" />
             <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={(file) => { void parseWorkbook(file as File); return false }}>
               <Button icon={<UploadOutlined />}>Smeta import et</Button>
             </Upload>
             <Button icon={<PlusOutlined />} onClick={() => setStageModalOpen(true)}>Yeni etap</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openItemDrawer()}>Yeni iş sətiri</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openItemDrawer()}>Yeni iş sətri</Button>
             <Button icon={<DownloadOutlined />} onClick={exportEstimate}>Excel export</Button>
           </Space>
         }
@@ -243,13 +347,13 @@ export const ProjectEstimatePage = () => {
         />
       </section>
 
-      <Drawer title={editingItem ? 'İş sətrini redaktə et' : 'Yeni iş sətiri'} open={itemDrawerOpen} width={560} onClose={() => setItemDrawerOpen(false)}>
+      <Drawer title={editingItem ? 'İş sətrini redaktə et' : 'Yeni iş sətri'} open={itemDrawerOpen} width={600} onClose={() => setItemDrawerOpen(false)}>
         <Form form={itemForm} layout="vertical" onFinish={saveWorkItem}>
           <Form.Item name="stageId" label="Etap" rules={[{ required: true }]}><Select showSearch options={stageOptions} /></Form.Item>
           <Form.Item name="name" label="İş adı" rules={[{ required: true }]}><Input /></Form.Item>
           <Space.Compact block>
             <Form.Item name="costCode" label="Cost Code" className="form-half"><Input /></Form.Item>
-            <Form.Item name="unit" label="Vahid" rules={[{ required: true }]} className="form-half"><Input /></Form.Item>
+            <Form.Item name="unit" label="Vahid" rules={[{ required: true }]} className="form-half"><UnitSelect /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
             <Form.Item name="quantity" label="Miqdar" rules={[{ required: true }]} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
@@ -257,27 +361,50 @@ export const ProjectEstimatePage = () => {
           </Space.Compact>
           <Space.Compact block>
             <Form.Item name="laborUnitPrice" label="İşçilik vahid qiyməti" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="materialUnitPrice" label="Material vahid qiyməti" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="plannedHours" label="Plan saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
+
+          <Divider>Material istifadəsi</Divider>
+          <Form.Item name="materialName" label="Material seç / yeni material yaz">
+            <SingleValueSelect options={materialOptions} placeholder="Məsələn: Beton B25" />
+          </Form.Item>
           <Space.Compact block>
-            <Form.Item name="materialUnit" label="Material vahidi" className="form-half"><Input /></Form.Item>
+            <Form.Item name="materialUnit" label="Material vahidi" className="form-half"><UnitSelect placeholder="Material vahidi" /></Form.Item>
             <Form.Item name="materialQuantity" label="Material miqdarı" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
-            <Form.Item name="plannedHours" label="Plan saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="materialUnitPrice" label="Material vahid qiyməti" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="materialSupplier" label="Təchizatçı" className="form-half"><Input /></Form.Item>
+          </Space.Compact>
+          <Button type="dashed" block onClick={() => itemForm.submit()}>Materialı əlavə et və yadda saxla</Button>
+
+          <Space.Compact block>
             <Form.Item name="actualHours" label="Faktiki saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="assignedCrewId" label="Briqada" className="form-half"><Select allowClear showSearch options={crewOptions} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
             <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
             <Form.Item name="plannedEndDate" label="Bitmə tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
           </Space.Compact>
-          <Form.Item name="assignedCrewId" label="Briqada"><Select allowClear showSearch options={crewOptions} /></Form.Item>
           <Form.Item name="status" label="Status"><Select options={statusOptions} /></Form.Item>
           <Form.Item name="progressPercent" label="Gedişat %"><Slider min={0} max={100} /></Form.Item>
           <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>
           <Button type="primary" htmlType="submit" block>Yadda saxla</Button>
         </Form>
       </Drawer>
+
+      <Modal title="Yeni layihə / obyekt" open={projectModalOpen} onCancel={() => setProjectModalOpen(false)} onOk={() => projectForm.submit()} okText="Yarat" cancelText="İmtina">
+        <Form form={projectForm} layout="vertical" onFinish={createProjectObject}>
+          <Form.Item name="name" label="Layihə / obyekt adı" rules={[{ required: true, message: 'Obyekt adı yazın' }]}><Input placeholder="Məsələn: Villa B blok" /></Form.Item>
+          <Form.Item name="address" label="Ünvan"><Input /></Form.Item>
+          <Space.Compact block>
+            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+            <Form.Item name="plannedEndDate" label="Plan bitmə tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+          </Space.Compact>
+          <Form.Item name="clientName" label="Müştəri / şirkət adı"><Input /></Form.Item>
+          <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>
+        </Form>
+      </Modal>
 
       <Modal title="Yeni etap" open={stageModalOpen} onCancel={() => setStageModalOpen(false)} onOk={() => stageForm.submit()} okText="Əlavə et" cancelText="İmtina">
         <Form form={stageForm} layout="vertical" onFinish={addNewStage}>

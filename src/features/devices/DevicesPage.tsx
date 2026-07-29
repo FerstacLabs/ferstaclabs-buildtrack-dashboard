@@ -128,7 +128,7 @@ export const DevicesPage = () => {
     try {
       await buildTrackBackendApi.createDevice({ ...values, vendor: 'dahua' })
       form.setFieldsValue({ registerDeviceId: `BT-${Date.now()}`, password: '' })
-      message.success('Dahua cihazı yaradıldı')
+      message.success('Kamera cihazı yaradıldı')
       await loadData()
     } catch (err) {
       message.error(getActionErrorMessage(err))
@@ -159,6 +159,7 @@ export const DevicesPage = () => {
   }
 
   const siteNameById = useMemo(() => new Map(sites.map((site) => [site.id, site.name])), [sites])
+  const listenerWarning = listenerStatus?.warning?.replaceAll('Dahua', 'Kamera')
 
   const columns: TableColumnsType<BackendDevice> = [
     { title: 'Cihaz', dataIndex: 'name', sorter: (a, b) => a.name.localeCompare(b.name) },
@@ -185,7 +186,7 @@ export const DevicesPage = () => {
       render: (_, row) => (
         <Space direction="vertical" size={6}>
           <Space wrap>
-            <Tooltip title="Cihazı Pending vəziyyətinə salır və real Dahua terminal connection gözləyir.">
+            <Tooltip title="Cihazı Pending vəziyyətinə salır və real kamera terminal bağlantısını gözləyir.">
               <Button size="small" onClick={() => runDeviceAction(row.id, 'ready')}>Active Register hazır et</Button>
             </Tooltip>
             {showDevSimulator && (
@@ -203,7 +204,7 @@ export const DevicesPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Dahua Cihazları və Active Register" subtitle="DHI-ASI6213J-MW terminalını BuildTrack backend-ə qoşmaq üçün cihaz konfiqurasiyası" />
+      <PageTitle title="Kamera cihazları və Active Register" subtitle="Face terminalını BuildTrack backend-ə qoşmaq üçün cihaz konfiqurasiyası" />
 
       {error && (
         <Alert
@@ -214,7 +215,7 @@ export const DevicesPage = () => {
         />
       )}
 
-      {listenerStatus?.warning && <Alert type="info" showIcon message="Dahua NetSDK xəbərdarlığı" description={listenerStatus.warning} />}
+      {listenerWarning && <Alert type="info" showIcon message="Kamera NetSDK xəbərdarlığı" description={listenerWarning} />}
 
       {showDevSimulator && <Alert type="warning" showIcon message="Development simulator enabled" description="DEV simulator düymələri real kamera olmadan test üçündür və yalnız explicit VITE_SHOW_DEV_SIMULATOR=true olduqda görünür." />}
 
@@ -234,12 +235,12 @@ export const DevicesPage = () => {
             rowKey="id"
             pagination={{ pageSize: 8 }}
             scroll={{ x: 'max-content' }}
-            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl test obyekti yaradın və Dahua terminal əlavə edin.' }}
+            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl test obyekti yaradın və kamera terminalı əlavə edin.' }}
           />
         </section>
 
         <aside className="panel-card builder-panel">
-          <h2>Yeni Dahua cihazı</h2>
+          <h2>Yeni kamera cihazı</h2>
           <Form<DeviceFormValues>
             form={form}
             layout="vertical"
@@ -279,7 +280,7 @@ export const DevicesPage = () => {
         <aside className="panel-card instruction-panel">
           <h2>Terminalda Active Register</h2>
           <ol>
-            <li>Dahua terminalında Connection &gt; Network &gt; Active Register bölməsinə keçin.</li>
+            <li>Kamera terminalında Connection &gt; Network &gt; Active Register bölməsinə keçin.</li>
             <li>Active Register Enable = ON edin.</li>
             <li>Server IP: BuildTrack backend public IP.</li>
             <li>Port: cihazda göstərilən register port, adətən 9500.</li>

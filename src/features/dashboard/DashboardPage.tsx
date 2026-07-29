@@ -1,25 +1,19 @@
 import {
-  AlertOutlined,
   ClockCircleOutlined,
   DollarCircleOutlined,
-  FileSearchOutlined,
-  ProjectOutlined,
-  TeamOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
 import { Progress, Table, Tag } from 'antd'
 import type { TableColumnsType } from 'antd'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -42,9 +36,7 @@ import {
   getStagesByObject,
   getWorkItemActualHours,
 } from '../projectProgress/projectSelectors'
-import { calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from '../projectProgress/projectProgressStore'
-
-const costColors = ['#1479ff', '#078b55', '#7546c9']
+import { calculateStageProgress, calculateWorkItemProgress, statusColor, statusLabel, useProjectProgressStore } from '../projectProgress/projectProgressStore'
 
 const trendData = [
   { day: 'B.e', saat: 22 },
@@ -69,15 +61,31 @@ export const DashboardPage = () => {
     totalAmount: scopedStages.reduce((sum, stage) => sum + stage.totalCost, 0),
     laborAmount: scopedStages.reduce((sum, stage) => sum + stage.laborCost, 0),
     materialAmount: scopedStages.reduce((sum, stage) => sum + stage.materialCost, 0),
-    hiddenCostAmount: selectedObjectId === ALL_OBJECTS_ID ? data.summary.hiddenCostAmount : data.summary.hiddenCostAmount / Math.max(1, data.objects.length),
   }
-  const stageRows = scopedStages
-    .map((stage) => ({
-      ...stage,
-      calculatedProgress: calculateStageProgress(stage, scopedWorkItems),
-      derivedActualHours: getStageActualHours(data, stage.id) || stage.actualHours,
-      crewName: data.crews.find((crew) => crew.id === stage.assignedCrewId)?.name ?? 'Təyin edilməyib',
-    }))
+  const usedTotals = scopedWorkItems.reduce(
+    (totals, item) => {
+      const ratio = calculateWorkItemProgress(item) / 100
+      return {
+        totalAmount: totals.totalAmount + item.totalCost * ratio,
+        laborAmount: totals.laborAmount + item.laborTotal * ratio,
+        materialAmount: totals.materialAmount + item.materialTotal * ratio,
+      }
+    },
+    { totalAmount: 0, laborAmount: 0, materialAmount: 0 },
+  )
+  const remainingTotals = {
+    totalAmount: Math.max(0, estimateTotals.totalAmount - usedTotals.totalAmount),
+    laborAmount: Math.max(0, estimateTotals.laborAmount - usedTotals.laborAmount),
+    materialAmount: Math.max(0, estimateTotals.materialAmount - usedTotals.materialAmount),
+  }
+  const remainingHours = Math.max(0, metrics.plannedHours - metrics.actualHours)
+
+  const stageRows = scopedStages.map((stage) => ({
+    ...stage,
+    calculatedProgress: calculateStageProgress(stage, scopedWorkItems),
+    derivedActualHours: getStageActualHours(data, stage.id) || stage.actualHours,
+    crewName: data.crews.find((crew) => crew.id === stage.assignedCrewId)?.name ?? 'Təyin edilməyib',
+  }))
 
   const workItems = scopedWorkItems.map((item) => ({
     ...item,
@@ -106,11 +114,13 @@ export const DashboardPage = () => {
     faktiki: stage.derivedActualHours,
   }))
 
-  const costSplit = [
-    { name: 'Material', value: estimateTotals.materialAmount },
-    { name: 'İşçilik', value: estimateTotals.laborAmount },
-    { name: 'Gizli xərc', value: estimateTotals.hiddenCostAmount },
-  ]
+  const keepObjectContext = (pageKey: string) => () => data.setSelectedObjectForPage(pageKey, selectedObjectId)
+
+  const linkedKpi = (to: string, pageKey: string, card: ReactNode) => (
+    <Link className="kpi-link" to={to} onClick={keepObjectContext(pageKey)}>
+      {card}
+    </Link>
+  )
 
   const stageColumns: TableColumnsType<WorkStage & { calculatedProgress: number; crewName: string }> = [
     { title: 'Etap', dataIndex: 'name', render: (value) => <strong>{value}</strong> },
@@ -137,31 +147,27 @@ export const DashboardPage = () => {
       />
 
       <section className="kpi-grid four">
-        <KpiCard icon={<DollarCircleOutlined />} title="Yekun smeta" value={formatCurrency(estimateTotals.totalAmount)} tone="blue" />
-        <KpiCard icon={<DollarCircleOutlined />} title="İşçilik büdcəsi" value={formatCurrency(estimateTotals.laborAmount)} tone="green" />
-        <KpiCard icon={<ToolOutlined />} title="Material büdcəsi" value={formatCurrency(estimateTotals.materialAmount)} tone="orange" />
-        <KpiCard icon={<AlertOutlined />} title="Gözə görünməyən xərclər" value={formatCurrency(estimateTotals.hiddenCostAmount)} tone="purple" />
-      </section>
+        {linkedKpi('/estimate', 'estimate', <KpiCard icon={<DollarCircleOutlined />} title="Yekun smeta" value={formatCurrency(estimateTotals.totalAmount)} tone="blue" />)}
+        {linkedKpi('/workers', 'workers', <KpiCard icon={<DollarCircleOutlined />} title="İşçilik büdcəsi" value={formatCurrency(estimateTotals.laborAmount)} tone="green" />)}
+        {linkedKpi('/materials', 'materials', <KpiCard icon={<ToolOutlined />} title="Material büdcəsi" value={formatCurrency(estimateTotals.materialAmount)} tone="orange" />)}
+        {linkedKpi('/timeline', 'timeline', <KpiCard icon={<ClockCircleOutlined />} title="Plan saat" value={formatHours(metrics.plannedHours, 0)} tone="blue" />)}
 
-      <section className="kpi-grid four">
-        <KpiCard icon={<ProjectOutlined />} title="Ümumi gedişat" value={formatPercent(metrics.weightedProgress, 1)} tone="green" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Plan saat" value={formatHours(metrics.plannedHours, 0)} tone="blue" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Faktiki saat" value={formatHours(metrics.actualHours, 0)} tone="orange" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Qalan saat" value={formatHours(metrics.remainingHours, 0)} tone="red" />
-      </section>
+        {linkedKpi('/estimate', 'estimate', <KpiCard icon={<DollarCircleOutlined />} title="İstifadə olunan smeta" value={formatCurrency(usedTotals.totalAmount)} tone="green" />)}
+        {linkedKpi('/payroll', 'payroll', <KpiCard icon={<DollarCircleOutlined />} title="İstifadə olunan işçilik büdcəsi" value={formatCurrency(usedTotals.laborAmount)} tone="green" />)}
+        {linkedKpi('/materials', 'materials', <KpiCard icon={<ToolOutlined />} title="İstifadə olunan material büdcəsi" value={formatCurrency(usedTotals.materialAmount)} tone="green" />)}
+        {linkedKpi('/daily-attendance', 'attendance', <KpiCard icon={<ClockCircleOutlined />} title="Faktiki saat" value={formatHours(metrics.actualHours, 0)} tone="orange" />)}
 
-      <section className="kpi-grid four">
-        <KpiCard icon={<TeamOutlined />} title="Aktiv briqadalar" value={formatNumber(metrics.activeCrews)} tone="green" />
-        <KpiCard icon={<AlertOutlined />} title="Gecikən işlər" value={formatNumber(metrics.delayedStages + metrics.delayedWorkItems)} tone="red" />
-        <KpiCard icon={<FileSearchOutlined />} title="Bugünkü görülən işlər" value={formatNumber(metrics.todayReports)} tone="purple" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Bugünkü işçi saatları" value={formatHours(metrics.todayWorkerHours, 1)} tone="blue" />
+        {linkedKpi('/estimate', 'estimate', <KpiCard icon={<DollarCircleOutlined />} title="Qalıq smeta" value={formatCurrency(remainingTotals.totalAmount)} tone="purple" />)}
+        {linkedKpi('/payroll', 'payroll', <KpiCard icon={<DollarCircleOutlined />} title="Qalıq işçilik büdcəsi" value={formatCurrency(remainingTotals.laborAmount)} tone="purple" />)}
+        {linkedKpi('/materials', 'materials', <KpiCard icon={<ToolOutlined />} title="Qalıq material büdcəsi" value={formatCurrency(remainingTotals.materialAmount)} tone="purple" />)}
+        {linkedKpi('/timeline', 'timeline', <KpiCard icon={<ClockCircleOutlined />} title="Qalan saat" value={formatHours(remainingHours, 0)} tone="red" />)}
       </section>
 
       <section className="project-chart-grid">
         <div className="chart-card">
           <div className="card-heading">
             <h2>Etaplar üzrə gedişat %</h2>
-            <Link className="muted-text" to="/project-progress/timeline">Təqvimə bax</Link>
+            <Link className="muted-text" to="/timeline" onClick={keepObjectContext('timeline')}>Təqvimə bax</Link>
           </div>
           <div className="chart-body tall">
             <ResponsiveContainer>
@@ -178,18 +184,22 @@ export const DashboardPage = () => {
 
         <div className="chart-card">
           <div className="card-heading">
-            <h2>Xərc bölgüsü</h2>
+            <h2>Ümumi gedişat</h2>
+            <Link className="muted-text" to="/timeline" onClick={keepObjectContext('timeline')}>Detallara bax</Link>
           </div>
-          <div className="chart-body tall">
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={costSplit} innerRadius={58} outerRadius={92} paddingAngle={3} dataKey="value">
-                  {costSplit.map((entry, index) => <Cell key={entry.name} fill={costColors[index]} />)}
-                </Pie>
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="chart-body tall overall-progress-card">
+            <Progress
+              type="circle"
+              percent={Number(metrics.weightedProgress.toFixed(1))}
+              size={220}
+              strokeColor="#078b55"
+              trailColor="#e6edf4"
+              format={(percent) => `${Number(percent ?? 0).toFixed(1)}%`}
+            />
+            <div className="summary-metric">
+              <span>Seçilmiş obyekt üzrə icra</span>
+              <strong>{formatPercent(metrics.weightedProgress, 1)}</strong>
+            </div>
           </div>
         </div>
       </section>
@@ -236,7 +246,7 @@ export const DashboardPage = () => {
         <div className="chart-card">
           <div className="card-heading">
             <h2>Briqada saatları</h2>
-            <Link className="muted-text" to="/crews">Briqadalara keç</Link>
+            <Link className="muted-text" to="/crews" onClick={keepObjectContext('crews')}>Briqadalara keç</Link>
           </div>
           <div className="chart-body">
             <ResponsiveContainer>
@@ -256,7 +266,7 @@ export const DashboardPage = () => {
         <div className="table-card">
           <div className="card-heading">
             <h2>Material xəbərdarlıqları</h2>
-            <Link className="muted-text" to="/materials">Materiallara keç</Link>
+            <Link className="muted-text" to="/materials" onClick={keepObjectContext('materials')}>Materiallara keç</Link>
           </div>
           <div className="dashboard-warning-list">
             {materialWarnings.length ? materialWarnings.map((material) => (
@@ -272,7 +282,7 @@ export const DashboardPage = () => {
       <section className="table-card">
         <div className="card-heading">
           <h2>İcrada olan işlər</h2>
-          <Link className="muted-text" to="/estimate">Smetanı redaktə et</Link>
+          <Link className="muted-text" to="/estimate" onClick={keepObjectContext('estimate')}>Smetanı redaktə et</Link>
         </div>
         <Table rowKey="id" columns={workColumns} dataSource={activeWorkItems} pagination={{ pageSize: 5 }} />
       </section>
@@ -288,7 +298,7 @@ export const DashboardPage = () => {
         <div className="table-card">
           <div className="card-heading">
             <h2>Son prorab gündəlikləri</h2>
-            <Link className="muted-text" to="/daily-reports">Gündəliklərə keç</Link>
+            <Link className="muted-text" to="/daily-reports" onClick={keepObjectContext('dailyReports')}>Gündəliklərə keç</Link>
           </div>
           <div className="daily-report-feed">
             {scopedReports.slice(0, 3).map((report) => (

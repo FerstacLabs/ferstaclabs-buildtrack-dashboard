@@ -231,7 +231,7 @@ export const AttendanceLivePage = () => {
         type="info"
         showIcon
         message="Biznes davamiyyət görünüşü"
-        description="Bir Dahua terminalı giriş və çıxışı ayırd edə bilmədiyi üçün təkrar tanınmalar checkout yaratmır. Onlar işçinin son görülmə vaxtını yeniləyir."
+        description="Bir kamera terminalı giriş və çıxışı ayırd edə bilmədiyi üçün təkrar tanınmalar checkout yaratmır. Onlar işçinin son görülmə vaxtını yeniləyir."
       />
 
       <section className="filter-bar live-filter-bar">
@@ -273,7 +273,7 @@ export const AttendanceLivePage = () => {
           rowKey="id"
           pagination={{ pageSize: 12 }}
           scroll={{ x: 'max-content' }}
-          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün davamiyyət sessiyası tapılmadı. Real Dahua Active Register / Smart Event gəldikdən sonra burada davamiyyət görünəcək.' }}
+          locale={{ emptyText: error ? 'API xətası var. Yuxarıdakı xətanı yoxlayın.' : 'Bu tarix üçün davamiyyət sessiyası tapılmadı. Real kamera tanıma hadisəsi gəldikdən sonra burada davamiyyət görünəcək.' }}
         />
       </section>
 

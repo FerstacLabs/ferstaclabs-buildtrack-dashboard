@@ -200,7 +200,7 @@ export const SecurityEventsPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Tanınmayan üzlər" subtitle="Dahua Active Register / Smart Event zamanı tanınmayan şəxslər ayrıca təhlükəsizlik hadisəsi kimi saxlanılır" />
+      <PageTitle title="Tanınmayan üzlər" subtitle="Kamera tanıma sistemi zamanı tanınmayan şəxslər ayrıca təhlükəsizlik hadisəsi kimi saxlanılır" />
 
       {error && <Alert type="error" showIcon message="Təhlükəsizlik hadisələri yüklənmədi" description={error} />}
 
@@ -208,7 +208,7 @@ export const SecurityEventsPage = () => {
         type="warning"
         showIcon
         message="Yad şəxslər və tanınmayan üzlər"
-        description="Bu səhifə əməkhaqqı davamiyyətinə təsir etmir. Tanınmayan üzlər və identity mismatch kimi yoxlanılmalı face hadisələri yalnız security_events cədvəlində saxlanılır. Snapshot backend storage-dan göstərilir, Dahua admin məlumatları frontend-ə çıxmır."
+        description="Bu səhifə əməkhaqqı davamiyyətinə təsir etmir. Tanınmayan üzlər və identity mismatch kimi yoxlanılmalı face hadisələri yalnız security_events cədvəlində saxlanılır. Snapshot backend storage-dan göstərilir, kamera admin məlumatları frontend-ə çıxmır."
       />
 
       <section className="filter-bar live-filter-bar">

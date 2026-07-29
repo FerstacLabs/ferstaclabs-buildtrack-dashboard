@@ -19,6 +19,10 @@ export interface ConstructionObject {
   address?: string
   projectId: string
   status: ProjectWorkStatus
+  plannedStartDate?: string
+  plannedEndDate?: string
+  clientName?: string
+  notes?: string
 }
 
 export interface Project {
@@ -154,7 +158,7 @@ export interface AttendanceSession {
   firstSeen: string
   lastSeen: string
   totalHours: number
-  source: AttendanceSource | 'Dahua'
+  source: AttendanceSource
   deviceId?: string
 }
 

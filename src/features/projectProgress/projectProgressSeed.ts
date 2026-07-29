@@ -126,7 +126,7 @@ export const projectMaterials: MaterialItem[] = [
 ]
 
 const workerNames = [
-  'İlham Əliyev', 'Rauf Hüseynli', 'Vüqar Məmmədov', 'Elçin Quliyev', 'Nicat Qurbanov', 'Orxan Rzayev', 'Murad Abbasov', 'Fərid Həsənov', 'Anar Cəfərov', 'Kamran İsmayılov', 'Emin Səfərov', 'Tural Nəcəfov',
+  'Rəşad Əliyev', 'Rauf Hüseynli', 'Vüqar Məmmədov', 'Elçin Quliyev', 'Nicat Qurbanov', 'Orxan Rzayev', 'Murad Abbasov', 'Fərid Həsənov', 'Anar Cəfərov', 'Kamran İsmayılov', 'Emin Səfərov', 'Tural Nəcəfov',
   'Tahirə Məmmədova', 'Ramil Əhmədov', 'Sadiq Əliyev', 'Cavid Qasımov', 'Şahin Mustafayev', 'Əli Babayev', 'Pərviz Məmmədli', 'Nurlan Kərimov', 'Elnur Ağayev',
   'Samir Qasımov', 'Namiq Sadıqov', 'Rəşad Məlikov', 'Fuad Osmanov', 'Məhəmməd Vəliyev', 'Sənan Hacıyev', 'Ruslan Əlizadə', 'Rövşən Məmmədov', 'Mətin Qurbanlı', 'Kənan Hüseynov',
   'Azər Bayramov', 'Ceyhun Rüstəmov', 'Qadir Məmmədov', 'Seymur Əliyev', 'Rəşid Orucov', 'Tofiq Quliyev', 'Mikayıl Əkbərov',
@@ -180,7 +180,7 @@ const monthlyAttendanceSessions: AttendanceSession[] = projectWorkerAssignments.
   firstSeen: '2025-05-01T04:00:00.000Z',
   lastSeen: '2025-05-31T14:00:00.000Z',
   totalHours: workerMonthlyHours(index),
-  source: worker.attendanceSource === 'Camera' ? 'Dahua' : worker.attendanceSource,
+  source: worker.attendanceSource,
   deviceId: worker.attendanceSource === 'Camera' ? 'dahua-entry-1' : undefined,
 }))
 
@@ -193,7 +193,7 @@ const todayAttendanceSessions: AttendanceSession[] = projectWorkerAssignments.sl
   firstSeen: '2026-07-20T04:00:00.000Z',
   lastSeen: '2026-07-20T12:00:00.000Z',
   totalHours: Math.round((7.2 + (index % 5) * 0.35) * 10) / 10,
-  source: worker.attendanceSource === 'Camera' ? 'Dahua' : worker.attendanceSource,
+  source: worker.attendanceSource,
   deviceId: worker.attendanceSource === 'Camera' ? 'dahua-entry-1' : undefined,
 }))
 
