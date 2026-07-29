@@ -19,6 +19,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { WrappedAxisTick } from '../../components/charts/WrappedAxisTick'
 import { ObjectFilter } from '../../components/filters/ObjectFilter'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
@@ -109,7 +110,7 @@ export const DashboardPage = () => {
   })
 
   const stageHourRows = stageRows.map((stage) => ({
-    name: compactName(stage.name, 16),
+    name: stage.name,
     plan: stage.plannedHours,
     faktiki: stage.derivedActualHours,
   }))
@@ -171,9 +172,19 @@ export const DashboardPage = () => {
           </div>
           <div className="chart-body tall">
             <ResponsiveContainer>
-              <BarChart data={stageRows.map((stage) => ({ name: compactName(stage.name, 18), progress: stage.calculatedProgress }))}>
+              <BarChart
+                data={stageRows.map((stage) => ({ name: stage.name, progress: stage.calculatedProgress }))}
+                margin={{ top: 12, right: 12, left: 0, bottom: 34 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis
+                  dataKey="name"
+                  height={74}
+                  interval={0}
+                  tick={<WrappedAxisTick maxCharsPerLine={16} maxLines={2} />}
+                  tickLine={false}
+                  tickMargin={10}
+                />
                 <YAxis domain={[0, 100]} />
                 <Tooltip formatter={(value) => `${value}%`} />
                 <Bar dataKey="progress" fill="#1479ff" radius={[6, 6, 0, 0]} name="Gedişat %" />
@@ -211,9 +222,16 @@ export const DashboardPage = () => {
           </div>
           <div className="chart-body">
             <ResponsiveContainer>
-              <BarChart data={stageHourRows}>
+              <BarChart data={stageHourRows} margin={{ top: 12, right: 12, left: 0, bottom: 34 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis
+                  dataKey="name"
+                  height={74}
+                  interval={0}
+                  tick={<WrappedAxisTick maxCharsPerLine={16} maxLines={2} />}
+                  tickLine={false}
+                  tickMargin={10}
+                />
                 <YAxis />
                 <Tooltip />
                 <Legend />
@@ -230,9 +248,16 @@ export const DashboardPage = () => {
           </div>
           <div className="chart-body">
             <ResponsiveContainer>
-              <LineChart data={trendData}>
+              <LineChart data={trendData} margin={{ top: 12, right: 12, left: 0, bottom: 18 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="day" />
+                <XAxis
+                  dataKey="day"
+                  height={46}
+                  interval={0}
+                  tick={<WrappedAxisTick dy={14} maxCharsPerLine={5} maxLines={1} />}
+                  tickLine={false}
+                  tickMargin={8}
+                />
                 <YAxis />
                 <Tooltip />
                 <Line type="monotone" dataKey="saat" stroke="#1479ff" strokeWidth={3} name="Saat" dot={{ r: 4 }} />
@@ -250,9 +275,16 @@ export const DashboardPage = () => {
           </div>
           <div className="chart-body">
             <ResponsiveContainer>
-              <BarChart data={crewHours}>
+              <BarChart data={crewHours} margin={{ top: 12, right: 12, left: 0, bottom: 26 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis
+                  dataKey="name"
+                  height={62}
+                  interval={0}
+                  tick={<WrappedAxisTick maxCharsPerLine={14} maxLines={2} />}
+                  tickLine={false}
+                  tickMargin={10}
+                />
                 <YAxis />
                 <Tooltip />
                 <Legend />

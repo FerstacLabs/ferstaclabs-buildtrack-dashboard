@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ChartPoint } from '../../types/reports'
+import { WrappedAxisTick } from './WrappedAxisTick'
 
 interface LineChartCardProps {
   title: string
@@ -21,9 +22,16 @@ export const LineChartCard = ({ data, height = 280, lines, title }: LineChartCar
   <section className="chart-card">
     <h2>{title}</h2>
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data}>
+      <LineChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 24 }}>
         <CartesianGrid stroke="#e8edf5" vertical={false} />
-        <XAxis dataKey="name" tick={{ fill: '#071b55', fontSize: 12 }} />
+        <XAxis
+          dataKey="name"
+          height={62}
+          interval={0}
+          tick={<WrappedAxisTick maxCharsPerLine={12} maxLines={2} />}
+          tickLine={false}
+          tickMargin={10}
+        />
         <YAxis tick={{ fill: '#50607f', fontSize: 12 }} />
         <ChartTooltip />
         <Legend />
