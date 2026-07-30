@@ -234,6 +234,15 @@ export const AttendanceLivePage = () => {
         description="Bir kamera terminalı giriş və çıxışı ayırd edə bilmədiyi üçün təkrar tanınmalar checkout yaratmır. Onlar işçinin son görülmə vaxtını yeniləyir."
       />
 
+      {securityEventsCount > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Bu obyekt üzrə yoxlanılmalı kamera hadisələri var"
+          description="Şübhəli tanıma və identity mismatch hadisələri davamiyyətə əlavə olunmur. Detallara Tanınmayan üzlər bölməsində baxın."
+        />
+      )}
+
       <section className="filter-bar live-filter-bar">
         <Select
           value={siteId}

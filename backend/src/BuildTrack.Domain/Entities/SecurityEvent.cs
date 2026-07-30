@@ -5,6 +5,7 @@ public enum SecurityEventType
     UnknownFace,
     SuspiciousRecognition,
     IdentityMismatch,
+    IdentityMappingConflict,
     ParserUncertainSmartEvent
 }
 

@@ -135,7 +135,7 @@ export interface SecurityEventRow {
   id: string
   eventTime: string
   eventTimeLocal: string
-  eventType: 'UnknownFace' | 'SuspiciousRecognition' | 'IdentityMismatch' | 'ParserUncertainSmartEvent'
+  eventType: 'UnknownFace' | 'SuspiciousRecognition' | 'IdentityMismatch' | 'IdentityMappingConflict' | 'ParserUncertainSmartEvent'
   severity: 'Warning'
   status: SecurityEventStatus
   deviceName?: string

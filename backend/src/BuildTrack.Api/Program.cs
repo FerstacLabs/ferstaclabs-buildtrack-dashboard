@@ -263,6 +263,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance-live", async (Guid siteId, int? 
         .OrderByDescending(x => x.EventTime)
         .Take(Math.Clamp(limit ?? 100, 1, 500))
         .ToListAsync(ct);
+    events = events.Where(IsRecognizedAttendancePayload).ToList();
     return await MapAttendanceEventsAsync(db, events, ct);
 });
 
@@ -340,6 +341,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
         .Where(x => x.SiteId == siteId && x.WorkDate == workDate && x.Status == AttendanceSessionStatus.Open)
         .OrderBy(x => x.CheckInTime)
         .ToListAsync(ct);
+    sessions = await FilterVerifiedAttendanceSessionsAsync(db, sessions, ct);
     var staleOpenSessionsCount = await db.AttendanceSessions.AsNoTracking()
         .CountAsync(x => x.SiteId == siteId && x.WorkDate < workDate && x.Status == AttendanceSessionStatus.Open, ct);
     var liveWorkerCodes = sessions.Select(x => x.WorkerExternalId).Distinct().ToArray();
@@ -449,6 +451,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         .Where(x => x.SiteId == siteId && x.WorkDate == workDate)
         .OrderBy(x => x.CheckInTime)
         .ToListAsync(ct);
+    sessions = await FilterVerifiedAttendanceSessionsAsync(db, sessions, ct);
 
     if (sessions.Count == 0)
     {
@@ -1177,24 +1180,42 @@ static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(D
 }
 
 static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
-{
-    if (string.IsNullOrWhiteSpace(attendanceEvent.RawPayloadJson)) return true;
-    try
-    {
-        using var document = JsonDocument.Parse(attendanceEvent.RawPayloadJson);
-        var root = document.RootElement;
-        var classification = root.TryGetProperty("Classification", out var classificationElement)
-            ? classificationElement.GetString()
-            : null;
-        if (string.Equals(classification, "UnknownFace", StringComparison.OrdinalIgnoreCase)) return false;
-        if (string.IsNullOrWhiteSpace(classification)) return true;
+    => DahuaVerifiedAttendancePayload.IsVerifiedAttendance(attendanceEvent);
 
-        return string.Equals(classification, "RecognizedAttendance", StringComparison.OrdinalIgnoreCase);
-    }
-    catch (JsonException)
-    {
-        return true;
-    }
+static async Task<List<AttendanceSession>> FilterVerifiedAttendanceSessionsAsync(
+    BuildTrackDbContext db,
+    IReadOnlyCollection<AttendanceSession> sessions,
+    CancellationToken ct)
+{
+    if (sessions.Count == 0) return [];
+
+    var eventIds = sessions
+        .Where(session => string.Equals(session.Source, DahuaEventSourceExtensions.ActiveRegisterSource, StringComparison.OrdinalIgnoreCase))
+        .SelectMany(session => new[] { (Guid?)session.CheckInEventId, session.LastSeenEventId, session.CheckOutEventId })
+        .Where(id => id is not null)
+        .Select(id => id!.Value)
+        .Distinct()
+        .ToArray();
+    if (eventIds.Length == 0) return sessions.ToList();
+
+    var eventsById = await db.AttendanceEvents.AsNoTracking()
+        .Where(x => eventIds.Contains(x.Id))
+        .ToDictionaryAsync(x => x.Id, ct);
+
+    return sessions
+        .Where(session =>
+        {
+            if (!string.Equals(session.Source, DahuaEventSourceExtensions.ActiveRegisterSource, StringComparison.OrdinalIgnoreCase)) return true;
+
+            var linkedEventIds = new[] { (Guid?)session.CheckInEventId, session.LastSeenEventId, session.CheckOutEventId }
+                .Where(id => id is not null)
+                .Select(id => id!.Value)
+                .ToArray();
+            return linkedEventIds.Length > 0
+                   && linkedEventIds.All(id => eventsById.TryGetValue(id, out var attendanceEvent)
+                                                && IsRecognizedAttendancePayload(attendanceEvent));
+        })
+        .ToList();
 }
 
 static async Task<AttendanceEventResponse[]> MapAttendanceEventsAsync(

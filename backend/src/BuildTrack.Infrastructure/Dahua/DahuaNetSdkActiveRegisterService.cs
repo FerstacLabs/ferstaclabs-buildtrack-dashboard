@@ -1514,15 +1514,36 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
 
         var decodedTrustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decoded.Record, decoded.RawStructSummaryJson, null);
-        var resolvedWorker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(
-            x => x.SiteId == device.SiteId
-                 && x.ExternalWorkerCode == decodedTrustedRecord.UserId
-                 && x.Status == WorkerStatus.Active,
-            CancellationToken.None);
+        var mappedWorkers = string.IsNullOrWhiteSpace(decodedTrustedRecord.UserId)
+            ? new List<Worker>()
+            : await db.Workers.AsNoTracking()
+                .Where(x => x.SiteId == device.SiteId
+                            && x.ExternalWorkerCode == decodedTrustedRecord.UserId
+                            && x.Status == WorkerStatus.Active)
+                .OrderBy(x => x.CreatedAt)
+                .Take(3)
+                .ToListAsync(CancellationToken.None);
+        var mappingConflict = mappedWorkers.Count > 1;
+        var resolvedWorker = mappedWorkers.Count == 1 ? mappedWorkers[0] : null;
         var trustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
         var workerResolved = resolvedWorker is not null;
         var identityPolicy = DahuaIdentityMatchPolicyParser.Parse(configuration["DAHUA_IDENTITY_MATCH_POLICY"]);
-        var recognizedAttendance = DahuaSmartEventClassification.IsRecognizedAttendance(trustedRecord, resolvedWorker, identityPolicy);
+        var allowCardNameMismatchAttendance = IsEnabled(configuration["DAHUA_ALLOW_CARDNAME_MISMATCH_ATTENDANCE"]);
+        if (identityPolicy == DahuaIdentityMatchPolicy.UserIdPrimary)
+        {
+            logger.LogWarning("UNSAFE identity policy user_id_primary is enabled; false-positive camera matches may be counted as attendance. AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}", allowCardNameMismatchAttendance);
+        }
+
+        var recognizedAttendance = !mappingConflict
+                                   && DahuaSmartEventClassification.IsRecognizedAttendance(
+                                       trustedRecord,
+                                       resolvedWorker,
+                                       identityPolicy,
+                                       allowCardNameMismatchAttendance);
+        var identityMismatch = !recognizedAttendance
+                               && !mappingConflict
+                               && workerResolved
+                               && DahuaSmartEventClassification.HasCardNameMismatch(trustedRecord);
 
         logger.LogInformation(
             "Canonical smart event decoded: Status={Status}, UserID={UserID}, CardName={CardName}, Method={Method}, Confidence={StatusConfidence}/{UserIdConfidence}/{CardNameConfidence}, ImageSize={ImageSize}",
@@ -1536,13 +1557,15 @@ public sealed class DahuaNetSdkActiveRegisterService(
             imageBufferSize);
 
         logger.LogInformation(
-            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, IdentityPolicy={IdentityPolicy}, CardNameMismatch={CardNameMismatch}, RecNo={RecNo}, ImageSize={ImageSize}",
+            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, MappedWorkerCount={MappedWorkerCount}, IdentityPolicy={IdentityPolicy}, AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}, CardNameMismatch={CardNameMismatch}, RecNo={RecNo}, ImageSize={ImageSize}",
             trustedRecord.UserId,
             trustedRecord.CardName,
             trustedRecord.StatusRaw,
             trustedRecord.RawFields.GetValueOrDefault("ErrorCode"),
             workerResolved,
+            mappedWorkers.Count,
             identityPolicy,
+            allowCardNameMismatchAttendance,
             trustedRecord.RawFields.GetValueOrDefault("CardNameMismatch"),
             trustedRecord.RecNo,
             imageBufferSize);
@@ -1554,15 +1577,19 @@ public sealed class DahuaNetSdkActiveRegisterService(
             return;
         }
 
-        var confirmedUnknownFace = !recognizedAttendance && DahuaSmartEventClassification.IsConfirmedUnknownFace(trustedRecord);
+        var confirmedUnknownFace = !recognizedAttendance && !identityMismatch && !mappingConflict && DahuaSmartEventClassification.IsConfirmedUnknownFace(trustedRecord);
         var recordToIngest = recognizedAttendance
             ? trustedRecord
-            : confirmedUnknownFace
-                ? DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson)
-                : DahuaSmartEventClassification.BuildParserUncertainRecord(trustedRecord, decoded.RawStructSummaryJson);
+            : mappingConflict
+                ? DahuaSmartEventClassification.BuildIdentityMappingConflictRecord(trustedRecord, decoded.RawStructSummaryJson, mappedWorkers)
+                : identityMismatch
+                    ? DahuaSmartEventClassification.BuildIdentityMismatchRecord(trustedRecord, decoded.RawStructSummaryJson)
+                    : confirmedUnknownFace
+                        ? DahuaSmartEventClassification.BuildUnknownFaceRecord(trustedRecord, decoded.RawStructSummaryJson)
+                        : DahuaSmartEventClassification.BuildParserUncertainRecord(trustedRecord, decoded.RawStructSummaryJson);
         if (recognizedAttendance)
         {
-            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest, resolvedWorker, identityPolicy);
+            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest, resolvedWorker, identityPolicy, allowCardNameMismatchAttendance);
         }
 
         if (recognizedAttendance)
@@ -1584,6 +1611,24 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 trustedRecord.CardName,
                 workerResolved,
                 imageBufferSize);
+        }
+        else if (mappingConflict)
+        {
+            logger.LogError("Smart event classified as identity mapping conflict. UserID={UserID}, MappedWorkerCount={MappedWorkerCount}, MappedWorkerNames={MappedWorkerNames}, ImageBytesLength={ImageBytesLength}",
+                trustedRecord.UserId,
+                mappedWorkers.Count,
+                string.Join(", ", mappedWorkers.Select(worker => worker.FullName)),
+                imageBufferSize);
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_identity_mapping_conflict", "Smart Event UserID maps to multiple active workers; attendance blocked", recordToIngest.RawFields, CancellationToken.None);
+        }
+        else if (identityMismatch)
+        {
+            logger.LogWarning("Smart event classified as identity mismatch. UserID={UserID}, ReceivedCardName={ReceivedCardName}, ExpectedWorkerName={ExpectedWorkerName}, ImageBytesLength={ImageBytesLength}",
+                trustedRecord.UserId,
+                trustedRecord.RawFields.GetValueOrDefault("ReceivedCardName"),
+                trustedRecord.RawFields.GetValueOrDefault("ExpectedWorkerName"),
+                imageBufferSize);
+            await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, null, null, "netsdk_smart_event_identity_mismatch", "Smart Event CardName did not match mapped worker; attendance blocked", recordToIngest.RawFields, CancellationToken.None);
         }
         else
         {
