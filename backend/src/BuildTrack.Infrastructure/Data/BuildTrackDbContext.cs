@@ -164,6 +164,9 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.LastAlarmDecodeStatus).HasMaxLength(120);
             entity.Property(x => x.LastDecodedAlarmJson).HasColumnType("jsonb");
             entity.Property(x => x.SmartEventErrorHex).HasMaxLength(40);
+            entity.Property(x => x.SmartEventRemoteIp).HasMaxLength(80);
+            entity.Property(x => x.LastSmartEventResubscribeReason).HasMaxLength(160);
+            entity.Property(x => x.LastSmartEventResubscribeError).HasMaxLength(500);
             entity.Property(x => x.LastSmartEventName).HasMaxLength(120);
             entity.Property(x => x.LastSmartEventParseStatus).HasMaxLength(120);
             entity.Property(x => x.LastSmartEventUserId).HasMaxLength(80);

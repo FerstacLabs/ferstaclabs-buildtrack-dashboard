@@ -86,6 +86,18 @@ public sealed class DahuaNetSdkDiagnostics
     public long? SmartEventAttachHandle { get; set; }
     public int? SmartEventErrorSigned { get; set; }
     public string? SmartEventErrorHex { get; set; }
+    public int SmartEventSubscriptionGeneration { get; set; }
+    public DateTimeOffset? SmartEventSubscribedAt { get; set; }
+    public string? SmartEventRemoteIp { get; set; }
+    public int? SmartEventRemotePort { get; set; }
+    public DateTimeOffset? LastServiceCallbackAt { get; set; }
+    public DateTimeOffset? LastSmartEventAt { get; set; }
+    public DateTimeOffset? LastSmartEventResubscribeAt { get; set; }
+    public string? LastSmartEventResubscribeReason { get; set; }
+    public bool? LastSmartEventResubscribeSuccess { get; set; }
+    public string? LastSmartEventResubscribeError { get; set; }
+    public bool StaleSmartEventDetected { get; set; }
+    public bool SmartEventWatchdogEnabled { get; set; }
     public int? LastSmartEventType { get; set; }
     public string? LastSmartEventName { get; set; }
     public int LastSmartEventPayloadBytes { get; set; }
@@ -122,6 +134,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private readonly ConcurrentDictionary<Guid, IntPtr> _smartEventAttachHandleByDeviceId = new();
     private readonly ConcurrentDictionary<IntPtr, Guid> _deviceIdBySmartEventAttachHandle = new();
     private readonly ConcurrentDictionary<Guid, byte> _subscriptionInProgress = new();
+    private readonly ConcurrentDictionary<Guid, SmartEventSubscriptionState> _smartEventStates = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _subscriptionLocks = new();
     private readonly ConcurrentDictionary<string, byte> _acceptedRegistrationKeys = new();
     private readonly ConcurrentDictionary<string, byte> _experimentalSubscribeAttemptKeys = new();
     private readonly ConcurrentDictionary<Guid, byte> _recordQueryLoops = new();
@@ -227,6 +241,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     SmartEventAttachHandle = _diagnostics.SmartEventAttachHandle,
                     SmartEventErrorSigned = _diagnostics.SmartEventErrorSigned,
                     SmartEventErrorHex = _diagnostics.SmartEventErrorHex,
+                    SmartEventSubscriptionGeneration = _diagnostics.SmartEventSubscriptionGeneration,
+                    SmartEventSubscribedAt = _diagnostics.SmartEventSubscribedAt,
+                    SmartEventRemoteIp = _diagnostics.SmartEventRemoteIp,
+                    SmartEventRemotePort = _diagnostics.SmartEventRemotePort,
+                    LastServiceCallbackAt = _diagnostics.LastServiceCallbackAt,
+                    LastSmartEventAt = _diagnostics.LastSmartEventAt,
+                    LastSmartEventResubscribeAt = _diagnostics.LastSmartEventResubscribeAt,
+                    LastSmartEventResubscribeReason = _diagnostics.LastSmartEventResubscribeReason,
+                    LastSmartEventResubscribeSuccess = _diagnostics.LastSmartEventResubscribeSuccess,
+                    LastSmartEventResubscribeError = _diagnostics.LastSmartEventResubscribeError,
+                    StaleSmartEventDetected = _diagnostics.StaleSmartEventDetected,
+                    SmartEventWatchdogEnabled = _diagnostics.SmartEventWatchdogEnabled,
                     LastSmartEventType = _diagnostics.LastSmartEventType,
                     LastSmartEventName = _diagnostics.LastSmartEventName,
                     LastSmartEventPayloadBytes = _diagnostics.LastSmartEventPayloadBytes,
@@ -293,9 +319,70 @@ public sealed class DahuaNetSdkActiveRegisterService(
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<DahuaSmartEventSubscriptionSnapshot>> GetSmartEventSubscriptionsAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var smartEventEnabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED"], defaultValue: true);
+        var snapshots = _smartEventStates.Values
+            .Select(state => state.ToSnapshot(smartEventEnabled))
+            .OrderBy(x => x.RegisterDeviceId)
+            .ToArray();
+        return Task.FromResult<IReadOnlyList<DahuaSmartEventSubscriptionSnapshot>>(snapshots);
+    }
+
+    public async Task<DahuaSmartEventResubscribeResult> ResubscribeSmartEventsAsync(Guid deviceId, string reason, CancellationToken cancellationToken)
+    {
+        var attemptedAt = DateTimeOffset.UtcNow;
+        if (_nativeClient is null)
+        {
+            return new DahuaSmartEventResubscribeResult(deviceId, false, reason, "Dahua NetSDK native client is unavailable", 0, attemptedAt);
+        }
+
+        if (!_loginHandleByDeviceId.TryGetValue(deviceId, out var loginHandle) || loginHandle == IntPtr.Zero)
+        {
+            var missingHandleError = "No active login handle exists for Smart Event resubscribe";
+            UpdateSmartEventResubscribeDiagnostics(deviceId, attemptedAt, reason, success: false, missingHandleError, staleDetected: IsStaleReason(reason));
+            return new DahuaSmartEventResubscribeResult(deviceId, false, reason, missingHandleError, GetSubscriptionGeneration(deviceId), attemptedAt);
+        }
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
+        var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
+        var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == deviceId, cancellationToken);
+        if (device is null)
+        {
+            var missingDeviceError = $"Device {deviceId} was not found for Smart Event resubscribe";
+            UpdateSmartEventResubscribeDiagnostics(deviceId, attemptedAt, reason, success: false, missingDeviceError, staleDetected: IsStaleReason(reason));
+            return new DahuaSmartEventResubscribeResult(deviceId, false, reason, missingDeviceError, GetSubscriptionGeneration(deviceId), attemptedAt);
+        }
+
+        var gate = _subscriptionLocks.GetOrAdd(deviceId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            logger.LogWarning("Resubscribing smart event. DeviceId={DeviceId}, RegisterDeviceId={RegisterDeviceId}, Reason={Reason}", device.Id, device.RegisterDeviceId, reason);
+            StopSmartEventSubscription(device.Id, reason);
+            _smartEventStates.TryGetValue(device.Id, out var state);
+            var remoteIp = state?.RemoteIp ?? device.LastKnownIp;
+            var remotePort = state?.RemotePort;
+            var subscribed = await StartSmartEventSubscriptionIfEnabledAsync(device, loginHandle, remoteIp, remotePort, connectionLogger, cancellationToken, reason);
+            var error = subscribed ? null : "CLIENT_RealLoadPictureEx resubscribe failed";
+            UpdateSmartEventResubscribeDiagnostics(device.Id, attemptedAt, reason, subscribed, error, staleDetected: IsStaleReason(reason) && !subscribed);
+            return new DahuaSmartEventResubscribeResult(device.Id, subscribed, reason, error, GetSubscriptionGeneration(device.Id), attemptedAt);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public Task StartAsync(IEnumerable<int> ports, CancellationToken cancellationToken)
     {
         _singleDeviceFallbackEnabled = DahuaActiveRegisterFallbackMatcher.IsSingleDeviceFallbackEnabled(configuration["DAHUA_ACTIVE_REGISTER_ALLOW_SINGLE_DEVICE_FALLBACK"]);
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.SmartEventWatchdogEnabled = DahuaSmartEventWatchdogPolicy.FromConfiguration(configuration).Enabled;
+        }
         PersistDiagnostics();
         logger.LogInformation("Single-device fallback enabled: {Value}", _singleDeviceFallbackEnabled);
 
@@ -536,6 +623,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             _diagnostics.LastServiceEventType = eventType;
             _diagnostics.LastServicePayloadBytes = payload.Length;
             _diagnostics.LastServicePayloadFirst256Hex = payloadDiagnostics.PayloadFirst256Hex;
+            _diagnostics.LastServiceCallbackAt = DateTimeOffset.UtcNow;
             _diagnostics.LastRegisterDeviceId = payloadDiagnostics.RegisterDeviceId;
             _diagnostics.LastParsedRegisterDeviceIdOffset = payloadDiagnostics.RegisterDeviceIdOffset;
             _diagnostics.LastParsedRegisterDeviceId = payloadDiagnostics.RegisterDeviceId;
@@ -600,7 +688,11 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 var disconnectedDevice = await MatchDeviceAsync(db, registerDeviceId, listenerPort, CancellationToken.None);
                 if (disconnectedDevice is not null)
                 {
-                    StopSmartEventSubscription(disconnectedDevice.Id);
+                    await StopDeviceSdkSessionAsync(disconnectedDevice, remoteIp, remotePort, connectionLogger, "DeviceDisconnected", CancellationToken.None);
+                    if (_smartEventStates.TryGetValue(disconnectedDevice.Id, out var state))
+                    {
+                        state.LastServiceCallbackAt = DateTimeOffset.UtcNow;
+                    }
                 }
 
                 await PersistActiveRegisterRawEventAsync(db, disconnectedDevice?.Id, disconnectedDevice?.RegisterDeviceId ?? registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
@@ -658,6 +750,16 @@ public sealed class DahuaNetSdkActiveRegisterService(
             device.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
             SetStatus("DeviceConnected");
+            var endpointChanged = TrackSmartEventServiceCallback(device, remoteIp, remotePort, DateTimeOffset.UtcNow);
+            if (endpointChanged)
+            {
+                logger.LogWarning(
+                    "Dahua device re-registered with a changed Active Register endpoint. DeviceId={DeviceId}, RegisterDeviceId={RegisterDeviceId}, Remote={RemoteIp}:{RemotePort}",
+                    device.Id,
+                    device.RegisterDeviceId,
+                    remoteIp,
+                    remotePort);
+            }
 
             await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_connected", "Dahua device connected via NetSDK", raw, CancellationToken.None);
             logger.LogInformation("Dahua device connected via NetSDK. DeviceId={DeviceId}, RegisterDeviceId={RegisterDeviceId}", device.Id, device.RegisterDeviceId);
@@ -735,7 +837,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
             await TryExperimentalServiceHandleSubscriptionsAsync(device, payloadDiagnostics, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, CancellationToken.None);
             var passwordProtector = scope.ServiceProvider.GetRequiredService<IPasswordProtector>();
             var plainPassword = passwordProtector.Unprotect(device.EncryptedPassword);
-            var subscribed = await EnsureSubscribedAsync(device, registration, serviceCallbackHandle, remoteIp, remotePort, connectionLogger, device.Username, plainPassword, CancellationToken.None);
+            var subscribed = await EnsureSubscribedAsync(
+                device,
+                registration,
+                serviceCallbackHandle,
+                remoteIp,
+                remotePort,
+                connectionLogger,
+                device.Username,
+                plainPassword,
+                forceRecreate: endpointChanged,
+                recreateReason: endpointChanged ? "RemoteEndpointChanged" : "RegisterAccepted",
+                CancellationToken.None);
             if (DahuaActiveRegisterLoginDiagnostics.ShouldReleaseRegistrationKeyAfterSubscription(subscribed))
             {
                 _acceptedRegistrationKeys.TryRemove(registrationKey, out _);
@@ -822,23 +935,36 @@ public sealed class DahuaNetSdkActiveRegisterService(
         lock (_diagnosticsLock) _diagnostics.LastExperimentalSubscribeJson = json;
         PersistDiagnostics();
     }
-    private async Task<bool> EnsureSubscribedAsync(Device device, DahuaActiveRegisterRegistration registration, IntPtr serviceCallbackHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, string username, string password, CancellationToken cancellationToken)
+    private async Task<bool> EnsureSubscribedAsync(
+        Device device,
+        DahuaActiveRegisterRegistration registration,
+        IntPtr serviceCallbackHandle,
+        string? remoteIp,
+        int remotePort,
+        IDeviceConnectionLogger connectionLogger,
+        string username,
+        string password,
+        bool forceRecreate,
+        string recreateReason,
+        CancellationToken cancellationToken)
     {
         if (_nativeClient is null) return false;
-        if (_loginHandleByDeviceId.TryGetValue(device.Id, out var existingHandle) && existingHandle != IntPtr.Zero)
-        {
-            logger.LogDebug("Dahua access event subscription already exists for device {DeviceId}", device.Id);
-            return true;
-        }
 
-        if (!_subscriptionInProgress.TryAdd(device.Id, 0))
-        {
-            logger.LogDebug("Dahua access event subscription already in progress for device {DeviceId}", device.Id);
-            return false;
-        }
-
+        var gate = _subscriptionLocks.GetOrAdd(device.Id, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
         try
         {
+            if (!forceRecreate && _loginHandleByDeviceId.TryGetValue(device.Id, out var existingHandle) && existingHandle != IntPtr.Zero)
+            {
+                logger.LogDebug("Dahua access event subscription already exists for device {DeviceId}", device.Id);
+                return true;
+            }
+
+            if (forceRecreate)
+            {
+                await StopDeviceSdkSessionAsync(device, remoteIp, remotePort, connectionLogger, recreateReason, cancellationToken);
+            }
+
             IntPtr loginHandle;
             string handleSource;
             if (registration.SessionHandle != IntPtr.Zero)
@@ -1025,7 +1151,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             _deviceIdByLoginHandle[loginHandle] = device.Id;
             _loginHandleByDeviceId[device.Id] = loginHandle;
             StartRecordQueryLoopIfEnabled(device.Id, loginHandle);
-            await StartSmartEventSubscriptionIfEnabledAsync(device, loginHandle, remoteIp, remotePort, connectionLogger, cancellationToken);
+            await StartSmartEventSubscriptionIfEnabledAsync(device, loginHandle, remoteIp, remotePort, connectionLogger, cancellationToken, recreateReason);
             lock (_diagnosticsLock)
             {
                 _diagnostics.StartListenExSuccess = true;
@@ -1041,13 +1167,13 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
         finally
         {
-            _subscriptionInProgress.TryRemove(device.Id, out _);
+            gate.Release();
         }
     }
 
-    private async Task StartSmartEventSubscriptionIfEnabledAsync(Device device, IntPtr loginHandle, string? remoteIp, int remotePort, IDeviceConnectionLogger connectionLogger, CancellationToken cancellationToken)
+    private async Task<bool> StartSmartEventSubscriptionIfEnabledAsync(Device device, IntPtr loginHandle, string? remoteIp, int? remotePort, IDeviceConnectionLogger connectionLogger, CancellationToken cancellationToken, string reason)
     {
-        if (_nativeClient is null || _smartEventCallback is null) return;
+        if (_nativeClient is null || _smartEventCallback is null) return false;
 
         var enabled = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED"], defaultValue: true);
         var needPicture = IsEnabled(configuration["DAHUA_ACTIVE_REGISTER_SMART_EVENT_NEED_PICTURE"], defaultValue: true);
@@ -1063,17 +1189,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
         if (!enabled)
         {
             logger.LogInformation("Dahua Smart Event subscription disabled by DAHUA_ACTIVE_REGISTER_SMART_EVENT_ENABLED=false");
-            return;
+            return false;
         }
 
         if (_smartEventAttachHandleByDeviceId.TryGetValue(device.Id, out var existingAttach) && existingAttach != IntPtr.Zero)
         {
             logger.LogDebug("Dahua Smart Event subscription already exists for device {DeviceId}", device.Id);
-            return;
+            return true;
         }
 
-        logger.LogInformation("Smart event subscription starting. DeviceId={DeviceId}, LoginHandle={LoginHandle}, Channel={Channel}, NeedPicture={NeedPicture}", device.Id, loginHandle.ToInt64(), channel, needPicture);
+        logger.LogInformation("Smart event subscription starting. DeviceId={DeviceId}, LoginHandle={LoginHandle}, Channel={Channel}, NeedPicture={NeedPicture}, Reason={Reason}", device.Id, loginHandle.ToInt64(), channel, needPicture, reason);
         var result = _nativeClient.TryStartSmartEventSubscription(loginHandle, channel, needPicture, _smartEventCallback, out var attachHandle, out var error);
+        var now = DateTimeOffset.UtcNow;
         lock (_diagnosticsLock)
         {
             _diagnostics.SmartEventSubscriptionAttempted = true;
@@ -1081,6 +1208,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
             _diagnostics.SmartEventAttachHandle = attachHandle != IntPtr.Zero ? attachHandle.ToInt64() : null;
             _diagnostics.SmartEventErrorSigned = result ? null : error;
             _diagnostics.SmartEventErrorHex = result ? null : ToHex(error);
+            _diagnostics.SmartEventRemoteIp = remoteIp;
+            _diagnostics.SmartEventRemotePort = remotePort;
+            if (result)
+            {
+                _diagnostics.SmartEventSubscriptionGeneration++;
+                _diagnostics.SmartEventSubscribedAt = now;
+                _diagnostics.LastSmartEventResubscribeAt = reason == "RegisterAccepted" ? _diagnostics.LastSmartEventResubscribeAt : now;
+                _diagnostics.LastSmartEventResubscribeReason = reason == "RegisterAccepted" ? _diagnostics.LastSmartEventResubscribeReason : reason;
+                _diagnostics.LastSmartEventResubscribeSuccess = reason == "RegisterAccepted" ? _diagnostics.LastSmartEventResubscribeSuccess : true;
+                _diagnostics.LastSmartEventResubscribeError = null;
+                _diagnostics.StaleSmartEventDetected = false;
+            }
         }
         PersistDiagnostics();
 
@@ -1088,24 +1227,197 @@ public sealed class DahuaNetSdkActiveRegisterService(
         {
             logger.LogError("CLIENT_RealLoadPictureEx failed. DeviceId={DeviceId}, LoginHandle={LoginHandle}, ErrorSigned={ErrorSigned}, ErrorHex={ErrorHex}", device.Id, loginHandle.ToInt64(), error, ToHex(error));
             await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_smart_event_subscription_failed", "CLIENT_RealLoadPictureEx failed", new { loginHandle = loginHandle.ToInt64(), channel, needPicture, errorSigned = error, errorHex = ToHex(error) }, cancellationToken);
-            return;
+            UpdateSmartEventState(device, loginHandle, attachHandle, remoteIp, remotePort, now, subscribed: false, reason);
+            return false;
         }
 
         _smartEventAttachHandleByDeviceId[device.Id] = attachHandle;
         _deviceIdBySmartEventAttachHandle[attachHandle] = device.Id;
+        UpdateSmartEventState(device, loginHandle, attachHandle, remoteIp, remotePort, now, subscribed: true, reason);
         logger.LogInformation("CLIENT_RealLoadPictureEx success AttachHandle={AttachHandle}", attachHandle.ToInt64());
         await connectionLogger.LogAsync(device.Id, device.RegisterDeviceId, remoteIp, remotePort, "netsdk_smart_event_subscribed", "CLIENT_RealLoadPictureEx smart event subscription succeeded", new { loginHandle = loginHandle.ToInt64(), attachHandle = attachHandle.ToInt64(), channel, needPicture }, cancellationToken);
+        return true;
     }
 
-    private void StopSmartEventSubscription(Guid deviceId)
+    private bool StopSmartEventSubscription(Guid deviceId, string reason = "StopSmartEventSubscription")
     {
-        if (_nativeClient is null) return;
-        if (!_smartEventAttachHandleByDeviceId.TryRemove(deviceId, out var attachHandle) || attachHandle == IntPtr.Zero) return;
+        if (_nativeClient is null) return false;
+        if (!_smartEventAttachHandleByDeviceId.TryRemove(deviceId, out var attachHandle) || attachHandle == IntPtr.Zero) return false;
 
         _deviceIdBySmartEventAttachHandle.TryRemove(attachHandle, out _);
         var stopped = _nativeClient.TryStopSmartEventSubscription(attachHandle);
-        logger.LogInformation("CLIENT_StopLoadPic called for device {DeviceId}. AttachHandle={AttachHandle}, Result={Result}", deviceId, attachHandle.ToInt64(), stopped);
+        logger.LogInformation("StopLoadPic old attach handle. DeviceId={DeviceId}, AttachHandle={AttachHandle}, Result={Result}, Reason={Reason}", deviceId, attachHandle.ToInt64(), stopped, reason);
+        if (_smartEventStates.TryGetValue(deviceId, out var state))
+        {
+            state.SmartEventAttachHandle = IntPtr.Zero;
+        }
+
+        return stopped;
     }
+
+    private async Task StopDeviceSdkSessionAsync(Device device, string? remoteIp, int? remotePort, IDeviceConnectionLogger connectionLogger, string reason, CancellationToken cancellationToken)
+    {
+        if (_nativeClient is null) return;
+
+        var stopLoadPicResult = StopSmartEventSubscription(device.Id, reason);
+        await connectionLogger.LogAsync(
+            device.Id,
+            device.RegisterDeviceId,
+            remoteIp,
+            remotePort,
+            "netsdk_smart_event_stoploadpic",
+            "Stopped old Dahua Smart Event subscription before resubscribe",
+            new { reason, stopLoadPicResult },
+            cancellationToken);
+
+        if (_loginHandleByDeviceId.TryRemove(device.Id, out var loginHandle) && loginHandle != IntPtr.Zero)
+        {
+            _deviceIdByLoginHandle.TryRemove(loginHandle, out _);
+            var stopListenResult = _nativeClient.TryStopListen(loginHandle);
+            logger.LogInformation("CLIENT_StopListen old login handle. DeviceId={DeviceId}, LoginHandle={LoginHandle}, Result={Result}, Reason={Reason}", device.Id, loginHandle.ToInt64(), stopListenResult, reason);
+            var logoutResult = _nativeClient.TryLogout(loginHandle);
+            logger.LogInformation("Logout old login handle. DeviceId={DeviceId}, LoginHandle={LoginHandle}, Result={Result}, Reason={Reason}", device.Id, loginHandle.ToInt64(), logoutResult, reason);
+            await connectionLogger.LogAsync(
+                device.Id,
+                device.RegisterDeviceId,
+                remoteIp,
+                remotePort,
+                "netsdk_session_recreated",
+                "Stopped old Dahua NetSDK session before re-register subscription",
+                new { reason, loginHandle = loginHandle.ToInt64(), stopListenResult, logoutResult },
+                cancellationToken);
+
+            if (_smartEventStates.TryGetValue(device.Id, out var state))
+            {
+                state.LoginHandle = IntPtr.Zero;
+            }
+        }
+    }
+
+    private bool TrackSmartEventServiceCallback(Device device, string? remoteIp, int remotePort, DateTimeOffset callbackAt)
+    {
+        var endpointChanged = false;
+        var state = _smartEventStates.AddOrUpdate(
+            device.Id,
+            _ => new SmartEventSubscriptionState
+            {
+                DeviceId = device.Id,
+                RegisterDeviceId = device.RegisterDeviceId,
+                RemoteIp = remoteIp,
+                RemotePort = remotePort,
+                LastServiceCallbackAt = callbackAt,
+            },
+            (_, existing) =>
+            {
+                var hasActiveSession = existing.LoginHandle != IntPtr.Zero
+                                       || existing.SmartEventAttachHandle != IntPtr.Zero
+                                       || existing.SubscribedAt is not null;
+                endpointChanged = DahuaSmartEventSubscriptionEndpoint.HasChanged(existing.RemoteIp, existing.RemotePort, remoteIp, remotePort, hasActiveSession);
+                existing.RegisterDeviceId = device.RegisterDeviceId;
+                existing.LastServiceCallbackAt = callbackAt;
+                if (endpointChanged || string.IsNullOrWhiteSpace(existing.RemoteIp))
+                {
+                    existing.RemoteIp = remoteIp;
+                    existing.RemotePort = remotePort;
+                }
+
+                return existing;
+            });
+
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.LastServiceCallbackAt = callbackAt;
+            _diagnostics.SmartEventRemoteIp = state.RemoteIp;
+            _diagnostics.SmartEventRemotePort = state.RemotePort;
+            _diagnostics.SmartEventSubscriptionGeneration = state.SubscriptionGeneration;
+        }
+        PersistDiagnostics();
+        return endpointChanged;
+    }
+
+    private void UpdateSmartEventState(Device device, IntPtr loginHandle, IntPtr attachHandle, string? remoteIp, int? remotePort, DateTimeOffset subscribedAt, bool subscribed, string reason)
+    {
+        var state = _smartEventStates.AddOrUpdate(
+            device.Id,
+            _ => new SmartEventSubscriptionState
+            {
+                DeviceId = device.Id,
+                RegisterDeviceId = device.RegisterDeviceId,
+                LoginHandle = loginHandle,
+                SmartEventAttachHandle = subscribed ? attachHandle : IntPtr.Zero,
+                RemoteIp = remoteIp,
+                RemotePort = remotePort,
+                SubscribedAt = subscribed ? subscribedAt : null,
+                SubscriptionGeneration = subscribed ? 1 : 0,
+                LastResubscribeAt = reason == "RegisterAccepted" ? null : subscribedAt,
+                LastResubscribeReason = reason == "RegisterAccepted" ? null : reason,
+                LastResubscribeSuccess = reason == "RegisterAccepted" ? null : subscribed,
+                LastResubscribeError = subscribed ? null : "CLIENT_RealLoadPictureEx failed",
+            },
+            (_, existing) =>
+            {
+                existing.RegisterDeviceId = device.RegisterDeviceId;
+                existing.LoginHandle = loginHandle;
+                existing.SmartEventAttachHandle = subscribed ? attachHandle : IntPtr.Zero;
+                existing.RemoteIp = remoteIp;
+                existing.RemotePort = remotePort;
+                if (subscribed)
+                {
+                    existing.SubscriptionGeneration++;
+                    existing.SubscribedAt = subscribedAt;
+                    existing.LastResubscribeError = null;
+                }
+
+                if (reason != "RegisterAccepted")
+                {
+                    existing.LastResubscribeAt = subscribedAt;
+                    existing.LastResubscribeReason = reason;
+                    existing.LastResubscribeSuccess = subscribed;
+                    existing.LastResubscribeError = subscribed ? null : "CLIENT_RealLoadPictureEx failed";
+                }
+
+                return existing;
+            });
+
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.SmartEventSubscriptionGeneration = state.SubscriptionGeneration;
+            _diagnostics.SmartEventSubscribedAt = state.SubscribedAt;
+            _diagnostics.SmartEventRemoteIp = state.RemoteIp;
+            _diagnostics.SmartEventRemotePort = state.RemotePort;
+            _diagnostics.LastSmartEventResubscribeAt = state.LastResubscribeAt;
+            _diagnostics.LastSmartEventResubscribeReason = state.LastResubscribeReason;
+            _diagnostics.LastSmartEventResubscribeSuccess = state.LastResubscribeSuccess;
+            _diagnostics.LastSmartEventResubscribeError = state.LastResubscribeError;
+        }
+        PersistDiagnostics();
+    }
+
+    private void UpdateSmartEventResubscribeDiagnostics(Guid deviceId, DateTimeOffset attemptedAt, string reason, bool success, string? error, bool staleDetected)
+    {
+        var generation = GetSubscriptionGeneration(deviceId);
+        if (_smartEventStates.TryGetValue(deviceId, out var state))
+        {
+            state.LastResubscribeAt = attemptedAt;
+            state.LastResubscribeReason = reason;
+            state.LastResubscribeSuccess = success;
+            state.LastResubscribeError = error;
+        }
+
+        lock (_diagnosticsLock)
+        {
+            _diagnostics.LastSmartEventResubscribeAt = attemptedAt;
+            _diagnostics.LastSmartEventResubscribeReason = reason;
+            _diagnostics.LastSmartEventResubscribeSuccess = success;
+            _diagnostics.LastSmartEventResubscribeError = error;
+            _diagnostics.StaleSmartEventDetected = staleDetected;
+            _diagnostics.SmartEventSubscriptionGeneration = generation;
+        }
+        PersistDiagnostics();
+    }
+
+    private int GetSubscriptionGeneration(Guid deviceId) =>
+        _smartEventStates.TryGetValue(deviceId, out var state) ? state.SubscriptionGeneration : 0;
 
     private void OnSmartEventCallback(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, int sequence)
     {
@@ -1115,6 +1427,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
     private async Task HandleSmartEventCallbackAsync(IntPtr analyzerHandle, uint eventType, IntPtr alarmInfo, IntPtr imageBuffer, uint imageBufferSize, int sequence)
     {
+        var smartEventReceivedAt = DateTimeOffset.UtcNow;
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
         var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
@@ -1124,6 +1437,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
         if (_deviceIdBySmartEventAttachHandle.TryGetValue(analyzerHandle, out var mappedDeviceId))
         {
             device = await db.Devices.FirstOrDefaultAsync(x => x.Id == mappedDeviceId, CancellationToken.None);
+            if (_smartEventStates.TryGetValue(mappedDeviceId, out var state))
+            {
+                state.LastSmartEventAt = smartEventReceivedAt;
+            }
         }
 
         var decoded = DahuaNetSdkSmartEventDecoder.Decode(eventType, alarmInfo, imageBuffer, imageBufferSize, sequence);
@@ -1146,8 +1463,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
             _diagnostics.LastSmartEventCardName = decoded.Record?.CardName;
             _diagnostics.LastSmartEventRecNo = decoded.Record?.RecNo;
             _diagnostics.LastSmartEventTime = decoded.Record?.CreateTime;
+            _diagnostics.LastSmartEventAt = smartEventReceivedAt;
             _diagnostics.LastSmartEventRawStructSummaryJson = decoded.RawStructSummaryJson;
             _diagnostics.LastDecodeError = decoded.FailureReason;
+            _diagnostics.StaleSmartEventDetected = false;
         }
         PersistDiagnostics();
 
@@ -1868,6 +2187,18 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 entity.SmartEventAttachHandle = snapshot.SmartEventAttachHandle;
                 entity.SmartEventErrorSigned = snapshot.SmartEventErrorSigned;
                 entity.SmartEventErrorHex = snapshot.SmartEventErrorHex;
+                entity.SmartEventSubscriptionGeneration = snapshot.SmartEventSubscriptionGeneration;
+                entity.SmartEventSubscribedAt = snapshot.SmartEventSubscribedAt;
+                entity.SmartEventRemoteIp = snapshot.SmartEventRemoteIp;
+                entity.SmartEventRemotePort = snapshot.SmartEventRemotePort;
+                entity.LastServiceCallbackAt = snapshot.LastServiceCallbackAt;
+                entity.LastSmartEventAt = snapshot.LastSmartEventAt;
+                entity.LastSmartEventResubscribeAt = snapshot.LastSmartEventResubscribeAt;
+                entity.LastSmartEventResubscribeReason = snapshot.LastSmartEventResubscribeReason;
+                entity.LastSmartEventResubscribeSuccess = snapshot.LastSmartEventResubscribeSuccess;
+                entity.LastSmartEventResubscribeError = snapshot.LastSmartEventResubscribeError;
+                entity.StaleSmartEventDetected = snapshot.StaleSmartEventDetected;
+                entity.SmartEventWatchdogEnabled = snapshot.SmartEventWatchdogEnabled;
                 entity.LastSmartEventType = snapshot.LastSmartEventType;
                 entity.LastSmartEventName = snapshot.LastSmartEventName;
                 entity.LastSmartEventPayloadBytes = snapshot.LastSmartEventPayloadBytes;
@@ -1904,6 +2235,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
     private static string BuildRegistrationKey(string registerDeviceId, string? remoteIp, int remotePort, IntPtr serviceCallbackHandle)
         => DahuaNetSdkSubscriptionDiagnostics.BuildRegistrationKey(registerDeviceId, remoteIp, remotePort, serviceCallbackHandle.ToInt64());
 
+    private static bool IsStaleReason(string reason) =>
+        reason.Contains("Stale", StringComparison.OrdinalIgnoreCase);
+
     private static byte[] CopyPayload(IntPtr param, uint paramLength)
     {
         if (param == IntPtr.Zero || paramLength == 0) return [];
@@ -1911,6 +2245,43 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var payload = new byte[length];
         Marshal.Copy(param, payload, 0, length);
         return payload;
+    }
+
+    private sealed class SmartEventSubscriptionState
+    {
+        public Guid DeviceId { get; init; }
+        public string? RegisterDeviceId { get; set; }
+        public IntPtr LoginHandle { get; set; }
+        public IntPtr SmartEventAttachHandle { get; set; }
+        public string? RemoteIp { get; set; }
+        public int? RemotePort { get; set; }
+        public DateTimeOffset? SubscribedAt { get; set; }
+        public DateTimeOffset? LastSmartEventAt { get; set; }
+        public DateTimeOffset? LastServiceCallbackAt { get; set; }
+        public int SubscriptionGeneration { get; set; }
+        public DateTimeOffset? LastResubscribeAt { get; set; }
+        public string? LastResubscribeReason { get; set; }
+        public bool? LastResubscribeSuccess { get; set; }
+        public string? LastResubscribeError { get; set; }
+
+        public DahuaSmartEventSubscriptionSnapshot ToSnapshot(bool smartEventEnabled) =>
+            new(
+                DeviceId,
+                RegisterDeviceId,
+                LoginHandle != IntPtr.Zero ? LoginHandle.ToInt64() : null,
+                SmartEventAttachHandle != IntPtr.Zero ? SmartEventAttachHandle.ToInt64() : null,
+                RemoteIp,
+                RemotePort,
+                SubscribedAt,
+                LastSmartEventAt,
+                LastServiceCallbackAt,
+                SubscriptionGeneration,
+                LastResubscribeAt,
+                LastResubscribeReason,
+                LastResubscribeSuccess,
+                LastResubscribeError,
+                smartEventEnabled,
+                SmartEventAttachHandle != IntPtr.Zero);
     }
 }
 

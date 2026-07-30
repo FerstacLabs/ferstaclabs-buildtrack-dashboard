@@ -203,6 +203,18 @@ ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventSubsc
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventAttachHandle" bigint NULL;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventErrorSigned" integer NULL;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventErrorHex" character varying(40) NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventSubscriptionGeneration" integer NOT NULL DEFAULT 0;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventSubscribedAt" timestamp with time zone NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventRemoteIp" character varying(80) NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventRemotePort" integer NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastServiceCallbackAt" timestamp with time zone NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventAt" timestamp with time zone NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventResubscribeAt" timestamp with time zone NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventResubscribeReason" character varying(160) NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventResubscribeSuccess" boolean NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventResubscribeError" character varying(500) NULL;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "StaleSmartEventDetected" boolean NOT NULL DEFAULT false;
+ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "SmartEventWatchdogEnabled" boolean NOT NULL DEFAULT false;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventType" integer NULL;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventName" character varying(120) NULL;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastSmartEventPayloadBytes" integer NOT NULL DEFAULT 0;

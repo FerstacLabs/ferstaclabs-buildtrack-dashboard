@@ -73,6 +73,18 @@ public sealed class NetSdkRuntimeDiagnostics
     public long? SmartEventAttachHandle { get; set; }
     public int? SmartEventErrorSigned { get; set; }
     public string? SmartEventErrorHex { get; set; }
+    public int SmartEventSubscriptionGeneration { get; set; }
+    public DateTimeOffset? SmartEventSubscribedAt { get; set; }
+    public string? SmartEventRemoteIp { get; set; }
+    public int? SmartEventRemotePort { get; set; }
+    public DateTimeOffset? LastServiceCallbackAt { get; set; }
+    public DateTimeOffset? LastSmartEventAt { get; set; }
+    public DateTimeOffset? LastSmartEventResubscribeAt { get; set; }
+    public string? LastSmartEventResubscribeReason { get; set; }
+    public bool? LastSmartEventResubscribeSuccess { get; set; }
+    public string? LastSmartEventResubscribeError { get; set; }
+    public bool StaleSmartEventDetected { get; set; }
+    public bool SmartEventWatchdogEnabled { get; set; }
     public int? LastSmartEventType { get; set; }
     public string? LastSmartEventName { get; set; }
     public int LastSmartEventPayloadBytes { get; set; }

@@ -160,6 +160,122 @@ public sealed class DahuaNetSdkSubscriptionDiagnosticsTests
     }
 }
 
+public sealed class DahuaSmartEventSubscriptionHealthTests
+{
+    [Fact]
+    public void EndpointChange_WithActiveSessionAndNewRemotePort_TriggersResubscribe()
+    {
+        var changed = DahuaSmartEventSubscriptionEndpoint.HasChanged(
+            previousIp: "185.146.112.123",
+            previousPort: 60062,
+            currentIp: "185.146.112.123",
+            currentPort: 60099,
+            hasActiveSession: true);
+
+        Assert.True(changed);
+    }
+
+    [Fact]
+    public void EndpointChange_WithoutActiveSession_DoesNotTriggerResubscribe()
+    {
+        var changed = DahuaSmartEventSubscriptionEndpoint.HasChanged(
+            previousIp: "185.146.112.123",
+            previousPort: 60062,
+            currentIp: "185.146.112.123",
+            currentPort: 60099,
+            hasActiveSession: false);
+
+        Assert.False(changed);
+    }
+
+    [Fact]
+    public void Watchdog_RecentServiceCallbackAndStaleSmartEvent_RequestsResubscribe()
+    {
+        var now = DateTimeOffset.Parse("2026-07-30T10:00:00Z");
+        var snapshot = NewSnapshot(
+            lastServiceCallbackAt: now.AddMinutes(-1),
+            lastSmartEventAt: now.AddMinutes(-20),
+            subscribedAt: now.AddHours(-1));
+        var options = new DahuaSmartEventWatchdogOptions(
+            Enabled: true,
+            StaleThreshold: TimeSpan.FromMinutes(10),
+            PeriodicResubscribeInterval: TimeSpan.FromHours(6),
+            ResubscribeCooldown: TimeSpan.FromSeconds(60));
+
+        var decision = DahuaSmartEventWatchdogPolicy.Evaluate(snapshot, options, now);
+
+        Assert.True(decision.ShouldResubscribe);
+        Assert.True(decision.StaleSmartEventDetected);
+        Assert.Equal("StaleSmartEventSubscription", decision.Reason);
+    }
+
+    [Fact]
+    public void Watchdog_CooldownSuppressesDuplicateStaleResubscribe()
+    {
+        var now = DateTimeOffset.Parse("2026-07-30T10:00:00Z");
+        var snapshot = NewSnapshot(
+            lastServiceCallbackAt: now.AddMinutes(-1),
+            lastSmartEventAt: now.AddMinutes(-20),
+            subscribedAt: now.AddHours(-1),
+            lastResubscribeAt: now.AddSeconds(-30));
+        var options = new DahuaSmartEventWatchdogOptions(
+            Enabled: true,
+            StaleThreshold: TimeSpan.FromMinutes(10),
+            PeriodicResubscribeInterval: TimeSpan.FromHours(6),
+            ResubscribeCooldown: TimeSpan.FromSeconds(60));
+
+        var decision = DahuaSmartEventWatchdogPolicy.Evaluate(snapshot, options, now);
+
+        Assert.False(decision.ShouldResubscribe);
+        Assert.True(decision.StaleSmartEventDetected);
+        Assert.True(decision.CooldownActive);
+    }
+
+    [Fact]
+    public void Watchdog_PeriodicSubscriptionAge_RequestsResubscribe()
+    {
+        var now = DateTimeOffset.Parse("2026-07-30T10:00:00Z");
+        var snapshot = NewSnapshot(
+            lastServiceCallbackAt: now.AddMinutes(-30),
+            lastSmartEventAt: now.AddMinutes(-30),
+            subscribedAt: now.AddHours(-7));
+        var options = new DahuaSmartEventWatchdogOptions(
+            Enabled: true,
+            StaleThreshold: TimeSpan.FromMinutes(10),
+            PeriodicResubscribeInterval: TimeSpan.FromHours(6),
+            ResubscribeCooldown: TimeSpan.FromSeconds(60));
+
+        var decision = DahuaSmartEventWatchdogPolicy.Evaluate(snapshot, options, now);
+
+        Assert.True(decision.ShouldResubscribe);
+        Assert.False(decision.StaleSmartEventDetected);
+        Assert.Equal("PeriodicSmartEventResubscribe", decision.Reason);
+    }
+
+    private static DahuaSmartEventSubscriptionSnapshot NewSnapshot(
+        DateTimeOffset? lastServiceCallbackAt,
+        DateTimeOffset? lastSmartEventAt,
+        DateTimeOffset? subscribedAt,
+        DateTimeOffset? lastResubscribeAt = null) =>
+        new(
+            DeviceId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            RegisterDeviceId: "BT-API-TEST-001",
+            LoginHandle: 123,
+            SmartEventAttachHandle: 456,
+            RemoteIp: "185.146.112.123",
+            RemotePort: 60062,
+            SubscribedAt: subscribedAt,
+            LastSmartEventAt: lastSmartEventAt,
+            LastServiceCallbackAt: lastServiceCallbackAt,
+            SubscriptionGeneration: 1,
+            LastResubscribeAt: lastResubscribeAt,
+            LastResubscribeReason: null,
+            LastResubscribeSuccess: null,
+            LastResubscribeError: null,
+            SmartEventEnabled: true,
+            SmartEventSubscriptionSuccess: true);
+}
+
 public sealed class DahuaNetSdkRegistrationAttemptTests
 {
     [Fact]

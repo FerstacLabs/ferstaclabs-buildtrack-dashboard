@@ -11,6 +11,8 @@ public interface IDahuaActiveRegisterSdk
     DahuaNetSdkDiagnostics Diagnostics { get; }
     Task StartAsync(IEnumerable<int> ports, CancellationToken cancellationToken);
     Task<object> RunRecordQueryDiagnosticAsync(Guid deviceId, int maxRecords, CancellationToken cancellationToken);
+    Task<IReadOnlyList<DahuaSmartEventSubscriptionSnapshot>> GetSmartEventSubscriptionsAsync(CancellationToken cancellationToken);
+    Task<DahuaSmartEventResubscribeResult> ResubscribeSmartEventsAsync(Guid deviceId, string reason, CancellationToken cancellationToken);
 }
 
 public interface IDahuaEventSubscriber
