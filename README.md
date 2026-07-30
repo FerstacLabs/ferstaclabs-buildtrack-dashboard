@@ -50,6 +50,20 @@ OPENAI_TTS_VOICE=shimmer
 OPENAI_TTS_FORMAT=mp3
 ```
 
+## Dahua camera identity mode
+
+The default backend identity behavior is conservative: `DAHUA_IDENTITY_RESOLUTION_MODE=strict_userid`. In this mode Smart Event attendance is accepted only when Dahua `UserID` maps to one active worker and the received `CardName` matches that worker.
+
+For the tested Dahua terminal, Smart Event can send the same `UserID` for different enrolled people. On the VPS demo/prototype deployment use:
+
+```env
+DAHUA_IDENTITY_RESOLUTION_MODE=cardname_primary
+DAHUA_AUTO_PROVISION_CAMERA_WORKERS=true
+DAHUA_MIN_CARDNAME_LENGTH_FOR_AUTOPROVISION=3
+```
+
+`cardname_primary` resolves workers by trusted, high-confidence Smart Event `CardName` first. If enabled, BuildTrack auto-creates a worker for valid camera names such as `ilham` or `tahira`, while suspicious binary candidates such as `Bx`, `fj`, `p1x`, or `J4myH` remain security-review events.
+
 Then recreate the backend API container:
 
 ```bash

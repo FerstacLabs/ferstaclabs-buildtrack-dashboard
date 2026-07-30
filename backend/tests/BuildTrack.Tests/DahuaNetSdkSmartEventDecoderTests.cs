@@ -250,6 +250,67 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     }
 
     [Fact]
+    public void SmartEventClassification_CardNamePrimaryKeepsTahiraSeparateFromRawUserIdCollision()
+    {
+        var record = KnownFaceRecord("1", "tahira");
+        var tahira = new Worker
+        {
+            SiteId = Guid.NewGuid(),
+            ExternalWorkerCode = "tahira",
+            FullName = "tahira",
+            Status = WorkerStatus.Active,
+        };
+
+        var resolved = DahuaSmartEventClassification.BuildCardNamePrimaryRecognizedRecord(
+            record,
+            TrustedSummary("1", "tahira", "1", confidence: "High", source: "CanonicalSmartEventParser"),
+            tahira,
+            rawCameraUserId: "1",
+            userIdCollision: true,
+            originalUserIdMappedWorkerName: "ilham",
+            autoProvisioned: true);
+        DahuaSmartEventClassification.MarkRecognizedAttendance(resolved, tahira);
+
+        Assert.Equal("tahira", resolved.UserId);
+        Assert.Equal("tahira", resolved.CardName);
+        Assert.Equal("1", resolved.RawFields["UserID"]);
+        Assert.Equal("1", resolved.RawFields["CameraUserID"]);
+        Assert.Equal("tahira", resolved.RawFields["WorkerExternalId"]);
+        Assert.Equal("tahira", resolved.RawFields["ReceivedCardName"]);
+        Assert.Equal("tahira", resolved.RawFields["ResolvedWorkerName"]);
+        Assert.Equal("CardName", resolved.RawFields["IdentityResolvedBy"]);
+        Assert.Equal("true", resolved.RawFields["UserIdCollision"]);
+        Assert.Equal("ilham", resolved.RawFields["OriginalUserIdMappedWorkerName"]);
+        Assert.Equal("true", resolved.RawFields["AutoProvisionedWorker"]);
+        Assert.Equal("false", resolved.RawFields["CardNameMismatch"]);
+        Assert.Equal("true", resolved.RawFields["IdentityVerified"]);
+        Assert.True(DahuaVerifiedAttendancePayload.IsVerifiedActiveRegisterPayload(System.Text.Json.JsonSerializer.Serialize(resolved.RawFields)));
+    }
+
+    [Theory]
+    [InlineData("ilham", true)]
+    [InlineData("tahira", true)]
+    [InlineData("J4myH", false)]
+    [InlineData("Bx", false)]
+    [InlineData("fj", false)]
+    [InlineData("p1x", false)]
+    public void CardNamePolicy_SeparatesHumanNamesFromCorruptedCandidates(string cardName, bool expectedValid)
+    {
+        var valid = DahuaCameraCardNamePolicy.TryValidate(cardName, 3, out _, out _, out _);
+
+        Assert.Equal(expectedValid, valid);
+    }
+
+    [Fact]
+    public void IdentityResolutionModeParser_DefaultsToStrictAndSupportsCardNamePrimary()
+    {
+        Assert.Equal(DahuaIdentityResolutionMode.StrictUserId, DahuaIdentityResolutionModeParser.Parse(null));
+        Assert.Equal(DahuaIdentityResolutionMode.StrictUserId, DahuaIdentityResolutionModeParser.Parse("strict_userid"));
+        Assert.Equal(DahuaIdentityResolutionMode.CardNamePrimary, DahuaIdentityResolutionModeParser.Parse("cardname_primary"));
+        Assert.Equal(DahuaIdentityResolutionMode.Hybrid, DahuaIdentityResolutionModeParser.Parse("hybrid"));
+    }
+
+    [Fact]
     public void SmartEventClassification_CanonicalDecodedRecordKeepsDiagnosticUserAndName()
     {
         var decodedRecord = KnownFaceRecord("1", "ilham");
@@ -300,6 +361,26 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         Assert.Null(conflict.UserId);
         Assert.True(DahuaSecurityReviewEventPolicy.IsFaceReviewEvent(conflict));
         Assert.Equal(SecurityEventType.IdentityMappingConflict, DahuaSecurityReviewEventPolicy.ResolveEventType(conflict));
+    }
+
+    [Fact]
+    public void SmartEventClassification_DuplicateCardNameCreatesIdentityMappingConflictReview()
+    {
+        var record = KnownFaceRecord("1", "tahira");
+        var workers = new[]
+        {
+            new Worker { SiteId = Guid.NewGuid(), ExternalWorkerCode = "tahira", FullName = "Tahira", Status = WorkerStatus.Active },
+            new Worker { SiteId = Guid.NewGuid(), ExternalWorkerCode = "camera-tahira", FullName = "tahira", Status = WorkerStatus.Active },
+        };
+        var trusted = DahuaSmartEventClassification.BuildTrustedRecord(record, TrustedSummary("1", "tahira", "1", confidence: "High", source: "CanonicalSmartEventParser"), null);
+
+        var conflict = DahuaSmartEventClassification.BuildIdentityMappingConflictRecord(trusted, TrustedSummary("1", "tahira", "1", confidence: "High", source: "CanonicalSmartEventParser"), workers);
+
+        Assert.Equal("IdentityMappingConflict", conflict.RawFields["Classification"]);
+        Assert.Equal("tahira", conflict.RawFields["ReceivedCardName"]);
+        Assert.Equal("2", conflict.RawFields["MappedWorkerCount"]);
+        Assert.Null(conflict.UserId);
+        Assert.True(DahuaSecurityReviewEventPolicy.IsFaceReviewEvent(conflict));
     }
 
     [Theory]

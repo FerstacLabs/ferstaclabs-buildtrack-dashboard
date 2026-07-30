@@ -1514,11 +1514,19 @@ public sealed class DahuaNetSdkActiveRegisterService(
         }
 
         var decodedTrustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decoded.Record, decoded.RawStructSummaryJson, null);
-        var mappedWorkers = string.IsNullOrWhiteSpace(decodedTrustedRecord.UserId)
+        var rawCameraUserId = decodedTrustedRecord.UserId;
+        var identityResolutionMode = DahuaIdentityResolutionModeParser.Parse(configuration["DAHUA_IDENTITY_RESOLUTION_MODE"]);
+        var identityPolicy = DahuaIdentityMatchPolicyParser.Parse(configuration["DAHUA_IDENTITY_MATCH_POLICY"]);
+        var allowCardNameMismatchAttendance = IsEnabled(configuration["DAHUA_ALLOW_CARDNAME_MISMATCH_ATTENDANCE"]);
+        var effectiveAllowCardNameMismatchAttendance = identityResolutionMode == DahuaIdentityResolutionMode.StrictUserId && allowCardNameMismatchAttendance;
+        var autoProvisionCameraWorkers = IsEnabled(configuration["DAHUA_AUTO_PROVISION_CAMERA_WORKERS"]);
+        var minCardNameLength = ParsePositiveInt(configuration["DAHUA_MIN_CARDNAME_LENGTH_FOR_AUTOPROVISION"], 3);
+
+        var mappedWorkers = string.IsNullOrWhiteSpace(rawCameraUserId)
             ? new List<Worker>()
             : await db.Workers.AsNoTracking()
                 .Where(x => x.SiteId == device.SiteId
-                            && x.ExternalWorkerCode == decodedTrustedRecord.UserId
+                            && x.ExternalWorkerCode == rawCameraUserId
                             && x.Status == WorkerStatus.Active)
                 .OrderBy(x => x.CreatedAt)
                 .Take(3)
@@ -1527,11 +1535,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var resolvedWorker = mappedWorkers.Count == 1 ? mappedWorkers[0] : null;
         var trustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
         var workerResolved = resolvedWorker is not null;
-        var identityPolicy = DahuaIdentityMatchPolicyParser.Parse(configuration["DAHUA_IDENTITY_MATCH_POLICY"]);
-        var allowCardNameMismatchAttendance = IsEnabled(configuration["DAHUA_ALLOW_CARDNAME_MISMATCH_ATTENDANCE"]);
         if (identityPolicy == DahuaIdentityMatchPolicy.UserIdPrimary)
         {
-            logger.LogWarning("UNSAFE identity policy user_id_primary is enabled; false-positive camera matches may be counted as attendance. AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}", allowCardNameMismatchAttendance);
+            logger.LogWarning("UNSAFE identity policy user_id_primary is enabled. AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}, EffectiveAllowCardNameMismatchAttendance={EffectiveAllowCardNameMismatchAttendance}, IdentityResolutionMode={IdentityResolutionMode}", allowCardNameMismatchAttendance, effectiveAllowCardNameMismatchAttendance, identityResolutionMode);
         }
 
         var recognizedAttendance = !mappingConflict
@@ -1539,7 +1545,55 @@ public sealed class DahuaNetSdkActiveRegisterService(
                                        trustedRecord,
                                        resolvedWorker,
                                        identityPolicy,
-                                       allowCardNameMismatchAttendance);
+                                       effectiveAllowCardNameMismatchAttendance);
+
+        CardNameIdentityResolutionResult? cardNameResolution = null;
+        if (!recognizedAttendance
+            && !mappingConflict
+            && identityResolutionMode is DahuaIdentityResolutionMode.CardNamePrimary or DahuaIdentityResolutionMode.Hybrid)
+        {
+            cardNameResolution = await TryResolveByCardNameAsync(
+                db,
+                device,
+                decodedTrustedRecord,
+                decoded.RawStructSummaryJson,
+                mappedWorkers,
+                rawCameraUserId,
+                autoProvisionCameraWorkers,
+                minCardNameLength,
+                CancellationToken.None);
+
+            if (cardNameResolution.MappingConflict)
+            {
+                mappingConflict = true;
+                mappedWorkers = cardNameResolution.MatchingWorkers.ToList();
+                trustedRecord.RawFields["IdentityResolutionMode"] = ToConfigValue(identityResolutionMode);
+                trustedRecord.RawFields["CardNamePrimaryRejectedReason"] = cardNameResolution.RejectionReason;
+            }
+            else if (cardNameResolution.Record is not null && cardNameResolution.ResolvedWorker is not null)
+            {
+                trustedRecord = cardNameResolution.Record;
+                resolvedWorker = cardNameResolution.ResolvedWorker;
+                workerResolved = true;
+                recognizedAttendance = true;
+                trustedRecord.RawFields["IdentityResolutionMode"] = ToConfigValue(identityResolutionMode);
+                trustedRecord.RawFields["IdentityResolvedBy"] = "CardName";
+                logger.LogInformation(
+                    "Smart Event identity resolved by CardName. RawUserID={RawUserID}, ReceivedCardName={ReceivedCardName}, ResolvedWorkerExternalId={ResolvedWorkerExternalId}, ResolvedWorkerName={ResolvedWorkerName}, AutoProvisioned={AutoProvisioned}, UserIdCollision={UserIdCollision}",
+                    rawCameraUserId,
+                    trustedRecord.RawFields.GetValueOrDefault("ReceivedCardName"),
+                    resolvedWorker.ExternalWorkerCode,
+                    resolvedWorker.FullName,
+                    cardNameResolution.AutoProvisioned,
+                    cardNameResolution.UserIdCollision);
+            }
+            else
+            {
+                trustedRecord.RawFields["IdentityResolutionMode"] = ToConfigValue(identityResolutionMode);
+                trustedRecord.RawFields["CardNamePrimaryRejectedReason"] = cardNameResolution.RejectionReason;
+            }
+        }
+
         var identityMismatch = !recognizedAttendance
                                && !mappingConflict
                                && workerResolved
@@ -1557,7 +1611,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             imageBufferSize);
 
         logger.LogInformation(
-            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, MappedWorkerCount={MappedWorkerCount}, IdentityPolicy={IdentityPolicy}, AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}, CardNameMismatch={CardNameMismatch}, RecNo={RecNo}, ImageSize={ImageSize}",
+            "Access smart event parsed UserID={UserID}, CardName={CardName}, Status={Status}, ErrorCode={ErrorCode}, WorkerResolved={WorkerResolved}, MappedWorkerCount={MappedWorkerCount}, IdentityPolicy={IdentityPolicy}, IdentityResolutionMode={IdentityResolutionMode}, AutoProvisionCameraWorkers={AutoProvisionCameraWorkers}, AllowCardNameMismatchAttendance={AllowCardNameMismatchAttendance}, EffectiveAllowCardNameMismatchAttendance={EffectiveAllowCardNameMismatchAttendance}, CardNameMismatch={CardNameMismatch}, RecNo={RecNo}, ImageSize={ImageSize}",
             trustedRecord.UserId,
             trustedRecord.CardName,
             trustedRecord.StatusRaw,
@@ -1565,7 +1619,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
             workerResolved,
             mappedWorkers.Count,
             identityPolicy,
+            identityResolutionMode,
+            autoProvisionCameraWorkers,
             allowCardNameMismatchAttendance,
+            effectiveAllowCardNameMismatchAttendance,
             trustedRecord.RawFields.GetValueOrDefault("CardNameMismatch"),
             trustedRecord.RecNo,
             imageBufferSize);
@@ -1589,7 +1646,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
                         : DahuaSmartEventClassification.BuildParserUncertainRecord(trustedRecord, decoded.RawStructSummaryJson);
         if (recognizedAttendance)
         {
-            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest, resolvedWorker, identityPolicy, allowCardNameMismatchAttendance);
+            DahuaSmartEventClassification.MarkRecognizedAttendance(recordToIngest, resolvedWorker, identityPolicy, effectiveAllowCardNameMismatchAttendance);
         }
 
         if (recognizedAttendance)
@@ -1644,6 +1701,156 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
         await pipeline.IngestAsync(device.Id, recordToIngest, DahuaEventSource.ActiveRegister, CancellationToken.None);
         logger.LogInformation("Attendance/security event submitted to shared pipeline from Dahua Smart Event");
+    }
+
+    private async Task<CardNameIdentityResolutionResult> TryResolveByCardNameAsync(
+        BuildTrackDbContext db,
+        Device device,
+        DahuaAccessRecord trustedRecord,
+        string rawStructSummaryJson,
+        IReadOnlyCollection<Worker> userIdMappedWorkers,
+        string? rawCameraUserId,
+        bool autoProvisionCameraWorkers,
+        int minCardNameLength,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(trustedRecord.StatusRaw, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return CardNameIdentityResolutionResult.Rejected("status is not successful");
+        }
+
+        if (trustedRecord.NormalizedMethod is not (AttendanceMethod.Face or AttendanceMethod.Card or AttendanceMethod.Fingerprint))
+        {
+            return CardNameIdentityResolutionResult.Rejected("method is not a valid access recognition method");
+        }
+
+        var cardNameSource = trustedRecord.RawFields.GetValueOrDefault("CardNameSource");
+        var cardNameConfidence = trustedRecord.RawFields.GetValueOrDefault("CardNameConfidence");
+        if (string.Equals(cardNameSource, "DecodedStringCandidates", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(cardNameConfidence, "High", StringComparison.OrdinalIgnoreCase))
+        {
+            return CardNameIdentityResolutionResult.Rejected("CardName did not come from a high-confidence struct field");
+        }
+
+        var receivedCardName = trustedRecord.RawFields.GetValueOrDefault("ReceivedCardName")
+                               ?? trustedRecord.RawFields.GetValueOrDefault("TrustedCardName")
+                               ?? trustedRecord.CardName;
+        if (!DahuaCameraCardNamePolicy.TryValidate(receivedCardName, minCardNameLength, out var displayName, out var normalizedName, out var validationReason))
+        {
+            return CardNameIdentityResolutionResult.Rejected(validationReason ?? "CardName is not valid for identity resolution");
+        }
+
+        var activeSiteWorkers = await db.Workers.AsNoTracking()
+            .Where(x => x.SiteId == device.SiteId && x.Status == WorkerStatus.Active)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var matchingWorkers = activeSiteWorkers
+            .Where(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.FullName), normalizedName, StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), normalizedName, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(worker => worker.Id)
+            .Select(group => group.First())
+            .ToList();
+
+        if (matchingWorkers.Count > 1)
+        {
+            return CardNameIdentityResolutionResult.Conflict(matchingWorkers, "CardName matches multiple active workers");
+        }
+
+        var autoProvisioned = false;
+        var resolvedWorker = matchingWorkers.Count == 1 ? matchingWorkers[0] : null;
+        if (resolvedWorker is null)
+        {
+            if (!autoProvisionCameraWorkers)
+            {
+                return CardNameIdentityResolutionResult.Rejected("CardName is valid but no worker matched and auto-provision is disabled");
+            }
+
+            var allSiteWorkers = await db.Workers.AsNoTracking()
+                .Where(x => x.SiteId == device.SiteId)
+                .ToListAsync(cancellationToken);
+            var externalWorkerCode = BuildUniqueCameraWorkerExternalCode(device, normalizedName, allSiteWorkers);
+            resolvedWorker = new Worker
+            {
+                SiteId = device.SiteId,
+                ExternalWorkerCode = externalWorkerCode,
+                FullName = displayName,
+                Status = WorkerStatus.Active,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+            db.Workers.Add(resolvedWorker);
+            await db.SaveChangesAsync(cancellationToken);
+            autoProvisioned = true;
+            logger.LogInformation("Camera worker auto-provisioned from Dahua CardName. SiteId={SiteId}, DeviceId={DeviceId}, ExternalWorkerCode={ExternalWorkerCode}, FullName={FullName}", device.SiteId, device.Id, resolvedWorker.ExternalWorkerCode, resolvedWorker.FullName);
+        }
+
+        var collisionWorkers = userIdMappedWorkers.Where(worker => worker.Id != resolvedWorker.Id).ToList();
+        var userIdCollision = collisionWorkers.Count > 0;
+        var originalUserIdMappedWorkerName = userIdCollision
+            ? string.Join(", ", collisionWorkers.Select(worker => worker.FullName))
+            : null;
+        var record = DahuaSmartEventClassification.BuildCardNamePrimaryRecognizedRecord(
+            trustedRecord,
+            rawStructSummaryJson,
+            resolvedWorker,
+            rawCameraUserId,
+            userIdCollision,
+            originalUserIdMappedWorkerName,
+            autoProvisioned);
+        record.RawFields["CardNamePrimaryNormalizedName"] = normalizedName;
+        record.RawFields["CardNameValidation"] = "Valid";
+
+        return CardNameIdentityResolutionResult.Resolved(record, resolvedWorker, userIdCollision, originalUserIdMappedWorkerName, autoProvisioned);
+    }
+
+    private static string BuildUniqueCameraWorkerExternalCode(Device device, string normalizedName, IReadOnlyCollection<Worker> siteWorkers)
+    {
+        var preferred = normalizedName.Length <= 80 ? normalizedName : normalizedName[..80];
+        if (!siteWorkers.Any(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), preferred, StringComparison.OrdinalIgnoreCase)))
+        {
+            return preferred;
+        }
+
+        var devicePrefix = $"camera-{device.Id.ToString("N")[..8]}-";
+        var maxBaseLength = Math.Max(1, 80 - devicePrefix.Length - 3);
+        var baseName = normalizedName.Length <= maxBaseLength ? normalizedName : normalizedName[..maxBaseLength];
+        for (var index = 1; index < 100; index++)
+        {
+            var candidate = $"{devicePrefix}{baseName}-{index}";
+            if (!siteWorkers.Any(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{devicePrefix}{Guid.NewGuid():N}"[..80];
+    }
+
+    private static string ToConfigValue(DahuaIdentityResolutionMode mode) => mode switch
+    {
+        DahuaIdentityResolutionMode.CardNamePrimary => "cardname_primary",
+        DahuaIdentityResolutionMode.Hybrid => "hybrid",
+        _ => "strict_userid",
+    };
+
+    private sealed record CardNameIdentityResolutionResult(
+        DahuaAccessRecord? Record,
+        Worker? ResolvedWorker,
+        IReadOnlyCollection<Worker> MatchingWorkers,
+        bool MappingConflict,
+        bool UserIdCollision,
+        string? OriginalUserIdMappedWorkerName,
+        bool AutoProvisioned,
+        string? RejectionReason)
+    {
+        public static CardNameIdentityResolutionResult Rejected(string reason) =>
+            new(null, null, [], false, false, null, false, reason);
+
+        public static CardNameIdentityResolutionResult Conflict(IReadOnlyCollection<Worker> matchingWorkers, string reason) =>
+            new(null, null, matchingWorkers, true, false, null, false, reason);
+
+        public static CardNameIdentityResolutionResult Resolved(DahuaAccessRecord record, Worker worker, bool userIdCollision, string? originalUserIdMappedWorkerName, bool autoProvisioned) =>
+            new(record, worker, [worker], false, userIdCollision, originalUserIdMappedWorkerName, autoProvisioned, null);
     }
 
     private string? TrySaveSmartEventImage(Guid? deviceId, long? recNo, IntPtr imageBuffer, uint imageBufferSize)
