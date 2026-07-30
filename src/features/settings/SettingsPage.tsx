@@ -2,6 +2,7 @@ import { ClockCircleOutlined, ExportOutlined, RobotOutlined, SafetyCertificateOu
 import { Button, Form, Input, InputNumber, Select, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
+import { languageOptions, type AppLanguage, useI18n } from '../../i18n'
 import { tryApiRequest } from '../../shared/api/client'
 import { useBuildTrackStore } from '../../services/data/dataService'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
@@ -15,6 +16,7 @@ interface AppSettings {
   mediumRiskThreshold: number
   highRiskThreshold: number
   exportFormatPreference: string
+  language: AppLanguage
 }
 
 interface AiAssistantStatus {
@@ -26,15 +28,21 @@ interface AiAssistantStatus {
 const settingsStorageKey = 'buildtrack-app-settings'
 
 const settingCards = [
-  ['Şirkət məlumatları', 'Şirkət adı və platformada görünən məlumatlar.', <SettingOutlined />],
-  ['İş saatları', 'Standart giriş və çıxış vaxtı qaydaları.', <ClockCircleOutlined />],
-  ['Risk qaydaları', 'Risk balı limitləri və nəzarət səviyyələri.', <SafetyCertificateOutlined />],
-  ['Export formatları', 'Excel, CSV və 1C üçün əsas seçimlər.', <ExportOutlined />],
-  ['İstifadəçi rolları', 'Layihə rəhbəri, mühasibatlıq, prorab və operator rolları.', <TeamOutlined />],
-  ['AI köməkçi', 'OpenAI bağlantısı backend serverdə idarə olunur.', <RobotOutlined />],
+  ['settings.card.company.title', 'settings.card.company.text', <SettingOutlined />],
+  ['settings.card.hours.title', 'settings.card.hours.text', <ClockCircleOutlined />],
+  ['settings.card.risk.title', 'settings.card.risk.text', <SafetyCertificateOutlined />],
+  ['settings.card.export.title', 'settings.card.export.text', <ExportOutlined />],
+  ['settings.card.roles.title', 'settings.card.roles.text', <TeamOutlined />],
+  ['settings.card.ai.title', 'settings.card.ai.text', <RobotOutlined />],
 ]
 
-const loadSettings = (fallbackName: string): AppSettings => {
+const languageSavedMessages: Record<AppLanguage, string> = {
+  az: 'Dil ayarı yadda saxlandı',
+  en: 'Language setting saved',
+  ru: 'Настройка языка сохранена',
+}
+
+const loadSettings = (fallbackName: string, fallbackLanguage: AppLanguage): AppSettings => {
   const fallback: AppSettings = {
     companyDisplayName: fallbackName,
     defaultWorkStart: '08:00',
@@ -44,6 +52,7 @@ const loadSettings = (fallbackName: string): AppSettings => {
     mediumRiskThreshold: 60,
     highRiskThreshold: 80,
     exportFormatPreference: 'Excel',
+    language: fallbackLanguage,
   }
 
   try {
@@ -55,6 +64,7 @@ const loadSettings = (fallbackName: string): AppSettings => {
 }
 
 export const SettingsPage = () => {
+  const { language, setLanguage, t } = useI18n()
   const { data, resetDemoData } = useBuildTrackStore()
   const project = useProjectProgressStore((state) => state.project)
   const refreshSeedData = useProjectProgressStore((state) => state.refreshSeedData)
@@ -65,10 +75,10 @@ export const SettingsPage = () => {
   const companyName = data?.company[0]?.company_name ?? project.name
 
   useEffect(() => {
-    const settings = loadSettings(companyName)
+    const settings = loadSettings(companyName, language)
     form.setFieldsValue(settings)
     riskForm.setFieldsValue(settings)
-  }, [companyName, form, riskForm])
+  }, [companyName, form, language, riskForm])
 
   const checkAiStatus = useCallback(async () => {
     setAiChecking(true)
@@ -91,8 +101,16 @@ export const SettingsPage = () => {
   if (!data) return null
 
   const saveSettings = (values: AppSettings) => {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify({ ...loadSettings(companyName), ...values }))
-    void message.success('Ayarlar yadda saxlandı')
+    window.localStorage.setItem(settingsStorageKey, JSON.stringify({ ...loadSettings(companyName, language), ...values, language }))
+    void message.success(t('settings.saved'))
+  }
+
+  const changeLanguage = (nextLanguage: AppLanguage) => {
+    setLanguage(nextLanguage)
+    const settings = { ...loadSettings(companyName, language), language: nextLanguage }
+    window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
+    form.setFieldValue('language', nextLanguage)
+    void message.success(languageSavedMessages[nextLanguage])
   }
 
   const refreshSampleData = async () => {
@@ -103,21 +121,34 @@ export const SettingsPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Ayarlar" subtitle="Şirkət, iş saatı, risk, export və AI köməkçi parametrləri" />
+      <PageTitle title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
       <section className="settings-grid">
         {settingCards.map(([title, text, icon]) => (
           <section className="panel-card" key={String(title)}>
             <div className="kpi-icon kpi-blue">{icon}</div>
-            <h2>{title}</h2>
-            <p>{text}</p>
+            <h2>{t(String(title))}</h2>
+            <p>{t(String(text))}</p>
           </section>
         ))}
       </section>
 
       <section className="content-grid">
         <section className="panel-card">
-          <h2>Əsas ayarlar</h2>
+          <h2>{t('settings.language.title')}</h2>
+          <Form layout="vertical">
+            <Form.Item label={t('settings.language.field')}>
+              <Select
+                value={language}
+                options={languageOptions.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+                onChange={changeLanguage}
+              />
+            </Form.Item>
+          </Form>
+        </section>
+
+        <section className="panel-card">
+          <h2>{t('settings.main')}</h2>
           <Form form={form} layout="vertical" onFinish={saveSettings}>
             <Form.Item label="Şirkət görünüş adı" name="companyDisplayName">
               <Input />
@@ -131,7 +162,7 @@ export const SettingsPage = () => {
             <Form.Item label="Default geofence radiusu" name="defaultGeofenceRadius">
               <InputNumber min={50} max={1000} addonAfter="m" />
             </Form.Item>
-            <Button type="primary" htmlType="submit">Yadda saxla</Button>
+            <Button type="primary" htmlType="submit">{t('settings.save')}</Button>
           </Form>
         </section>
 
@@ -150,7 +181,7 @@ export const SettingsPage = () => {
             <Form.Item label="Export formatı seçimi" name="exportFormatPreference">
               <Select options={[{ label: 'Excel', value: 'Excel' }, { label: 'CSV', value: 'CSV' }, { label: '1C XML', value: '1C XML' }]} />
             </Form.Item>
-            <Button type="primary" htmlType="submit">Yadda saxla</Button>
+            <Button type="primary" htmlType="submit">{t('settings.save')}</Button>
           </Form>
           <div className="settings-reset">
             <Button danger onClick={() => void refreshSampleData()}>Nümunə məlumatları yenilə</Button>

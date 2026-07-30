@@ -20,9 +20,10 @@ import {
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useI18n } from '../../i18n'
 
 interface SidebarItem {
-  label: string
+  labelKey: string
   path: string
   icon: ReactNode
   end?: boolean
@@ -30,45 +31,45 @@ interface SidebarItem {
 
 interface SidebarGroup {
   id: string
-  label: string
+  labelKey: string
   icon: ReactNode
   children: SidebarItem[]
 }
 
 const mainItems: SidebarItem[] = [
-  { label: 'Dashboard', path: '/', icon: <DashboardOutlined /> },
-  { label: 'Smeta', path: '/estimate', icon: <FileSearchOutlined /> },
-  { label: 'Briqadalar', path: '/crews', icon: <TeamOutlined /> },
-  { label: 'İşçilər', path: '/workers', icon: <UserOutlined /> },
-  { label: 'Gündəlik hesabatlar', path: '/daily-reports', icon: <CalendarOutlined /> },
-  { label: 'Materiallar', path: '/materials', icon: <ToolOutlined /> },
+  { labelKey: 'nav.dashboard', path: '/', icon: <DashboardOutlined /> },
+  { labelKey: 'nav.estimate', path: '/estimate', icon: <FileSearchOutlined /> },
+  { labelKey: 'nav.crews', path: '/crews', icon: <TeamOutlined /> },
+  { labelKey: 'nav.workers', path: '/workers', icon: <UserOutlined /> },
+  { labelKey: 'nav.dailyReports', path: '/daily-reports', icon: <CalendarOutlined /> },
+  { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
 ]
 
 const footerItems: SidebarItem[] = [
-  { label: 'Prorab Audit', path: '/supervisor-audit', icon: <AuditOutlined /> },
-  { label: 'Export / 1C', path: '/export', icon: <ExportOutlined /> },
-  { label: 'Ayarlar', path: '/settings', icon: <SettingOutlined /> },
+  { labelKey: 'nav.supervisorAudit', path: '/supervisor-audit', icon: <AuditOutlined /> },
+  { labelKey: 'nav.export', path: '/export', icon: <ExportOutlined /> },
+  { labelKey: 'nav.settings', path: '/settings', icon: <SettingOutlined /> },
 ]
 
 const groups: SidebarGroup[] = [
   {
     id: 'attendance',
-    label: 'Davamiyyət / Saatlar',
+    labelKey: 'nav.attendanceGroup',
     icon: <ClockCircleOutlined />,
     children: [
-      { label: 'Davamiyyət / Saatlar', path: '/daily-attendance', icon: <ClockCircleOutlined /> },
-      { label: 'Risk və gecikmələr', path: '/delays-permissions', icon: <FieldTimeOutlined /> },
-      { label: 'Maaş Hesabatı', path: '/payroll', icon: <DollarCircleOutlined /> },
+      { labelKey: 'nav.attendanceHours', path: '/daily-attendance', icon: <ClockCircleOutlined /> },
+      { labelKey: 'nav.risksDelays', path: '/delays-permissions', icon: <FieldTimeOutlined /> },
+      { labelKey: 'nav.payroll', path: '/payroll', icon: <DollarCircleOutlined /> },
     ],
   },
   {
     id: 'camera',
-    label: 'Kamera idarəetmə sistemi',
+    labelKey: 'nav.cameraGroup',
     icon: <ApiOutlined />,
     children: [
-      { label: 'Kamera cihazları', path: '/devices', icon: <ApiOutlined /> },
-      { label: 'Canlı Davamiyyət', path: '/attendance-live', icon: <ThunderboltOutlined /> },
-      { label: 'Tanınmayan üzlər', path: '/security-events', icon: <EyeInvisibleOutlined /> },
+      { labelKey: 'nav.cameraDevices', path: '/devices', icon: <ApiOutlined /> },
+      { labelKey: 'nav.liveAttendance', path: '/attendance-live', icon: <ThunderboltOutlined /> },
+      { labelKey: 'nav.unknownFaces', path: '/security-events', icon: <EyeInvisibleOutlined /> },
     ],
   },
 ]
@@ -78,18 +79,22 @@ const isActivePath = (pathname: string, item: SidebarItem) => {
   return pathname === item.path || pathname.startsWith(`${item.path}/`)
 }
 
-const SidebarLink = ({ item, child = false }: { item: SidebarItem; child?: boolean }) => (
+const SidebarLink = ({ item, child = false }: { item: SidebarItem; child?: boolean }) => {
+  const { t } = useI18n()
+  return (
   <NavLink
     to={item.path}
     end={item.end ?? item.path === '/'}
     className={({ isActive }) => `sidebar-link${child ? ' sidebar-child' : ''}${isActive ? ' active' : ''}`}
   >
     <span className="sidebar-icon">{item.icon}</span>
-    <span>{item.label}</span>
+    <span>{t(item.labelKey)}</span>
   </NavLink>
-)
+  )
+}
 
 export const Sidebar = () => {
+  const { t } = useI18n()
   const location = useLocation()
   const activeGroupIds = useMemo(
     () => new Set(groups.filter((group) => group.children.some((item) => isActivePath(location.pathname, item))).map((group) => group.id)),
@@ -113,7 +118,7 @@ export const Sidebar = () => {
         <div className="sidebar-logo">BT</div>
         <div>
           <strong>BuildTrack</strong>
-          <span>Tikinti nəzarət platforması</span>
+          <span>{t('brand.subtitle')}</span>
         </div>
       </div>
 
@@ -127,7 +132,7 @@ export const Sidebar = () => {
             onClick={() => toggleGroup('attendance')}
           >
             <span className="sidebar-icon">{groups[0].icon}</span>
-            <span>{groups[0].label}</span>
+            <span>{t(groups[0].labelKey)}</span>
             <span className="sidebar-caret">{attendanceOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
           {attendanceOpen && groups[0].children.map((item) => <SidebarLink key={item.path} item={item} child />)}
@@ -142,7 +147,7 @@ export const Sidebar = () => {
             onClick={() => toggleGroup('camera')}
           >
             <span className="sidebar-icon">{groups[1].icon}</span>
-            <span>{groups[1].label}</span>
+            <span>{t(groups[1].labelKey)}</span>
             <span className="sidebar-caret">{cameraOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
           {cameraOpen && groups[1].children.map((item) => <SidebarLink key={item.path} item={item} child />)}
