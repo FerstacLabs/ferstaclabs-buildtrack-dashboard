@@ -1,5 +1,5 @@
 ﻿import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
-import { Alert, Modal, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -34,7 +34,18 @@ const formatDuration = (minutes: number) => {
   const hours = Math.floor(safeMinutes / 60)
   const rest = safeMinutes % 60
   if (hours === 0) return `${rest} dəq`
-  return `${hours}s ${rest}dəq`
+  return `${hours} saat ${rest} dəq`
+}
+
+const calculateWorkedMinutes = (row: AttendanceSessionRow, nowMs: number) => {
+  const startMs = Date.parse(row.checkInTime)
+  if (!Number.isFinite(startMs)) return Math.max(0, row.workedMinutes ?? 0)
+
+  const endSource = row.confirmedCheckOutTime ?? row.checkOutTime
+  const endMs = endSource ? Date.parse(endSource) : nowMs
+  if (!Number.isFinite(endMs) || endMs < startMs) return Math.max(0, row.workedMinutes ?? 0)
+
+  return Math.max(0, Math.floor((endMs - startMs) / 60000))
 }
 
 const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPreview: (row: AttendanceSessionRow) => void }) => {
@@ -91,6 +102,7 @@ export const AttendanceLivePage = () => {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryWorker, setGalleryWorker] = useState<AttendanceSessionRow | null>(null)
   const [gallerySnapshots, setGallerySnapshots] = useState<AttendanceSnapshotRow[]>([])
+  const [durationNow, setDurationNow] = useState(() => Date.now())
 
   const loadSites = async () => {
     try {
@@ -144,6 +156,11 @@ export const AttendanceLivePage = () => {
   }, [siteId])
 
   useEffect(() => {
+    const timer = window.setInterval(() => setDurationNow(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     const refreshAfterSimulatorEvent = (event: Event) => {
       const customEvent = event as CustomEvent<{ siteId?: string }>
       if (!customEvent.detail?.siteId || customEvent.detail.siteId === siteId) void loadSessions(customEvent.detail?.siteId ?? siteId)
@@ -179,11 +196,14 @@ export const AttendanceLivePage = () => {
     status: worker.status,
     source: 'attendance_live_status',
   }))
-  const sessions = summary?.sessions.length ? summary.sessions : liveWorkerRows
+  const sessions = (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
+    ...session,
+    workedMinutes: calculateWorkedMinutes(session, durationNow),
+  }))
   const activeWorkersCount = summary?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0
   const totalCheckedIn = summary?.totalWorkersCheckedIn || sessions.length
   const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
-  const totalWorkedHours = summary?.totalWorkedHours ?? Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
+  const totalWorkedHours = Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -209,8 +229,15 @@ export const AttendanceLivePage = () => {
   }
 
   const columns: TableColumnsType<AttendanceSessionRow> = [
-    { title: 'İşçi', dataIndex: 'workerName', render: (value, row) => value ?? row.workerExternalId },
-    { title: 'Worker ID', dataIndex: 'workerExternalId' },
+    {
+      title: 'İşçi',
+      dataIndex: 'workerName',
+      render: (value, row) => (
+        <Tooltip title={`İşçi kodu: ${row.workerExternalId}`}>
+          <strong>{value ?? row.workerExternalId}</strong>
+        </Tooltip>
+      ),
+    },
     { title: 'İlk görünmə', dataIndex: 'checkInTimeLocal', sorter: (a, b) => a.checkInTime.localeCompare(b.checkInTime) },
     { title: 'Son görülmə', dataIndex: 'lastSeenTimeLocal', render: (value, row) => value ?? row.checkInTimeLocal ?? '-' },
     { title: 'Təsdiqli çıxış', dataIndex: 'confirmedCheckOutTimeLocal', render: (value) => value ?? 'Yoxdur' },
@@ -296,7 +323,7 @@ export const AttendanceLivePage = () => {
       >
         <div className="snapshot-preview-meta">
           <span>İşçi: {galleryWorker?.workerName ?? galleryWorker?.workerExternalId ?? '-'}</span>
-          <span>Worker ID: {galleryWorker?.workerExternalId ?? '-'}</span>
+          <span>İşçi kodu: {galleryWorker?.workerExternalId ?? '-'}</span>
           <span>Tarix: {requestedDate || '-'}</span>
         </div>
         {galleryLoading ? (

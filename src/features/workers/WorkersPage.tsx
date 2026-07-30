@@ -30,6 +30,21 @@ const sourceLabel: Record<AttendanceSource, string> = {
   ForemanTablet: 'Prorab tablet',
 }
 
+const generateNextWorkerCode = (workers: WorkerAssignment[]) => {
+  const used = new Set(workers.map((worker) => worker.workerExternalId.toUpperCase()))
+  const maxExisting = workers.reduce((max, worker) => {
+    const match = /^W-(\d{4})$/i.exec(worker.workerExternalId.trim())
+    return match ? Math.max(max, Number(match[1])) : max
+  }, 0)
+
+  for (let next = maxExisting + 1; next < 10000; next += 1) {
+    const candidate = `W-${String(next).padStart(4, '0')}`
+    if (!used.has(candidate.toUpperCase())) return candidate
+  }
+
+  return `W-${String(workers.length + 1).padStart(4, '0')}`
+}
+
 export const WorkersPage = () => {
   const store = useProjectProgressStore()
   const { addWorker, crews, deleteWorker, updateWorker, workItems } = store
@@ -71,7 +86,7 @@ export const WorkersPage = () => {
     setEditingWorker(worker)
     form.setFieldsValue(worker ?? {
       workerName: '',
-      workerExternalId: `W-${String(workers.length + 1).padStart(4, '0')}`,
+      workerExternalId: generateNextWorkerCode(workers),
       crewId: scopedCrews[0]?.id,
       role: '',
       hourlyRate: 0,
@@ -147,7 +162,9 @@ export const WorkersPage = () => {
       <Drawer title={editingWorker ? 'İşçini redaktə et' : 'Yeni işçi'} open={drawerOpen} width={520} onClose={() => setDrawerOpen(false)}>
         <Form form={form} layout="vertical" onFinish={saveWorker}>
           <Form.Item name="workerName" label="İşçi adı" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="workerExternalId" label="Xarici işçi ID" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="workerExternalId" label="İşçi kodu" rules={[{ required: true }]} extra="Sistem tərəfindən avtomatik verilir">
+            <Input readOnly={!editingWorker} />
+          </Form.Item>
           <Form.Item name="crewId" label="Briqada" rules={[{ required: true }]}><Select showSearch options={crewOptions} /></Form.Item>
           <Form.Item name="activeWorkItemId" label="Aktiv iş sətiri"><Select allowClear showSearch options={itemOptions} /></Form.Item>
           <Space.Compact block>

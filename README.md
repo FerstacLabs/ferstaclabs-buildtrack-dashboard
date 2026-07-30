@@ -60,9 +60,11 @@ For the tested Dahua terminal, Smart Event can send the same `UserID` for differ
 DAHUA_IDENTITY_RESOLUTION_MODE=cardname_primary
 DAHUA_AUTO_PROVISION_CAMERA_WORKERS=true
 DAHUA_MIN_CARDNAME_LENGTH_FOR_AUTOPROVISION=3
+DAHUA_CARDNAME_AUTOPROVISION_ALLOWLIST=ilham,tahira
+DAHUA_CARDNAME_AUTOPROVISION_DENYLIST=Bx,fj,p1x,J4myH,uiryH
 ```
 
-`cardname_primary` resolves workers by trusted, high-confidence Smart Event `CardName` first. If enabled, BuildTrack auto-creates a worker for valid camera names such as `ilham` or `tahira`, while suspicious binary candidates such as `Bx`, `fj`, `p1x`, or `J4myH` remain security-review events.
+`cardname_primary` resolves workers by trusted, high-confidence Smart Event `CardName` first. If enabled, BuildTrack auto-creates a worker for valid camera names such as `ilham` or `tahira` using normal system worker codes like `W-0001`, while suspicious binary candidates such as `Bx`, `fj`, `p1x`, `J4myH`, or `uiryH` remain security-review events.
 
 Then recreate the backend API container:
 

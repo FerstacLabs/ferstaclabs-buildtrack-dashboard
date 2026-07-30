@@ -256,7 +256,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         var tahira = new Worker
         {
             SiteId = Guid.NewGuid(),
-            ExternalWorkerCode = "tahira",
+            ExternalWorkerCode = "W-0002",
             FullName = "tahira",
             Status = WorkerStatus.Active,
         };
@@ -271,11 +271,11 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
             autoProvisioned: true);
         DahuaSmartEventClassification.MarkRecognizedAttendance(resolved, tahira);
 
-        Assert.Equal("tahira", resolved.UserId);
+        Assert.Equal("W-0002", resolved.UserId);
         Assert.Equal("tahira", resolved.CardName);
         Assert.Equal("1", resolved.RawFields["UserID"]);
         Assert.Equal("1", resolved.RawFields["CameraUserID"]);
-        Assert.Equal("tahira", resolved.RawFields["WorkerExternalId"]);
+        Assert.Equal("W-0002", resolved.RawFields["WorkerExternalId"]);
         Assert.Equal("tahira", resolved.RawFields["ReceivedCardName"]);
         Assert.Equal("tahira", resolved.RawFields["ResolvedWorkerName"]);
         Assert.Equal("CardName", resolved.RawFields["IdentityResolvedBy"]);
@@ -291,6 +291,7 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
     [InlineData("ilham", true)]
     [InlineData("tahira", true)]
     [InlineData("J4myH", false)]
+    [InlineData("uiryH", false)]
     [InlineData("Bx", false)]
     [InlineData("fj", false)]
     [InlineData("p1x", false)]
@@ -299,6 +300,27 @@ public sealed class DahuaNetSdkSmartEventDecoderTests
         var valid = DahuaCameraCardNamePolicy.TryValidate(cardName, 3, out _, out _, out _);
 
         Assert.Equal(expectedValid, valid);
+    }
+
+    [Fact]
+    public void CardNamePolicy_AllowlistLimitsAutoProvisionNames()
+    {
+        Assert.True(DahuaCameraCardNamePolicy.TryValidate("tahira", 3, ["Bx", "uiryH"], ["ilham", "tahira"], out _, out _, out _));
+        Assert.False(DahuaCameraCardNamePolicy.TryValidate("rauf", 3, ["Bx", "uiryH"], ["ilham", "tahira"], out _, out _, out var reason));
+        Assert.Equal("card name is not in auto-provision allowlist", reason);
+    }
+
+    [Fact]
+    public void WorkerCodeGenerator_UsesNextSystemWorkerCode()
+    {
+        var workers = new[]
+        {
+            new Worker { ExternalWorkerCode = "1", FullName = "ilham" },
+            new Worker { ExternalWorkerCode = "W-0001", FullName = "existing" },
+            new Worker { ExternalWorkerCode = "tahira", FullName = "old tahira" },
+        };
+
+        Assert.Equal("W-0002", DahuaWorkerCodeGenerator.NextWorkerCode(workers));
     }
 
     [Fact]

@@ -1521,6 +1521,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var effectiveAllowCardNameMismatchAttendance = identityResolutionMode == DahuaIdentityResolutionMode.StrictUserId && allowCardNameMismatchAttendance;
         var autoProvisionCameraWorkers = IsEnabled(configuration["DAHUA_AUTO_PROVISION_CAMERA_WORKERS"]);
         var minCardNameLength = ParsePositiveInt(configuration["DAHUA_MIN_CARDNAME_LENGTH_FOR_AUTOPROVISION"], 3);
+        var cardNameAutoProvisionAllowlist = ParseCsv(configuration["DAHUA_CARDNAME_AUTOPROVISION_ALLOWLIST"]);
+        var cardNameAutoProvisionDenylist = ParseCsv(configuration["DAHUA_CARDNAME_AUTOPROVISION_DENYLIST"]);
 
         var mappedWorkers = string.IsNullOrWhiteSpace(rawCameraUserId)
             ? new List<Worker>()
@@ -1561,6 +1563,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 rawCameraUserId,
                 autoProvisionCameraWorkers,
                 minCardNameLength,
+                cardNameAutoProvisionDenylist,
+                cardNameAutoProvisionAllowlist,
                 CancellationToken.None);
 
             if (cardNameResolution.MappingConflict)
@@ -1712,6 +1716,8 @@ public sealed class DahuaNetSdkActiveRegisterService(
         string? rawCameraUserId,
         bool autoProvisionCameraWorkers,
         int minCardNameLength,
+        IReadOnlyCollection<string> cardNameDenylist,
+        IReadOnlyCollection<string> cardNameAllowlist,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(trustedRecord.StatusRaw, "1", StringComparison.OrdinalIgnoreCase))
@@ -1735,7 +1741,14 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var receivedCardName = trustedRecord.RawFields.GetValueOrDefault("ReceivedCardName")
                                ?? trustedRecord.RawFields.GetValueOrDefault("TrustedCardName")
                                ?? trustedRecord.CardName;
-        if (!DahuaCameraCardNamePolicy.TryValidate(receivedCardName, minCardNameLength, out var displayName, out var normalizedName, out var validationReason))
+        if (!DahuaCameraCardNamePolicy.TryValidate(
+                receivedCardName,
+                minCardNameLength,
+                cardNameDenylist,
+                cardNameAllowlist,
+                out var displayName,
+                out var normalizedName,
+                out var validationReason))
         {
             return CardNameIdentityResolutionResult.Rejected(validationReason ?? "CardName is not valid for identity resolution");
         }
@@ -1746,8 +1759,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             .ToListAsync(cancellationToken);
 
         var matchingWorkers = activeSiteWorkers
-            .Where(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.FullName), normalizedName, StringComparison.OrdinalIgnoreCase)
-                             || string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), normalizedName, StringComparison.OrdinalIgnoreCase))
+            .Where(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.FullName), normalizedName, StringComparison.OrdinalIgnoreCase))
             .GroupBy(worker => worker.Id)
             .Select(group => group.First())
             .ToList();
@@ -1769,7 +1781,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             var allSiteWorkers = await db.Workers.AsNoTracking()
                 .Where(x => x.SiteId == device.SiteId)
                 .ToListAsync(cancellationToken);
-            var externalWorkerCode = BuildUniqueCameraWorkerExternalCode(device, normalizedName, allSiteWorkers);
+            var externalWorkerCode = DahuaWorkerCodeGenerator.NextWorkerCode(allSiteWorkers);
             resolvedWorker = new Worker
             {
                 SiteId = device.SiteId,
@@ -1799,31 +1811,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
             autoProvisioned);
         record.RawFields["CardNamePrimaryNormalizedName"] = normalizedName;
         record.RawFields["CardNameValidation"] = "Valid";
+        record.RawFields["CardNameAllowlistEnabled"] = cardNameAllowlist.Count > 0 ? "true" : "false";
 
         return CardNameIdentityResolutionResult.Resolved(record, resolvedWorker, userIdCollision, originalUserIdMappedWorkerName, autoProvisioned);
-    }
-
-    private static string BuildUniqueCameraWorkerExternalCode(Device device, string normalizedName, IReadOnlyCollection<Worker> siteWorkers)
-    {
-        var preferred = normalizedName.Length <= 80 ? normalizedName : normalizedName[..80];
-        if (!siteWorkers.Any(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), preferred, StringComparison.OrdinalIgnoreCase)))
-        {
-            return preferred;
-        }
-
-        var devicePrefix = $"camera-{device.Id.ToString("N")[..8]}-";
-        var maxBaseLength = Math.Max(1, 80 - devicePrefix.Length - 3);
-        var baseName = normalizedName.Length <= maxBaseLength ? normalizedName : normalizedName[..maxBaseLength];
-        for (var index = 1; index < 100; index++)
-        {
-            var candidate = $"{devicePrefix}{baseName}-{index}";
-            if (!siteWorkers.Any(worker => string.Equals(DahuaCameraCardNamePolicy.NormalizeForMatching(worker.ExternalWorkerCode), candidate, StringComparison.OrdinalIgnoreCase)))
-            {
-                return candidate;
-            }
-        }
-
-        return $"{devicePrefix}{Guid.NewGuid():N}"[..80];
     }
 
     private static string ToConfigValue(DahuaIdentityResolutionMode mode) => mode switch
@@ -2307,6 +2297,11 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
     private static int ParseInt(string? value, int defaultValue) =>
         int.TryParse(value, out var parsed) ? parsed : defaultValue;
+
+    private static string[] ParseCsv(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? []
+            : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static TimeZoneInfo ResolveTimeZone(string timeZoneId)
     {

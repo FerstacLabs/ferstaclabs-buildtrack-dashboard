@@ -13,14 +13,47 @@ public static class DahuaCameraCardNamePolicy
         "cj",
         "kf",
         "p1x",
-        "j4myh"
+        "j4myh",
+        "uiryh"
     };
 
     public static bool TryValidate(string? value, int minLength, out string displayName, out string normalizedName, out string? reason)
     {
+        return TryValidate(value, minLength, [], [], out displayName, out normalizedName, out reason);
+    }
+
+    public static bool TryValidate(
+        string? value,
+        int minLength,
+        IReadOnlyCollection<string> denylist,
+        IReadOnlyCollection<string> allowlist,
+        out string displayName,
+        out string normalizedName,
+        out string? reason)
+    {
         displayName = NormalizeDisplayName(value);
         normalizedName = NormalizeForMatching(displayName);
         reason = null;
+
+        var normalizedAllowlist = allowlist
+            .Select(NormalizeForMatching)
+            .Where(item => item.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (normalizedAllowlist.Count > 0 && !normalizedAllowlist.Contains(normalizedName))
+        {
+            reason = "card name is not in auto-provision allowlist";
+            return false;
+        }
+
+        var normalizedDenylist = denylist
+            .Select(NormalizeForMatching)
+            .Where(item => item.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (normalizedDenylist.Contains(normalizedName))
+        {
+            reason = "card name is in auto-provision denylist";
+            return false;
+        }
 
         var effectiveMinLength = Math.Clamp(minLength, 2, 64);
         if (displayName.Length < effectiveMinLength)
@@ -90,11 +123,23 @@ public static class DahuaCameraCardNamePolicy
             return false;
         }
 
+        if (HasSuspiciousMixedCase(displayName))
+        {
+            reason = "card name has random-looking mixed case";
+            return false;
+        }
+
         var asciiLetters = normalizedName.Count(ch => ch is >= 'a' and <= 'z');
-        var vowels = normalizedName.Count(ch => "aeiouaeiou".Contains(ch, StringComparison.OrdinalIgnoreCase));
+        var vowels = normalizedName.Count(ch => "aeiouəıöüаеёиоуыэюя".Contains(ch, StringComparison.OrdinalIgnoreCase));
         if (normalizedName.Length <= 3 && asciiLetters == normalizedName.Length && vowels == 0)
         {
             reason = "short consonant-only card name looks suspicious";
+            return false;
+        }
+
+        if (asciiLetters == normalizedName.Length && vowels == 0)
+        {
+            reason = "latin card name has no vowel";
             return false;
         }
 
@@ -117,5 +162,23 @@ public static class DahuaCameraCardNamePolicy
         }
 
         return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static bool HasSuspiciousMixedCase(string displayName)
+    {
+        foreach (var token in displayName.Split([' ', '-', '_', '\''], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var letters = token.Where(char.IsLetter).ToArray();
+            if (letters.Length < 2) continue;
+
+            var hasUpper = letters.Any(char.IsUpper);
+            var hasLower = letters.Any(char.IsLower);
+            if (!hasUpper || !hasLower) continue;
+
+            var titleCase = char.IsUpper(letters[0]) && letters.Skip(1).All(ch => !char.IsUpper(ch));
+            if (!titleCase) return true;
+        }
+
+        return false;
     }
 }

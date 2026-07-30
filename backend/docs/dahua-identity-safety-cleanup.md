@@ -96,6 +96,48 @@ order by ae."CreatedAt" desc;
 
 If these rows should be excluded from live attendance, mark them high risk with the update statement above after manual review. Do not run broad deletes against production attendance history.
 
+## Remove bad auto-provisioned test workers
+
+After `cardname_primary` was introduced, early test runs may have created workers from corrupted Smart Event names such as `uiryH`. Review first, then delete only confirmed test rows:
+
+```sql
+select *
+from workers
+where lower("FullName") in ('uiryh', 'j4myh', 'bx', 'fj', 'p1x')
+   or lower("ExternalWorkerCode") in ('uiryh', 'j4myh', 'bx', 'fj', 'p1x');
+```
+
+```sql
+delete from workers
+where lower("FullName") in ('uiryh', 'j4myh', 'bx', 'fj', 'p1x')
+   or lower("ExternalWorkerCode") in ('uiryh', 'j4myh', 'bx', 'fj', 'p1x');
+```
+
+For new camera auto-provisioned workers, BuildTrack now generates normal system codes like `W-0001`, `W-0002`. If a demo worker was previously created with `ExternalWorkerCode='tahira'`, update it manually after checking for conflicts:
+
+```sql
+update workers
+set "ExternalWorkerCode" = 'W-0002'
+where lower("FullName") = 'tahira'
+  and lower("ExternalWorkerCode") = 'tahira'
+  and not exists (
+    select 1 from workers existing
+    where existing."SiteId" = workers."SiteId"
+      and existing."ExternalWorkerCode" = 'W-0002'
+  );
+```
+
+Then update only the matching attendance rows if they are confirmed Tahira rows:
+
+```sql
+update attendance_events
+set "WorkerExternalId" = 'W-0002',
+    "RawPayloadJson" = jsonb_set(coalesce("RawPayloadJson", '{}'::jsonb), '{ResolvedWorkerExternalId}', '"W-0002"', true)
+where lower("WorkerName") = 'tahira'
+  and "Source" = 'dahua_active_register'
+  and "WorkerExternalId" = 'tahira';
+```
+
 ## Optional review-event copy
 
 If a reviewed audit trail is needed, copy each suspicious row into `security_events` as `IdentityMismatch` with the same snapshot path before marking it high risk. Keep this as a controlled admin operation so real attendance history is not silently rewritten.
