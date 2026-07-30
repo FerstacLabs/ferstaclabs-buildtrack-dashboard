@@ -2,6 +2,7 @@ import { createContext, createElement, useCallback, useContext, useMemo, useStat
 import { az } from './az'
 import { en } from './en'
 import { ru } from './ru'
+import { useAutoTranslateUi } from './useAutoTranslateUi'
 
 export type AppLanguage = 'az' | 'en' | 'ru'
 
@@ -35,6 +36,7 @@ const I18nContext = createContext<I18nContextValue | null>(null)
 
 export const I18nProvider = ({ children }: { children: ReactNode }) => {
   const [language, setLanguageState] = useState<AppLanguage>(getInitialLanguage)
+  useAutoTranslateUi(language)
 
   const setLanguage = useCallback((nextLanguage: AppLanguage) => {
     setLanguageState(nextLanguage)
