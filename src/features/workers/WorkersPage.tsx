@@ -48,7 +48,7 @@ const generateNextWorkerCode = (workers: WorkerAssignment[]) => {
 export const WorkersPage = () => {
   const store = useProjectProgressStore()
   const { addWorker, crews, deleteWorker, updateWorker, workItems } = store
-  const selectedObjectId = store.selectedObjectIdByPage.workers ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
   const [form] = Form.useForm<WorkerFormValues>()

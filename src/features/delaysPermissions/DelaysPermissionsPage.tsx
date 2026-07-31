@@ -14,7 +14,7 @@ import { useProjectProgressStore } from '../projectProgress/projectProgressStore
 
 export const DelaysPermissionsPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.delays ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const rows = getDelayRowsByObject(store, selectedObjectId)
   const workers = getWorkersByObject(store, selectedObjectId)
   const lateCount = rows.reduce((sum, row) => sum + row.delayCount, 0)

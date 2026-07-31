@@ -51,7 +51,7 @@ const trendData = [
 
 export const DashboardPage = () => {
   const data = useProjectProgressStore()
-  const selectedObjectId = data.selectedObjectIdByPage.dashboard ?? ALL_OBJECTS_ID
+  const selectedObjectId = data.selectedObjectId ?? ALL_OBJECTS_ID
   const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const scopedStages = getStagesByObject(data, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(data, selectedObjectId)

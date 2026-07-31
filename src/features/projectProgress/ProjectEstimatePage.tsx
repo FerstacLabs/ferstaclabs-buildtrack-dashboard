@@ -104,7 +104,7 @@ export const ProjectEstimatePage = () => {
     updateStage,
     updateWorkItem,
   } = store
-  const selectedObjectId = store.selectedObjectIdByPage.estimate ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const scopedStages = getStagesByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)

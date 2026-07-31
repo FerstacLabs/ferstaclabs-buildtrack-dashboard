@@ -29,7 +29,7 @@ interface SiteHoursPanelRow {
 
 export const SiteHoursPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.siteHours ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const objects = selectedObjectId === ALL_OBJECTS_ID ? getObjects(store) : getObjects(store).filter((object) => object.id === selectedObjectId)
   const rows: SiteHoursPanelRow[] = objects.map((object) => {
     const workers = getWorkersByObject(store, object.id)

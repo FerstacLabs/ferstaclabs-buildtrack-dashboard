@@ -65,31 +65,39 @@ export const useAutoTranslateUi = (language: AppLanguage) => {
     if (typeof document === 'undefined') return undefined
 
     let frame = 0
+    let observer: MutationObserver | null = null
+    const observe = () => {
+      observer?.observe(document.body, {
+        attributes: true,
+        attributeFilter: [...translatedAttributeNames],
+        childList: true,
+        subtree: true,
+      })
+    }
+
     const scan = () => {
       window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(() => scanNode(document.body, language))
+      frame = window.requestAnimationFrame(() => {
+        observer?.disconnect()
+        scanNode(document.body, language)
+        observe()
+      })
     }
 
     scan()
-    const observer = new MutationObserver((mutations) => {
+    observer = new MutationObserver((mutations) => {
       let shouldScan = false
       mutations.forEach((mutation) => {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) shouldScan = true
-        if (mutation.type === 'characterData' || mutation.type === 'attributes') shouldScan = true
+        if (mutation.type === 'attributes') shouldScan = true
       })
       if (shouldScan) scan()
     })
 
-    observer.observe(document.body, {
-      attributes: true,
-      attributeFilter: [...translatedAttributeNames],
-      characterData: true,
-      childList: true,
-      subtree: true,
-    })
+    observe()
 
     return () => {
-      observer.disconnect()
+      observer?.disconnect()
       window.cancelAnimationFrame(frame)
     }
   }, [language])

@@ -21,7 +21,7 @@ const auditColor: Record<AuditPanelRow['auditStatus'], string> = {
 
 export const SupervisorAuditPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.audit ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const rows = getAuditRowsByObject(store, selectedObjectId)
   const manual = rows.reduce((sum, row) => sum + row.manualEntries, 0)
   const changes = rows.reduce((sum, row) => sum + row.corrections, 0)

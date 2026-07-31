@@ -38,7 +38,7 @@ const statusColor: Record<DailyReportStatus, string> = {
 export const DailyReportsPage = () => {
   const store = useProjectProgressStore()
   const { addDailyReport, crews, deleteDailyReport, project, updateDailyReport, workItems } = store
-  const selectedObjectId = store.selectedObjectIdByPage.dailyReports ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const dailyReports = getDailyReportsByObject(store, selectedObjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)

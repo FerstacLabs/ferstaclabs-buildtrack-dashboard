@@ -27,7 +27,7 @@ interface MaterialFormValues {
 export const MaterialsPage = () => {
   const store = useProjectProgressStore()
   const { addMaterial, deleteMaterial, stages, updateMaterial } = store
-  const selectedObjectId = store.selectedObjectIdByPage.materials ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const materials = getMaterialsByObject(store, selectedObjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)

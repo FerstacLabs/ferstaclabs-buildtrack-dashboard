@@ -22,7 +22,7 @@ const statusColor: Record<AttendancePanelRow['status'], string> = {
 
 export const DailyAttendancePage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.attendance ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const rows = getAttendanceRowsByObject(store, selectedObjectId)
   const workers = getWorkersByObject(store, selectedObjectId)
   const present = new Set(rows.map((row) => row.workerId)).size

@@ -123,7 +123,7 @@ export const AiAssistant = () => {
   const speechRecognition = getSpeechRecognition()
   const messages = data.assistantMessages
   const pageFilterKey = pageObjectFilterKeyByPath.find(([path]) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)))?.[1] ?? 'dashboard'
-  const selectedObjectId = data.selectedObjectIdByPage[pageFilterKey] ?? ALL_OBJECTS_ID
+  const selectedObjectId = data.selectedObjectId ?? data.selectedObjectIdByPage[pageFilterKey] ?? ALL_OBJECTS_ID
   const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 

@@ -15,7 +15,7 @@ import { useProjectProgressStore } from '../projectProgress/projectProgressStore
 
 export const ExportPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.export ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const validationRows = getExportRowsByObject(store, selectedObjectId)
   const ready = validationRows.filter((row) => row.exportStatus === 'Hazır').length
   const errors = validationRows.filter((row) => row.exportStatus === 'Xəta').length

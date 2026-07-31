@@ -9,7 +9,7 @@ import { calculateStageProgress, statusColor, statusLabel, useProjectProgressSto
 
 export const ProjectTimelinePage = () => {
   const data = useProjectProgressStore()
-  const selectedObjectId = data.selectedObjectIdByPage.timeline ?? ALL_OBJECTS_ID
+  const selectedObjectId = data.selectedObjectId ?? ALL_OBJECTS_ID
   const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const crewNameById = new Map(data.crews.map((crew) => [crew.id, crew.name]))
   const stages = getStagesByObject(data, selectedObjectId)

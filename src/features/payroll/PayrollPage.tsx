@@ -21,7 +21,7 @@ const statusColor: Record<ProjectPayrollRow['exportStatus'], string> = {
 
 export const PayrollPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.payroll ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const [crewFilter, setCrewFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const allRows = getPayrollRowsByObject(store, selectedObjectId)

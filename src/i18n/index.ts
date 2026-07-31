@@ -1,4 +1,4 @@
-import { createContext, createElement, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { az } from './az'
 import { en } from './en'
 import { ru } from './ru'
@@ -38,9 +38,13 @@ export const I18nProvider = ({ children }: { children: ReactNode }) => {
   const [language, setLanguageState] = useState<AppLanguage>(getInitialLanguage)
   useAutoTranslateUi(language)
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') document.documentElement.lang = language
+  }, [language])
+
   const setLanguage = useCallback((nextLanguage: AppLanguage) => {
     setLanguageState(nextLanguage)
-    window.localStorage.setItem(languageStorageKey, nextLanguage)
+    if (typeof window !== 'undefined') window.localStorage.setItem(languageStorageKey, nextLanguage)
   }, [])
 
   const t = useCallback((key: string, fallback?: string) => (

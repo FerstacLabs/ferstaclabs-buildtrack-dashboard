@@ -15,7 +15,7 @@ import { useProjectProgressStore } from '../projectProgress/projectProgressStore
 
 export const RiskWorkersPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectIdByPage.riskWorkers ?? ALL_OBJECTS_ID
+  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
   const rows = getRiskRowsByObject(store, selectedObjectId)
   const critical = rows.filter((row) => row.riskLevel === 'Kritik').length
   const high = rows.filter((row) => row.riskLevel === 'Yüksək').length
