@@ -1,7 +1,7 @@
 import { CheckCircleOutlined, DownloadOutlined, FileExcelOutlined, FileTextOutlined, WarningOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { Button } from 'antd'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -10,12 +10,13 @@ import { StatusBadge } from '../../components/ui/StatusBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { exportRowsTo1CMock, exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getExportRowsByObject, type ExportPanelRow } from '../projectProgress/projectSelectors'
+import { getExportRowsByObject, type ExportPanelRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 export const ExportPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const validationRows = getExportRowsByObject(store, selectedObjectId)
   const ready = validationRows.filter((row) => row.exportStatus === 'Hazır').length
   const errors = validationRows.filter((row) => row.exportStatus === 'Xəta').length
@@ -38,7 +39,7 @@ export const ExportPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Export / 1C Mərkəzi" extra={<ObjectFilter pageKey="export" />} />
+      <PageTitle title="Export / 1C Mərkəzi" extra={<ProjectSelect pageKey="export" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<CheckCircleOutlined />} title="Hazır sətir" value={formatNumber(ready)} trend="export üçün hazır" tone="green" />

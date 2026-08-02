@@ -13,14 +13,13 @@ import type {
   WorkStage,
   WorkerAssignment,
 } from '../../types/projectProgress'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { projectProgressSeed, villaEstimateSummary } from './projectProgressSeed'
 
 interface ProjectProgressState extends ProjectProgressData {
   applyBackendData: (data: Partial<ProjectProgressData>) => void
   refreshSeedData: () => void
   resetDemoData: () => void
-  setSelectedObjectId: (objectId: string) => void
-  setSelectedObjectForPage: (pageKey: string, objectId: string) => void
   addObject: (object: Omit<ConstructionObject, 'id' | 'projectId' | 'status'> & Partial<Pick<ConstructionObject, 'projectId' | 'status'>>) => string
   addStage: (stage: Omit<WorkStage, 'id' | 'order'>) => void
   updateStage: (stageId: string, patch: Partial<WorkStage>) => void
@@ -45,70 +44,6 @@ interface ProjectProgressState extends ProjectProgressData {
 }
 
 const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-
-const allObjectsId = 'all'
-export const selectedProjectStorageKey = 'buildtrack.selectedProjectId'
-
-const objectFilterPageKeys = [
-  'dashboard',
-  'estimate',
-  'crews',
-  'workers',
-  'timeline',
-  'dailyReports',
-  'materials',
-  'attendance',
-  'siteHours',
-  'riskWorkers',
-  'dailyAttendance',
-  'delays',
-  'payroll',
-  'audit',
-  'supervisorAudit',
-  'export',
-  'devices',
-  'attendanceLive',
-  'securityEvents',
-]
-
-const normalizeSelectedObjectId = (objectId: string | undefined, objects: { id: string }[]) =>
-  objectId && (objectId === allObjectsId || objects.some((object) => object.id === objectId)) ? objectId : allObjectsId
-
-const readStoredSelectedObjectId = () => {
-  if (typeof window === 'undefined') return undefined
-  try {
-    return window.localStorage.getItem(selectedProjectStorageKey) ?? undefined
-  } catch {
-    return undefined
-  }
-}
-
-const persistSelectedObjectId = (objectId: string) => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(selectedProjectStorageKey, objectId)
-  } catch {
-    // Local storage can be unavailable in private mode; Zustand persistence remains the backup.
-  }
-}
-
-const debugSelectedObjectChange = (source: string, previous: string | undefined, next: string, pageKey?: string) => {
-  if (!import.meta.env.DEV || previous === next) return
-  console.debug('[BuildTrack] selectedProjectId changed', {
-    source,
-    pageKey,
-    previous,
-    next,
-  })
-}
-
-const createSyncedObjectSelections = (objectId: string, current: Record<string, string> = {}) => ({
-  ...current,
-  ...Object.fromEntries(objectFilterPageKeys.map((key) => [key, objectId])),
-})
-
-const firstSavedObjectSelection = (selections?: Record<string, string>) =>
-  selections ? Object.values(selections).find((value) => value && value !== allObjectsId) : undefined
 
 const todayKey = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Baku' }).format(new Date())
 
@@ -233,37 +168,16 @@ export const statusColor: Record<ProjectWorkStatus, string> = {
 
 export const useProjectProgressStore = create<ProjectProgressState>()(
   persist(
-    (set) => {
-      const initialSelectedObjectId = normalizeSelectedObjectId(
-        readStoredSelectedObjectId() ?? projectProgressSeed.selectedObjectId,
-        projectProgressSeed.objects,
-      )
-
-      return {
+    (set) => ({
         ...projectProgressSeed,
-        selectedObjectId: initialSelectedObjectId,
-        selectedObjectIdByPage: createSyncedObjectSelections(initialSelectedObjectId, projectProgressSeed.selectedObjectIdByPage),
         applyBackendData: (data) => set((state) => {
         const objects = data.objects?.length ? data.objects : state.objects
-        const previousSelectedObjectId = state.selectedObjectId
-        const selectedObjectId = normalizeSelectedObjectId(
-          data.selectedObjectId
-            ?? state.selectedObjectId
-            ?? readStoredSelectedObjectId()
-            ?? data.selectedObjectIdByPage?.dashboard
-            ?? firstSavedObjectSelection(data.selectedObjectIdByPage),
-          objects,
-        )
-        persistSelectedObjectId(selectedObjectId)
-        debugSelectedObjectChange('applyBackendData', previousSelectedObjectId, selectedObjectId)
         return {
           ...state,
           project: data.project ?? state.project,
           projects: data.projects?.length ? data.projects : state.projects,
           activeProjectId: data.activeProjectId ?? state.activeProjectId,
           objects,
-          selectedObjectId,
-          selectedObjectIdByPage: createSyncedObjectSelections(selectedObjectId, data.selectedObjectIdByPage ?? state.selectedObjectIdByPage),
           estimateVersions: data.estimateVersions?.length ? data.estimateVersions : state.estimateVersions,
           summary: data.summary ?? state.summary,
           stages: data.stages?.length ? data.stages : state.stages,
@@ -278,46 +192,10 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           risks: data.risks?.length ? data.risks : state.risks,
         }
       }),
-      refreshSeedData: () => {
-        persistSelectedObjectId(projectProgressSeed.selectedObjectId)
-        set({
-          ...projectProgressSeed,
-          selectedObjectId: projectProgressSeed.selectedObjectId,
-          selectedObjectIdByPage: createSyncedObjectSelections(projectProgressSeed.selectedObjectId, projectProgressSeed.selectedObjectIdByPage),
-        })
-      },
-      resetDemoData: () => {
-        persistSelectedObjectId(projectProgressSeed.selectedObjectId)
-        set({
-          ...projectProgressSeed,
-          selectedObjectId: projectProgressSeed.selectedObjectId,
-          selectedObjectIdByPage: createSyncedObjectSelections(projectProgressSeed.selectedObjectId, projectProgressSeed.selectedObjectIdByPage),
-        })
-      },
-      setSelectedObjectId: (objectId) => set((state) => {
-        const selectedObjectId = normalizeSelectedObjectId(objectId, state.objects)
-        persistSelectedObjectId(selectedObjectId)
-        debugSelectedObjectChange('setSelectedObjectId', state.selectedObjectId, selectedObjectId)
-        return {
-          selectedObjectId,
-          selectedObjectIdByPage: createSyncedObjectSelections(selectedObjectId, state.selectedObjectIdByPage),
-        }
-      }),
-      setSelectedObjectForPage: (pageKey, objectId) => set((state) => {
-        const selectedObjectId = normalizeSelectedObjectId(objectId, state.objects)
-        persistSelectedObjectId(selectedObjectId)
-        debugSelectedObjectChange('setSelectedObjectForPage', state.selectedObjectId, selectedObjectId, pageKey)
-        return {
-          selectedObjectId,
-          selectedObjectIdByPage: {
-            ...createSyncedObjectSelections(selectedObjectId, state.selectedObjectIdByPage),
-            [pageKey]: selectedObjectId,
-          },
-        }
-      }),
+      refreshSeedData: () => set(projectProgressSeed),
+      resetDemoData: () => set(projectProgressSeed),
       addObject: (object) => {
         const objectId = createId('object')
-        persistSelectedObjectId(objectId)
         set((state) => ({
           objects: [
             ...state.objects,
@@ -328,11 +206,8 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
               status: object.status ?? 'NotStarted',
             },
           ],
-          selectedObjectId: objectId,
-          selectedObjectIdByPage: {
-            ...createSyncedObjectSelections(objectId, state.selectedObjectIdByPage),
-          },
         }))
+        useProjectSelectionStore.getState().setSelectedProjectId(objectId)
         return objectId
       },
       addStage: (stage) => set((state) => ({
@@ -439,8 +314,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         ],
       })),
         clearAssistantMessages: () => set({ assistantMessages: [] }),
-      }
-    },
+    }),
     {
       name: 'buildtrack-project-progress',
       partialize: (state) => ({
@@ -448,8 +322,6 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         projects: state.projects,
         activeProjectId: state.activeProjectId,
         objects: state.objects,
-        selectedObjectId: state.selectedObjectId,
-        selectedObjectIdByPage: state.selectedObjectIdByPage,
         estimateVersions: state.estimateVersions,
         summary: state.summary ?? villaEstimateSummary,
         stages: state.stages,
@@ -464,21 +336,13 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         risks: state.risks,
         assistantMessages: state.assistantMessages,
       }),
-      version: 6,
+      version: 7,
       migrate: (persisted) => {
         const saved = persisted as Partial<ProjectProgressData>
         const hasIncompleteSeedWorkers = !saved.workerAssignments?.length || saved.workerAssignments.length < 20
         const hasIncompleteObjects = !saved.objects?.length || saved.objects.length < projectProgressSeed.objects.length
         const shouldRefreshObjectPortfolio = hasIncompleteObjects || hasIncompleteSeedWorkers
         const objects = shouldRefreshObjectPortfolio ? projectProgressSeed.objects : saved.objects ?? projectProgressSeed.objects
-        const selectedObjectId = normalizeSelectedObjectId(
-          readStoredSelectedObjectId()
-            ?? saved.selectedObjectId
-            ?? saved.selectedObjectIdByPage?.dashboard
-            ?? firstSavedObjectSelection(saved.selectedObjectIdByPage),
-          objects,
-        )
-        persistSelectedObjectId(selectedObjectId)
         const workerAssignments = shouldRefreshObjectPortfolio
           ? projectProgressSeed.workerAssignments
           : saved.workerAssignments ?? projectProgressSeed.workerAssignments
@@ -489,8 +353,6 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           projects: saved.projects?.length ? saved.projects : [saved.project ?? projectProgressSeed.project],
           activeProjectId: saved.activeProjectId ?? saved.project?.id ?? projectProgressSeed.activeProjectId,
           objects,
-          selectedObjectId,
-          selectedObjectIdByPage: createSyncedObjectSelections(selectedObjectId, saved.selectedObjectIdByPage ?? projectProgressSeed.selectedObjectIdByPage),
           stages: shouldRefreshObjectPortfolio ? projectProgressSeed.stages : saved.stages ?? projectProgressSeed.stages,
           workItems: shouldRefreshObjectPortfolio ? projectProgressSeed.workItems : saved.workItems ?? projectProgressSeed.workItems,
           crews: shouldRefreshObjectPortfolio ? projectProgressSeed.crews : saved.crews ?? projectProgressSeed.crews,

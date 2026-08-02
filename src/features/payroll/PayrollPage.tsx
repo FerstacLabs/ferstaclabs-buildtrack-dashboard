@@ -1,15 +1,16 @@
 import { DollarCircleOutlined, DownloadOutlined, FileExcelOutlined, FileTextOutlined, WalletOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { Select, Space, Table, Tag } from 'antd'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { exportRowsTo1CMock, exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getPayrollRowsByObject, type ProjectPayrollRow } from '../projectProgress/projectSelectors'
+import { getPayrollRowsByObject, type ProjectPayrollRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { useState } from 'react'
 
 const statusColor: Record<ProjectPayrollRow['exportStatus'], string> = {
@@ -21,7 +22,7 @@ const statusColor: Record<ProjectPayrollRow['exportStatus'], string> = {
 
 export const PayrollPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const [crewFilter, setCrewFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const allRows = getPayrollRowsByObject(store, selectedObjectId)
@@ -78,7 +79,7 @@ export const PayrollPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="Maaş Hesabatı" subtitle={`${store.project.name} üzrə işçi saatları, tariflər və payroll hesablaması`} extra={<ObjectFilter pageKey="payroll" />} />
+      <PageTitle title="Maaş Hesabatı" subtitle={`${store.project.name} üzrə işçi saatları, tariflər və payroll hesablaması`} extra={<ProjectSelect pageKey="payroll" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<DollarCircleOutlined />} title="Təsdiqli saat" value={formatHours(totals.approved, 1)} trend={`${rows.length} işçi`} tone="green" />

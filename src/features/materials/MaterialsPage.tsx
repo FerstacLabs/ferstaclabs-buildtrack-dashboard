@@ -2,7 +2,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, ToolOutlined } from '@ant-d
 import { Button, Drawer, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useMemo, useState } from 'react'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import type { MaterialItem } from '../../types/projectProgress'
@@ -10,6 +10,7 @@ import { formatCurrency, formatNumber } from '../../utils/formatters'
 import { UnitSelect } from '../projectProgress/constructionUnits'
 import { ALL_OBJECTS_ID, getEstimateRowsByObject, getMaterialsByObject, getStagesByObject } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface MaterialFormValues {
   name: string
@@ -27,7 +28,7 @@ interface MaterialFormValues {
 export const MaterialsPage = () => {
   const store = useProjectProgressStore()
   const { addMaterial, deleteMaterial, stages, updateMaterial } = store
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const materials = getMaterialsByObject(store, selectedObjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
@@ -87,7 +88,7 @@ export const MaterialsPage = () => {
       <PageTitle
         title="Materiallar"
         subtitle="Smeta materialları, istifadə miqdarı, qalıq və çatdırılma nəzarəti"
-        extra={<Space wrap><ObjectFilter pageKey="materials" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Yeni material</Button></Space>}
+        extra={<Space wrap><ProjectSelect pageKey="materials" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Yeni material</Button></Space>}
       />
 
       <section className="kpi-grid four">

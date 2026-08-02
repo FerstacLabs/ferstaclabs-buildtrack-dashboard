@@ -1,7 +1,7 @@
 import { CloudSyncOutlined, DownloadOutlined, SafetyCertificateOutlined, TabletOutlined, WarningOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { Button } from 'antd'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -10,12 +10,13 @@ import { RiskBadge } from '../../components/ui/RiskBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { exportRowsToExcel } from '../../services/data/exportService'
 import { formatNumber } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getRiskRowsByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
+import { getRiskRowsByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 export const RiskWorkersPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const rows = getRiskRowsByObject(store, selectedObjectId)
   const critical = rows.filter((row) => row.riskLevel === 'Kritik').length
   const high = rows.filter((row) => row.riskLevel === 'Yüksək').length
@@ -38,7 +39,7 @@ export const RiskWorkersPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="3. Riskli İşçilər və Şübhəli Davamiyyət" extra={<ObjectFilter pageKey="riskWorkers" />} />
+      <PageTitle title="3. Riskli İşçilər və Şübhəli Davamiyyət" extra={<ProjectSelect pageKey="riskWorkers" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<SafetyCertificateOutlined />} title="Riskli İşçi" value={formatNumber(rows.length)} trend="central worker datası" tone="green" />

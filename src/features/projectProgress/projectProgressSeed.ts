@@ -439,8 +439,6 @@ export const projectProgressSeed: ProjectProgressData = {
   projects: [villaProject],
   activeProjectId: villaProject.id,
   objects: constructionObjects,
-  selectedObjectId: 'all',
-  selectedObjectIdByPage: {},
   project: villaProject,
   estimateVersions,
   summary: objectSummary,

@@ -1,7 +1,7 @@
 import { CheckCircleOutlined, ClockCircleOutlined, DownloadOutlined, LoginOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
 import { LineChartCard } from '../../components/charts/LineChartCard'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -9,12 +9,13 @@ import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
 import { formatNumber, formatPercent } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getDelayRowsByObject, getWorkersByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
+import { getDelayRowsByObject, getWorkersByObject, type DelayRiskRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 export const DelaysPermissionsPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const rows = getDelayRowsByObject(store, selectedObjectId)
   const workers = getWorkersByObject(store, selectedObjectId)
   const lateCount = rows.reduce((sum, row) => sum + row.delayCount, 0)
@@ -44,7 +45,7 @@ export const DelaysPermissionsPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="4. Gecikmə, Erkən Çıxış və İcazələr" extra={<ObjectFilter pageKey="delays" />} />
+      <PageTitle title="4. Gecikmə, Erkən Çıxış və İcazələr" extra={<ProjectSelect pageKey="delays" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<ClockCircleOutlined />} title="Gecikmə Sayı" value={formatNumber(lateCount)} trend="filtered object" tone="green" />

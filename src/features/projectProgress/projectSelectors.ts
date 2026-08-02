@@ -388,6 +388,13 @@ export const getDashboardSummary = (data: ProjectProgressData, projectId = data.
   }
 }
 
+export const getProjectScopedRows = getEstimateRowsByObject
+export const getProjectScopedMaterials = getMaterialsByObject
+export const getProjectScopedWorkers = getWorkersByObject
+export const getProjectScopedBrigades = getCrewsByObject
+export const getProjectScopedAttendance = getAttendanceRowsByObject
+export const getProjectScopedDashboardStats = getDashboardSummary
+
 export const getAiContextSummary = (data: ProjectProgressData, projectId = data.project.id, objectId = ALL_OBJECTS_ID) => ({
   project: getActiveProject(data),
   selectedObject: getObjectById(data, objectId),

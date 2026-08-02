@@ -20,13 +20,12 @@ import {
   YAxis,
 } from 'recharts'
 import { WrappedAxisTick } from '../../components/charts/WrappedAxisTick'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import type { WorkItem, WorkStage } from '../../types/projectProgress'
 import { compactName, formatCurrency, formatHours, formatNumber, formatPercent } from '../../utils/formatters'
 import {
-  ALL_OBJECTS_ID,
   getCrewActualHours,
   getCrewsByObject,
   getDashboardSummary,
@@ -38,6 +37,7 @@ import {
   getWorkItemActualHours,
 } from '../projectProgress/projectSelectors'
 import { calculateStageProgress, calculateWorkItemProgress, statusColor, statusLabel, useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 const trendData = [
   { day: 'B.e', saat: 22 },
@@ -51,7 +51,7 @@ const trendData = [
 
 export const DashboardPage = () => {
   const data = useProjectProgressStore()
-  const selectedObjectId = data.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const scopedStages = getStagesByObject(data, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(data, selectedObjectId)
@@ -115,7 +115,7 @@ export const DashboardPage = () => {
     faktiki: stage.derivedActualHours,
   }))
 
-  const keepObjectContext = (pageKey: string) => () => data.setSelectedObjectForPage(pageKey, selectedObjectId)
+  const keepObjectContext = (_pageKey: string) => undefined
 
   const linkedKpi = (to: string, pageKey: string, card: ReactNode) => (
     <Link className="kpi-link" to={to} onClick={keepObjectContext(pageKey)}>
@@ -144,7 +144,7 @@ export const DashboardPage = () => {
       <PageTitle
         title={data.project.name}
         subtitle="Smeta, briqada, iş saatı, material və prorab gündəlikləri üzrə layihə idarəetməsi"
-        extra={<ObjectFilter pageKey="dashboard" />}
+        extra={<ProjectSelect pageKey="dashboard" />}
       />
 
       <section className="kpi-grid four">

@@ -250,8 +250,6 @@ export interface ProjectProgressData {
   projects: Project[]
   activeProjectId: string
   objects: ConstructionObject[]
-  selectedObjectId: string
-  selectedObjectIdByPage: Record<string, string>
   project: Project
   estimateVersions: EstimateVersion[]
   summary: ProjectEstimateSummary

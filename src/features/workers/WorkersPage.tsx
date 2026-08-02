@@ -2,13 +2,14 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, TeamOutlined, UserOutlined 
 import { Button, Drawer, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useMemo, useState } from 'react'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import type { AttendanceSource, WorkerAssignment, WorkerStatus } from '../../types/projectProgress'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
 import { ALL_OBJECTS_ID, getCrewsByObject, getEstimateRowsByObject, getProjectWorkers, getWorkerTotalHours } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface WorkerFormValues {
   workerName: string
@@ -48,7 +49,7 @@ const generateNextWorkerCode = (workers: WorkerAssignment[]) => {
 export const WorkersPage = () => {
   const store = useProjectProgressStore()
   const { addWorker, crews, deleteWorker, updateWorker, workItems } = store
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
   const [form] = Form.useForm<WorkerFormValues>()
@@ -136,7 +137,7 @@ export const WorkersPage = () => {
       <PageTitle
         title="İşçilər"
         subtitle="Briqada, aktiv iş, saat mənbəyi və risk göstəriciləri üzrə işçi idarəetməsi"
-        extra={<Space wrap><ObjectFilter pageKey="workers" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>İşçi əlavə et</Button></Space>}
+        extra={<Space wrap><ProjectSelect pageKey="workers" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>İşçi əlavə et</Button></Space>}
       />
 
       <section className="kpi-grid four">

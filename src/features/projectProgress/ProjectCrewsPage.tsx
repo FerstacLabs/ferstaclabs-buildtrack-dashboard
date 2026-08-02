@@ -2,7 +2,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, TeamOutlined } from '@ant-d
 import { Button, Card, Drawer, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useMemo, useState } from 'react'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { crewTypeOptions, resolveCrewTypeValue, translateCrewType, translateDuration, translateStatus } from '../../i18n/helpers'
@@ -11,6 +11,7 @@ import type { Crew, ProjectWorkStatus } from '../../types/projectProgress'
 import { formatNumber, formatPercent } from '../../utils/formatters'
 import { ALL_OBJECTS_ID, getCrewsByObject, getCrewActualHours, getEstimateRowsByObject, getStagesByObject, getWorkersByCrew } from './projectSelectors'
 import { calculateStageProgress, statusColor, useProjectProgressStore } from './projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface CrewFormValues {
   name: string
@@ -30,7 +31,7 @@ export const ProjectCrewsPage = () => {
   const { language, t } = useI18n()
   const store = useProjectProgressStore()
   const { addCrew, deleteCrew, stages, updateCrew, workItems } = store
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
@@ -112,7 +113,7 @@ export const ProjectCrewsPage = () => {
       <PageTitle
         title={t('crews.title')}
         subtitle={t('crews.subtitle')}
-        extra={<Space wrap><ObjectFilter pageKey="crews" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>{t('crews.add')}</Button></Space>}
+        extra={<Space wrap><ProjectSelect pageKey="crews" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>{t('crews.add')}</Button></Space>}
       />
 
       <section className="kpi-grid four">

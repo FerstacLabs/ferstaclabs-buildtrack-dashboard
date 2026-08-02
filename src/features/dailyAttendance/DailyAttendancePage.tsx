@@ -2,7 +2,7 @@ import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined
 import type { TableColumnsType } from 'antd'
 import { Tag } from 'antd'
 import { DonutChartCard } from '../../components/charts/DonutChartCard'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -11,8 +11,9 @@ import { RiskBadge } from '../../components/ui/RiskBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { exportRowsToExcel } from '../../services/data/exportService'
 import { formatHours, formatNumber, formatPercent } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getAttendanceRowsByObject, getWorkersByObject, type AttendancePanelRow } from '../projectProgress/projectSelectors'
+import { getAttendanceRowsByObject, getWorkersByObject, type AttendancePanelRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 const statusColor: Record<AttendancePanelRow['status'], string> = {
   'Gəlib': 'green',
@@ -22,7 +23,7 @@ const statusColor: Record<AttendancePanelRow['status'], string> = {
 
 export const DailyAttendancePage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const rows = getAttendanceRowsByObject(store, selectedObjectId)
   const workers = getWorkersByObject(store, selectedObjectId)
   const present = new Set(rows.map((row) => row.workerId)).size
@@ -57,7 +58,7 @@ export const DailyAttendancePage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="1. Günlük Davamiyyət Paneli" extra={<ObjectFilter pageKey="attendance" />} />
+      <PageTitle title="1. Günlük Davamiyyət Paneli" extra={<ProjectSelect pageKey="attendance" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<TeamOutlined />} title="Bugün Gələn" value={formatNumber(present)} trend={formatPercent((present / total) * 100)} tone="green" />

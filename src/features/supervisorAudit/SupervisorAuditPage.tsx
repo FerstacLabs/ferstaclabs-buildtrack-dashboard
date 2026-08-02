@@ -2,7 +2,7 @@ import { AuditOutlined, ClockCircleOutlined, DownloadOutlined, EditOutlined, Saf
 import type { TableColumnsType } from 'antd'
 import { Tag } from 'antd'
 import { DonutChartCard } from '../../components/charts/DonutChartCard'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -10,8 +10,9 @@ import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
 import { formatNumber, formatPercent } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getAuditRowsByObject, type AuditPanelRow } from '../projectProgress/projectSelectors'
+import { getAuditRowsByObject, type AuditPanelRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 const auditColor: Record<AuditPanelRow['auditStatus'], string> = {
   Uyğun: 'green',
@@ -21,7 +22,7 @@ const auditColor: Record<AuditPanelRow['auditStatus'], string> = {
 
 export const SupervisorAuditPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const rows = getAuditRowsByObject(store, selectedObjectId)
   const manual = rows.reduce((sum, row) => sum + row.manualEntries, 0)
   const changes = rows.reduce((sum, row) => sum + row.corrections, 0)
@@ -47,7 +48,7 @@ export const SupervisorAuditPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="7. Prorab/Briqadir Müdaxilələri və Audit Hesabatı" extra={<ObjectFilter pageKey="audit" />} />
+      <PageTitle title="7. Prorab/Briqadir Müdaxilələri və Audit Hesabatı" extra={<ProjectSelect pageKey="audit" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<EditOutlined />} title="Manual Giriş" value={formatNumber(manual)} trend="prorab gündəlikləri" tone="green" />

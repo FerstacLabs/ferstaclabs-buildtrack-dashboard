@@ -2,7 +2,7 @@ import { BarChartOutlined, ClockCircleOutlined, DollarCircleOutlined, DownloadOu
 import { Progress } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { BarChartCard } from '../../components/charts/BarChartCard'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
 import { ExplanationCard } from '../../components/ui/ExplanationCard'
 import { KpiCard } from '../../components/ui/KpiCard'
@@ -12,6 +12,7 @@ import { exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportSe
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '../../utils/formatters'
 import { ALL_OBJECTS_ID, getObjects, getPayrollRowsByObject, getStagesByObject, getWorkersByObject } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface SiteHoursPanelRow {
   id: string
@@ -29,7 +30,7 @@ interface SiteHoursPanelRow {
 
 export const SiteHoursPage = () => {
   const store = useProjectProgressStore()
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const objects = selectedObjectId === ALL_OBJECTS_ID ? getObjects(store) : getObjects(store).filter((object) => object.id === selectedObjectId)
   const rows: SiteHoursPanelRow[] = objects.map((object) => {
     const workers = getWorkersByObject(store, object.id)
@@ -78,7 +79,7 @@ export const SiteHoursPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="2. Obyekt Üzrə İş Saatı və Əmək Yükü" extra={<ObjectFilter pageKey="siteHours" />} />
+      <PageTitle title="2. Obyekt Üzrə İş Saatı və Əmək Yükü" extra={<ProjectSelect pageKey="siteHours" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<TeamOutlined />} title="Plan İşçi" value={formatNumber(totals.planned)} trend="central worker planı" tone="green" />

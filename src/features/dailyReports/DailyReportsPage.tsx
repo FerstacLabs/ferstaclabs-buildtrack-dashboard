@@ -2,13 +2,14 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, ProfileOutlined } from '@an
 import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useMemo, useState } from 'react'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import type { DailyForemanReport, DailyReportStatus, WeatherType } from '../../types/projectProgress'
 import { formatNumber } from '../../utils/formatters'
 import { ALL_OBJECTS_ID, getCrewsByObject, getDailyReportsByObject, getEstimateRowsByObject } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface DailyReportFormValues {
   date: string
@@ -38,7 +39,7 @@ const statusColor: Record<DailyReportStatus, string> = {
 export const DailyReportsPage = () => {
   const store = useProjectProgressStore()
   const { addDailyReport, crews, deleteDailyReport, project, updateDailyReport, workItems } = store
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const dailyReports = getDailyReportsByObject(store, selectedObjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
@@ -132,7 +133,7 @@ export const DailyReportsPage = () => {
       <PageTitle
         title="Gündəlik hesabatlar"
         subtitle="Prorab qeydləri, görülən iş miqdarı, gecikmə səbəbləri və foto sayları"
-        extra={<Space wrap><ObjectFilter pageKey="dailyReports" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Gündəlik əlavə et</Button></Space>}
+        extra={<Space wrap><ProjectSelect pageKey="dailyReports" /><Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>Gündəlik əlavə et</Button></Space>}
       />
 
       <section className="kpi-grid four">

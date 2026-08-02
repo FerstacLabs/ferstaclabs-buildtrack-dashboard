@@ -1,9 +1,8 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
 import { Button, Drawer, Input, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
 import { tryApiRequest } from '../../shared/api/client'
-import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { getAssistantAnswer } from './aiAssistantEngine'
 import { fetchTtsAudio } from './api/ttsApi'
@@ -38,26 +37,6 @@ const quickPrompts = [
   'Prorab son nə qeyd edib?',
   'Maaş xərci nə qədərdir?',
   'Vacib məlumatları özün təqdim et',
-]
-
-const pageObjectFilterKeyByPath: Array<[string, string]> = [
-  ['/estimate', 'estimate'],
-  ['/project-progress/estimate', 'estimate'],
-  ['/crews', 'crews'],
-  ['/project-progress/crews', 'crews'],
-  ['/workers', 'workers'],
-  ['/timeline', 'timeline'],
-  ['/project-progress/timeline', 'timeline'],
-  ['/daily-reports', 'dailyReports'],
-  ['/materials', 'materials'],
-  ['/daily-attendance', 'attendance'],
-  ['/site-hours', 'siteHours'],
-  ['/risk-workers', 'riskWorkers'],
-  ['/delays-permissions', 'delays'],
-  ['/payroll', 'payroll'],
-  ['/supervisor-audit', 'audit'],
-  ['/export', 'export'],
-  ['/', 'dashboard'],
 ]
 
 const getSpeechRecognition = () => {
@@ -109,7 +88,7 @@ export const AiAssistant = () => {
   const data = useProjectProgressStore()
   const addAssistantMessage = useProjectProgressStore((state) => state.addAssistantMessage)
   const clearAssistantMessages = useProjectProgressStore((state) => state.clearAssistantMessages)
-  const location = useLocation()
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -122,8 +101,6 @@ export const AiAssistant = () => {
   const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
   const messages = data.assistantMessages
-  const pageFilterKey = pageObjectFilterKeyByPath.find(([path]) => (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)))?.[1] ?? 'dashboard'
-  const selectedObjectId = data.selectedObjectId ?? data.selectedObjectIdByPage[pageFilterKey] ?? ALL_OBJECTS_ID
   const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
   const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
 

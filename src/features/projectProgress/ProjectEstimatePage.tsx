@@ -2,7 +2,7 @@ import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, UploadOut
 import { Alert, Button, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Table, Tag, Upload, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useCallback, useMemo, useState } from 'react'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { useI18n } from '../../i18n'
 import { buildTrackBackendApi } from '../../services/api/buildTrackBackendApi'
@@ -20,6 +20,7 @@ import {
 } from './estimateExcelService'
 import { ALL_OBJECTS_ID, getCrewsByObject, getEstimateRowsByObject, getMaterialsByObject, getObjectName, getStagesByObject } from './projectSelectors'
 import { calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 interface WorkItemFormValues {
   stageId: string
@@ -104,7 +105,7 @@ export const ProjectEstimatePage = () => {
     updateStage,
     updateWorkItem,
   } = store
-  const selectedObjectId = store.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(store, selectedObjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
@@ -433,6 +434,11 @@ export const ProjectEstimatePage = () => {
   }
 
   const parseWorkbook = async (file: File) => {
+    if (selectedObjectId === ALL_OBJECTS_ID) {
+      void message.warning('Import üçün konkret layihə seçin')
+      return
+    }
+
     try {
       const result = await parseEstimateWorkbook(file)
       const nextSummary = applyImportedRows(result.rows, result.invalidRows)
@@ -508,7 +514,7 @@ export const ProjectEstimatePage = () => {
         extra={
           <Space wrap>
             <Button onClick={() => setProjectModalOpen(true)}>{t('estimate.newProject')}</Button>
-            <ObjectFilter pageKey="estimate" />
+            <ProjectSelect pageKey="estimate" />
             <Upload accept=".xlsx,.xls" showUploadList={false} beforeUpload={(file) => { void parseWorkbook(file as File); return false }}>
               <Button icon={<UploadOutlined />}>{t('estimate.import')}</Button>
             </Upload>

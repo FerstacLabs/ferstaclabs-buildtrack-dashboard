@@ -1,15 +1,16 @@
 import { CalendarOutlined, ClockCircleOutlined, DollarCircleOutlined } from '@ant-design/icons'
 import { Progress, Tag } from 'antd'
-import { ObjectFilter } from '../../components/filters/ObjectFilter'
+import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
-import { ALL_OBJECTS_ID, getDashboardSummary, getStageActualHours, getStagesByObject } from './projectSelectors'
+import { getDashboardSummary, getStageActualHours, getStagesByObject } from './projectSelectors'
 import { calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 export const ProjectTimelinePage = () => {
   const data = useProjectProgressStore()
-  const selectedObjectId = data.selectedObjectId ?? ALL_OBJECTS_ID
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const crewNameById = new Map(data.crews.map((crew) => [crew.id, crew.name]))
   const stages = getStagesByObject(data, selectedObjectId)
@@ -17,7 +18,7 @@ export const ProjectTimelinePage = () => {
 
   return (
     <div className="page-stack project-progress-page">
-      <PageTitle title="Təqvim / Gedişat" subtitle={`${data.project.name} üzrə etapların plan və faktiki gedişat xəritəsi`} extra={<ObjectFilter pageKey="timeline" />} />
+      <PageTitle title="Təqvim / Gedişat" subtitle={`${data.project.name} üzrə etapların plan və faktiki gedişat xəritəsi`} extra={<ProjectSelect pageKey="timeline" />} />
 
       <section className="kpi-grid four">
         <KpiCard icon={<CalendarOutlined />} title="Etap sayı" value={formatNumber(stages.length)} tone="blue" />
