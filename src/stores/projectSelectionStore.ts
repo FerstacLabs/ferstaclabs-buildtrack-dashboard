@@ -7,6 +7,7 @@ export type SelectedProjectId = string
 
 interface ProjectSelectionState {
   selectedProjectId: SelectedProjectId
+  lastChangedAt: number
   setSelectedProjectId: (projectId: SelectedProjectId) => void
   ensureSelectedProjectId: (validProjectIds: string[]) => SelectedProjectId
 }
@@ -45,21 +46,22 @@ const debugProjectSelection = (source: string, previous: SelectedProjectId, next
 
 export const useProjectSelectionStore = create<ProjectSelectionState>()((set, get) => ({
   selectedProjectId: readStoredProjectId(),
+  lastChangedAt: Date.now(),
   setSelectedProjectId: (projectId) => {
     const previous = get().selectedProjectId
     const next = normalizeSelectedProjectId(projectId)
-    writeStoredProjectId(next)
     debugProjectSelection('setSelectedProjectId', previous, next)
-    set({ selectedProjectId: next })
+    set({ selectedProjectId: next, lastChangedAt: Date.now() })
+    writeStoredProjectId(next)
   },
   ensureSelectedProjectId: (validProjectIds) => {
     const previous = get().selectedProjectId
     const next = normalizeSelectedProjectId(previous, validProjectIds)
 
     if (next !== previous) {
-      writeStoredProjectId(next)
       debugProjectSelection('ensureSelectedProjectId', previous, next)
-      set({ selectedProjectId: next })
+      set({ selectedProjectId: next, lastChangedAt: Date.now() })
+      writeStoredProjectId(next)
     }
 
     return next

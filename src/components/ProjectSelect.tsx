@@ -26,6 +26,14 @@ export const ProjectSelect = ({ pageKey = 'global', className, placeholder, styl
   const projectIds = useMemo(() => objects.map((object) => object.id), [objects])
   const selectedValue = normalizeSelectedProjectId(selectedProjectId, projectIds)
 
+  if (import.meta.env.DEV) {
+    console.debug('[ProjectSelect render]', {
+      pageKey,
+      selectedProjectId,
+      selectedValue,
+    })
+  }
+
   const options = useMemo(() => [
     { value: ALL_PROJECTS_ID, label: t('project.allObjects') },
     ...objects.map((object) => ({ value: object.id, label: object.name })),
@@ -37,7 +45,7 @@ export const ProjectSelect = ({ pageKey = 'global', className, placeholder, styl
 
   const handleChange = (nextProjectId: string) => {
     if (import.meta.env.DEV) {
-      console.debug('[ProjectSelect] change', {
+      console.debug('[ProjectSelect onChange]', {
         pageKey,
         previous: selectedValue,
         next: nextProjectId,
