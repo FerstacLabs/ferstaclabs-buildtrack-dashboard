@@ -1,3 +1,5 @@
+import { authHeader } from '../../features/auth/authToken'
+
 export const API_BASE_URL = (
   (import.meta.env.VITE_API_BASE_URL as string | undefined)
   ?? 'http://46.101.182.202:8080'
@@ -37,12 +39,12 @@ const parseBody = (text: string) => {
 
 export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const url = `${API_BASE_URL}${path}`
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
+  Object.entries(authHeader()).forEach(([key, value]) => headers.set(key, value))
   const response = await fetch(url, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   })
   const text = response.status === 204 ? '' : await response.text()
   const parsed = parseBody(text)

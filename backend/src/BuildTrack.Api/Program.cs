@@ -10,6 +10,7 @@ using BuildTrack.Infrastructure.Dahua;
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Security;
 using BuildTrack.Infrastructure.Services;
+using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -40,6 +41,9 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddBuildTrackInfrastructure(builder.Configuration);
+var jwtOptions = BuildJwtOptions(builder.Configuration);
+builder.Services.AddSingleton(jwtOptions);
+builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 var aiOptions = BuildAiOptions(builder.Configuration);
 builder.Services.AddSingleton(aiOptions);
 builder.Services.AddHttpClient<IOpenAiProjectAssistantService, OpenAiProjectAssistantService>((serviceProvider, client) =>
@@ -57,7 +61,190 @@ app.UseSwaggerUI();
 
 await EnsureDatabaseWithRetryAsync(app.Services, app.Logger, app.Lifetime.ApplicationStopping);
 
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!IsApiPath(path) || IsPublicApiPath(path))
+    {
+        await next();
+        return;
+    }
+
+    var tokenService = context.RequestServices.GetRequiredService<IJwtTokenService>();
+    var principal = tokenService.ValidateToken(ExtractBearerToken(context.Request));
+    if (principal is null)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new { error = "Authentication is required" });
+        return;
+    }
+
+    var tenantContext = context.RequestServices.GetRequiredService<ITenantContext>();
+    tenantContext.TenantId = principal.TenantId;
+    tenantContext.UserId = principal.UserId;
+    tenantContext.Role = principal.Role.ToString();
+
+    if (IsLicenseExemptPath(path))
+    {
+        await next();
+        return;
+    }
+
+    var db = context.RequestServices.GetRequiredService<BuildTrackDbContext>();
+    var hasActiveLicense = await db.Licenses
+        .AsNoTracking()
+        .AnyAsync(x => x.TenantId == principal.TenantId
+                       && x.Status == LicenseStatus.Active
+                       && (x.ExpiresAt == null || x.ExpiresAt > DateTimeOffset.UtcNow));
+    if (!hasActiveLicense)
+    {
+        context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
+        await context.Response.WriteAsJsonAsync(new { error = "Active license is required" });
+        return;
+    }
+
+    await next();
+});
+
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", service = "BuildTrack.Api", time = DateTimeOffset.UtcNow }));
+
+app.MapPost("/api/auth/register", async (
+    RegisterRequest request,
+    BuildTrackDbContext db,
+    IJwtTokenService tokenService,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.CompanyName)
+        || string.IsNullOrWhiteSpace(request.FullName)
+        || string.IsNullOrWhiteSpace(request.Email)
+        || string.IsNullOrWhiteSpace(request.Password))
+    {
+        return Results.BadRequest(new { error = "Company, full name, email and password are required" });
+    }
+
+    if (request.Password.Length < 8) return Results.BadRequest(new { error = "Password must be at least 8 characters" });
+    var email = request.Email.Trim().ToLowerInvariant();
+    if (await db.Users.AnyAsync(x => x.Email == email, ct)) return Results.Conflict(new { error = "Email is already registered" });
+
+    var tenant = new Tenant
+    {
+        CompanyName = request.CompanyName.Trim(),
+        Code = await GenerateTenantCodeAsync(db, request.CompanyName, ct),
+        Status = TenantStatus.Active,
+    };
+    var user = new AppUser
+    {
+        TenantId = tenant.Id,
+        FullName = request.FullName.Trim(),
+        Email = email,
+        PasswordHash = BuildTrackPasswordHasher.HashPassword(request.Password),
+        Role = BuildTrackUserRole.Owner,
+        Status = BuildTrackUserStatus.Active,
+    };
+    var license = new License
+    {
+        TenantId = tenant.Id,
+        LicenseKeyHash = $"pending-{tenant.Id:N}",
+        Plan = LicensePlan.Trial,
+        Status = LicenseStatus.Pending,
+        StartsAt = DateTimeOffset.UtcNow,
+    };
+
+    db.Tenants.Add(tenant);
+    db.Users.Add(user);
+    db.Licenses.Add(license);
+    await db.SaveChangesAsync(ct);
+
+    return CreateAuthResponseResult(tokenService, user, tenant, license);
+});
+
+app.MapPost("/api/auth/login", async (
+    LoginRequest request,
+    BuildTrackDbContext db,
+    IJwtTokenService tokenService,
+    CancellationToken ct) =>
+{
+    var email = request.Email.Trim().ToLowerInvariant();
+    var user = await db.Users
+        .Include(x => x.Tenant)
+        .FirstOrDefaultAsync(x => x.Email == email && x.Status == BuildTrackUserStatus.Active, ct);
+    if (user is null || !BuildTrackPasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
+    {
+        return Results.Unauthorized();
+    }
+
+    var license = await GetCurrentLicenseAsync(db, user.TenantId, ct);
+    return CreateAuthResponseResult(tokenService, user, user.Tenant!, license);
+});
+
+app.MapGet("/api/auth/me", async (BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
+{
+    var userId = RequireUserId(tenantContext);
+    var user = await db.Users.Include(x => x.Tenant).FirstOrDefaultAsync(x => x.Id == userId, ct);
+    if (user is null) return Results.Unauthorized();
+    var license = await GetCurrentLicenseAsync(db, user.TenantId, ct);
+    return Results.Ok(new AuthMeResponse(ToAuthUserResponse(user), ToTenantResponse(user.Tenant!), license is null ? null : ToLicenseResponse(license)));
+});
+
+app.MapPost("/api/auth/logout", () => Results.Ok(new { ok = true }));
+
+app.MapPost("/api/licenses/activate", async (
+    ActivateLicenseRequest request,
+    BuildTrackDbContext db,
+    ITenantContext tenantContext,
+    CancellationToken ct) =>
+{
+    var tenantId = RequireTenantId(tenantContext);
+    if (string.IsNullOrWhiteSpace(request.LicenseKey)) return Results.BadRequest(new { error = "License key is required" });
+    var hash = LicenseKeyHasher.HashLicenseKey(request.LicenseKey);
+    var license = await db.Licenses.FirstOrDefaultAsync(x => x.LicenseKeyHash == hash, ct);
+    if (license is null || license.TenantId != tenantId) return Results.BadRequest(new { error = "License key is not valid for this tenant" });
+    if (license.Status is LicenseStatus.Revoked or LicenseStatus.Expired) return Results.BadRequest(new { error = "License cannot be activated" });
+
+    license.Status = LicenseStatus.Active;
+    license.ActivatedAt = DateTimeOffset.UtcNow;
+    license.StartsAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(ToLicenseResponse(license));
+});
+
+app.MapPost("/api/admin/licenses", async (
+    CreateLicenseRequest request,
+    BuildTrackDbContext db,
+    ITenantContext tenantContext,
+    CancellationToken ct) =>
+{
+    var currentTenantId = RequireTenantId(tenantContext);
+    var currentTenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == currentTenantId, ct);
+    if (currentTenant?.Code != "DEMO" || !IsAdminRole(tenantContext.Role)) return Results.Forbid();
+
+    var tenantExists = await db.Tenants.AnyAsync(x => x.Id == request.TenantId, ct);
+    if (!tenantExists) return Results.NotFound(new { error = "Tenant was not found" });
+
+    string rawKey;
+    string hash;
+    do
+    {
+        rawKey = LicenseKeyHasher.GenerateRawLicenseKey();
+        hash = LicenseKeyHasher.HashLicenseKey(rawKey);
+    } while (await db.Licenses.AnyAsync(x => x.LicenseKeyHash == hash, ct));
+
+    var license = new License
+    {
+        TenantId = request.TenantId,
+        LicenseKeyHash = hash,
+        Plan = request.Plan,
+        Status = LicenseStatus.Pending,
+        StartsAt = DateTimeOffset.UtcNow,
+        ExpiresAt = request.ExpiresAt,
+        MaxProjects = request.MaxProjects,
+        MaxUsers = request.MaxUsers,
+        MaxCameras = request.MaxCameras,
+    };
+    db.Licenses.Add(license);
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new CreateLicenseResponse(rawKey, ToLicenseResponse(license)));
+});
 
 app.MapGet("/api/ai/project-assistant/status", (AiOptions options) =>
     Results.Ok(new ProjectAssistantStatusResponse(
@@ -95,11 +282,12 @@ app.MapPost("/api/ai/tts", async (
 app.MapGet("/api/sites", async (BuildTrackDbContext db, CancellationToken ct) =>
     await db.Sites.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
 
-app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Name)) return Results.BadRequest(new { error = "Site name is required" });
     var site = new Site
     {
+        TenantId = RequireTenantId(tenantContext),
         Name = request.Name.Trim(),
         Address = request.Address?.Trim() ?? string.Empty,
         TimeZone = string.IsNullOrWhiteSpace(request.TimeZone) ? "Asia/Baku" : request.TimeZone.Trim(),
@@ -116,7 +304,7 @@ app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, Cancella
     return await query.OrderBy(x => x.FullName).ToListAsync(ct);
 });
 
-app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
     if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     if (string.IsNullOrWhiteSpace(request.ExternalWorkerCode) || string.IsNullOrWhiteSpace(request.FullName))
@@ -126,6 +314,7 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
 
     var worker = new Worker
     {
+        TenantId = RequireTenantId(tenantContext),
         SiteId = request.SiteId,
         ExternalWorkerCode = request.ExternalWorkerCode.Trim(),
         FullName = request.FullName.Trim(),
@@ -185,19 +374,28 @@ app.MapPost("/api/devices", async (
     CreateDeviceRequest request,
     BuildTrackDbContext db,
     IPasswordProtector passwordProtector,
+    ITenantContext tenantContext,
     CancellationToken ct) =>
 {
     if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
-    if (string.IsNullOrWhiteSpace(request.RegisterDeviceId)) return Results.BadRequest(new { error = "RegisterDeviceId is required" });
+    var tenantId = RequireTenantId(tenantContext);
+    var tenantCode = await db.Tenants.AsNoTracking()
+        .Where(x => x.Id == tenantId)
+        .Select(x => x.Code)
+        .FirstOrDefaultAsync(ct) ?? "TENANT";
+    var registerDeviceId = string.IsNullOrWhiteSpace(request.RegisterDeviceId)
+        ? await GenerateRegisterDeviceIdAsync(db, tenantCode, ct)
+        : request.RegisterDeviceId.Trim();
 
     var device = new Device
     {
+        TenantId = tenantId,
         SiteId = request.SiteId,
-        Name = string.IsNullOrWhiteSpace(request.Name) ? request.RegisterDeviceId : request.Name.Trim(),
+        Name = string.IsNullOrWhiteSpace(request.Name) ? registerDeviceId : request.Name.Trim(),
         Vendor = string.IsNullOrWhiteSpace(request.Vendor) ? "dahua" : request.Vendor.Trim().ToLowerInvariant(),
         Model = string.IsNullOrWhiteSpace(request.Model) ? "DHI-ASI6213J-MW" : request.Model.Trim(),
         Mode = request.Mode,
-        RegisterDeviceId = request.RegisterDeviceId.Trim(),
+        RegisterDeviceId = registerDeviceId,
         RegisterPort = request.RegisterPort <= 0 ? 9500 : request.RegisterPort,
         Username = request.Username.Trim(),
         EncryptedPassword = passwordProtector.Protect(request.Password),
@@ -1150,6 +1348,122 @@ static AiOptions BuildAiOptions(IConfiguration configuration)
     };
 }
 
+static JwtOptions BuildJwtOptions(IConfiguration configuration)
+{
+    var secret = configuration["JWT_SECRET"] ?? configuration["Jwt:Secret"] ?? string.Empty;
+    var environment = configuration["ASPNETCORE_ENVIRONMENT"] ?? "Production";
+    if (string.IsNullOrWhiteSpace(secret) && environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
+    {
+        secret = "buildtrack-local-development-secret-change-before-production";
+    }
+
+    return new JwtOptions
+    {
+        Secret = secret,
+        Issuer = string.IsNullOrWhiteSpace(configuration["JWT_ISSUER"] ?? configuration["Jwt:Issuer"])
+            ? "BuildTrack"
+            : (configuration["JWT_ISSUER"] ?? configuration["Jwt:Issuer"] ?? "BuildTrack").Trim(),
+        Audience = string.IsNullOrWhiteSpace(configuration["JWT_AUDIENCE"] ?? configuration["Jwt:Audience"])
+            ? "BuildTrack.App"
+            : (configuration["JWT_AUDIENCE"] ?? configuration["Jwt:Audience"] ?? "BuildTrack.App").Trim(),
+        ExpiresMinutes = ParseInt(configuration["JWT_EXPIRES_MINUTES"] ?? configuration["Jwt:ExpiresMinutes"], 720),
+    };
+}
+
+static bool IsApiPath(string path) => path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase);
+
+static bool IsPublicApiPath(string path) =>
+    path.Equals("/api/health", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/register", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase);
+
+static bool IsLicenseExemptPath(string path) =>
+    path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/licenses/activate", StringComparison.OrdinalIgnoreCase);
+
+static string ExtractBearerToken(HttpRequest request)
+{
+    var authorization = request.Headers.Authorization.ToString();
+    const string prefix = "Bearer ";
+    return authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+        ? authorization[prefix.Length..].Trim()
+        : string.Empty;
+}
+
+static Guid RequireTenantId(ITenantContext tenantContext) =>
+    tenantContext.TenantId ?? throw new InvalidOperationException("Tenant context is missing");
+
+static Guid RequireUserId(ITenantContext tenantContext) =>
+    tenantContext.UserId ?? throw new InvalidOperationException("User context is missing");
+
+static bool IsAdminRole(string? role) =>
+    string.Equals(role, BuildTrackUserRole.Owner.ToString(), StringComparison.OrdinalIgnoreCase)
+    || string.Equals(role, BuildTrackUserRole.Admin.ToString(), StringComparison.OrdinalIgnoreCase);
+
+static AuthUserResponse ToAuthUserResponse(AppUser user) =>
+    new(user.Id, user.TenantId, user.FullName, user.Email, user.Role, user.Status);
+
+static TenantResponse ToTenantResponse(Tenant tenant) =>
+    new(tenant.Id, tenant.CompanyName, tenant.Code, tenant.Status);
+
+static LicenseResponse ToLicenseResponse(License license) =>
+    new(license.Id, license.TenantId, license.Plan, license.Status, license.StartsAt, license.ExpiresAt, license.MaxProjects, license.MaxUsers, license.MaxCameras);
+
+static IResult CreateAuthResponseResult(IJwtTokenService tokenService, AppUser user, Tenant tenant, License? license)
+{
+    try
+    {
+        return Results.Ok(new AuthResponse(
+            tokenService.CreateToken(user),
+            ToAuthUserResponse(user),
+            ToTenantResponse(tenant),
+            license is null ? null : ToLicenseResponse(license)));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+}
+
+static async Task<License?> GetCurrentLicenseAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct) =>
+    await db.Licenses
+        .Where(x => x.TenantId == tenantId)
+        .OrderByDescending(x => x.Status == LicenseStatus.Active)
+        .ThenByDescending(x => x.ActivatedAt ?? x.CreatedAt)
+        .FirstOrDefaultAsync(ct);
+
+static async Task<string> GenerateTenantCodeAsync(BuildTrackDbContext db, string companyName, CancellationToken ct)
+{
+    var chars = companyName
+        .ToUpperInvariant()
+        .Where(char.IsLetterOrDigit)
+        .Take(10)
+        .ToArray();
+    var baseCode = chars.Length == 0 ? "TENANT" : new string(chars);
+    var code = baseCode;
+    for (var index = 2; await db.Tenants.AnyAsync(x => x.Code == code, ct); index++)
+    {
+        code = $"{baseCode}{index}";
+    }
+
+    return code;
+}
+
+static async Task<string> GenerateRegisterDeviceIdAsync(BuildTrackDbContext db, string tenantCode, CancellationToken ct)
+{
+    var safeTenantCode = new string((tenantCode ?? "TENANT").Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+    if (string.IsNullOrWhiteSpace(safeTenantCode)) safeTenantCode = "TENANT";
+    for (var index = 1; index < 10_000; index++)
+    {
+        var candidate = $"BT-{safeTenantCode}-CAM{index:000}";
+        var exists = await db.Devices.IgnoreQueryFilters().AnyAsync(x => x.RegisterDeviceId == candidate, ct);
+        if (!exists) return candidate;
+    }
+
+    throw new InvalidOperationException("Could not generate a unique Dahua register device id");
+}
+
 static TimeZoneInfo ResolveApiTimeZone(string? timeZoneId)
 {
     var candidate = string.IsNullOrWhiteSpace(timeZoneId) ? "Asia/Baku" : timeZoneId;
@@ -1289,7 +1603,8 @@ static async Task EnsureDatabaseWithRetryAsync(IServiceProvider services, ILogge
         {
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
-            await DbInitializer.EnsureDatabaseAsync(db, cancellationToken);
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            await DbInitializer.EnsureDatabaseAsync(db, configuration, cancellationToken);
             return;
         }
         catch (Exception ex) when (attempt < 10)

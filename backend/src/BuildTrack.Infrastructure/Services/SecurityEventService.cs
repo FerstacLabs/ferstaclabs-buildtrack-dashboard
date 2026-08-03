@@ -70,6 +70,7 @@ public sealed class SecurityEventService(
 
         var securityEvent = new SecurityEvent
         {
+            TenantId = device.TenantId,
             SiteId = device.SiteId,
             DeviceId = device.Id,
             EventTime = eventTime,

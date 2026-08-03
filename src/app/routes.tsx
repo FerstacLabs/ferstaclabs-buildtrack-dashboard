@@ -1,5 +1,9 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
+import { LicensePage } from '../features/auth/LicensePage'
+import { LoginPage } from '../features/auth/LoginPage'
+import { PublicAuthPage, RequireAuth, RequireLogin } from '../features/auth/AuthGate'
+import { RegisterPage } from '../features/auth/RegisterPage'
 import { AttendanceLivePage } from '../features/attendanceLive/AttendanceLivePage'
 import { CostCodePage } from '../features/costCode/CostCodePage'
 import { CustomReportsPage } from '../features/customReports/CustomReportsPage'
@@ -25,8 +29,20 @@ import { WorkersPage } from '../features/workers/WorkersPage'
 
 export const router = createBrowserRouter([
   {
+    path: '/login',
+    element: <PublicAuthPage><LoginPage /></PublicAuthPage>,
+  },
+  {
+    path: '/register',
+    element: <PublicAuthPage><RegisterPage /></PublicAuthPage>,
+  },
+  {
+    path: '/license',
+    element: <RequireLogin><LicensePage /></RequireLogin>,
+  },
+  {
     path: '/',
-    element: <AppLayout />,
+    element: <RequireAuth><AppLayout /></RequireAuth>,
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'estimate', element: <ProjectEstimatePage /> },

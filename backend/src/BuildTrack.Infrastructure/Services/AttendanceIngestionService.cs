@@ -77,6 +77,7 @@ public sealed class AttendanceIngestionService(
 
         var attendanceEvent = new AttendanceEvent
         {
+            TenantId = device.TenantId,
             SiteId = device.SiteId,
             DeviceId = device.Id,
             WorkerId = worker?.Id,

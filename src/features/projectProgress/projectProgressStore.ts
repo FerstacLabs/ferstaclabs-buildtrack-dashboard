@@ -13,10 +13,11 @@ import type {
   WorkStage,
   WorkerAssignment,
 } from '../../types/projectProgress'
-import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
-import { projectProgressSeed, villaEstimateSummary } from './projectProgressSeed'
+import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import { createEmptyProjectProgressData, projectProgressSeed, villaEstimateSummary } from './projectProgressSeed'
 
 interface ProjectProgressState extends ProjectProgressData {
+  prepareWorkspaceForTenant: (tenantId: string, tenantCode?: string, companyName?: string) => void
   applyBackendData: (data: Partial<ProjectProgressData>) => void
   refreshSeedData: () => void
   resetDemoData: () => void
@@ -170,6 +171,18 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
   persist(
     (set) => ({
         ...projectProgressSeed,
+        prepareWorkspaceForTenant: (tenantId, tenantCode, companyName) => set((state) => {
+        const normalizedTenantCode = tenantCode?.trim().toUpperCase()
+        const targetWorkspaceId = normalizedTenantCode === 'DEMO' ? 'DEMO' : tenantId
+        if (state.workspaceTenantId === targetWorkspaceId) return state
+
+        const nextData = normalizedTenantCode === 'DEMO'
+          ? { ...projectProgressSeed, workspaceTenantId: 'DEMO' }
+          : createEmptyProjectProgressData(tenantId, companyName)
+
+        useProjectSelectionStore.getState().setSelectedProjectId(ALL_PROJECTS_ID)
+        return nextData
+      }),
         applyBackendData: (data) => set((state) => {
         const objects = data.objects?.length ? data.objects : state.objects
         return {
@@ -318,6 +331,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
     {
       name: 'buildtrack-project-progress',
       partialize: (state) => ({
+        workspaceTenantId: state.workspaceTenantId,
         project: state.project,
         projects: state.projects,
         activeProjectId: state.activeProjectId,
@@ -336,7 +350,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         risks: state.risks,
         assistantMessages: state.assistantMessages,
       }),
-      version: 7,
+      version: 8,
       migrate: (persisted) => {
         const saved = persisted as Partial<ProjectProgressData>
         const hasIncompleteSeedWorkers = !saved.workerAssignments?.length || saved.workerAssignments.length < 20
@@ -350,6 +364,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         return {
           ...projectProgressSeed,
           ...saved,
+          workspaceTenantId: saved.workspaceTenantId ?? 'DEMO',
           projects: saved.projects?.length ? saved.projects : [saved.project ?? projectProgressSeed.project],
           activeProjectId: saved.activeProjectId ?? saved.project?.id ?? projectProgressSeed.activeProjectId,
           objects,

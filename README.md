@@ -34,6 +34,63 @@ If multiple origins are needed, separate them with commas. The docker-compose fi
 
 Project progress endpoints are optional for now. If `/api/project-progress/*` does not exist or the API is unavailable, the frontend keeps using persisted local demo data from `localStorage`.
 
+## SaaS auth, tenant and license setup
+
+BuildTrack now runs as a tenant-isolated SaaS app:
+
+- `buildtrack.ferstaclabs.com` shows the public marketing landing page.
+- `app.buildtrack.ferstaclabs.com` shows the protected application.
+- Unauthenticated users are redirected to `/login`.
+- Authenticated tenants without an active license are redirected to `/license`.
+- Existing demo data is backfilled to the `FerstacLabs Demo` tenant with code `DEMO`.
+- Newly registered tenants start with an empty workspace.
+
+Set these backend variables in the VPS `.env` file before recreating the API container:
+
+```env
+JWT_SECRET=replace-with-a-long-random-secret
+JWT_ISSUER=BuildTrack
+JWT_AUDIENCE=BuildTrack.App
+JWT_EXPIRES_MINUTES=720
+
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=replace-with-secure-password
+SEED_ADMIN_FULL_NAME=FerstacLabs Admin
+SEED_ADMIN_TENANT_NAME=FerstacLabs Demo
+
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
+```
+
+If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure default admin password. The demo tenant still receives an active Unlimited license.
+
+Create a tenant license as the demo/admin account:
+
+```bash
+curl -X POST https://api.ferstaclabs.com/api/admin/licenses \
+  -H "Authorization: Bearer <admin-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"tenantId":"<tenant-id>","plan":"Business","expiresAt":null,"maxProjects":10,"maxUsers":50,"maxCameras":5}'
+```
+
+The response includes the raw `licenseKey` only once. Store only the hash in the database. The tenant activates it from `/license` or with:
+
+```bash
+curl -X POST https://api.ferstaclabs.com/api/licenses/activate \
+  -H "Authorization: Bearer <tenant-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"licenseKey":"BT-..."}'
+```
+
+Frontend environment for Vercel:
+
+```env
+VITE_API_BASE_URL=/backend
+VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
+VITE_MARKETING_BASE_URL=https://buildtrack.ferstaclabs.com
+```
+
+Keep the `/backend` rewrite before the SPA fallback in `vercel.json`. The VPS backend still runs in Docker on port `8080`; HTTPS should be provided by Nginx or another reverse proxy.
+
 ## AI assistant backend setup
 
 The BuildTrack AI assistant must call OpenAI only through the VPS backend. Do not add `OPENAI_API_KEY` or any secret to Vercel or React/Vite environment variables.

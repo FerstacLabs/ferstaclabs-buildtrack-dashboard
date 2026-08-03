@@ -169,6 +169,7 @@ public sealed class AttendanceSessionService(
     {
         var session = new AttendanceSession
         {
+            TenantId = attendanceEvent.TenantId,
             SiteId = attendanceEvent.SiteId,
             DeviceId = attendanceEvent.DeviceId,
             WorkerId = attendanceEvent.WorkerId,

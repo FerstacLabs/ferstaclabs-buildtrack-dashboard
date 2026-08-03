@@ -3,6 +3,8 @@
 public sealed class Site
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Address { get; set; } = string.Empty;
     public string TimeZone { get; set; } = "Asia/Baku";

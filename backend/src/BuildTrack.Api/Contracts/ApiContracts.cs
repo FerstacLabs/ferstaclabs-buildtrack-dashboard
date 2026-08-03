@@ -140,6 +140,62 @@ public sealed record SecurityEventResponse(
 
 public sealed record ReviewSecurityEventRequest(SecurityEventStatus Status, string? ReviewNote);
 
+public sealed record RegisterRequest(
+    string CompanyName,
+    string FullName,
+    string Email,
+    string Password);
+
+public sealed record LoginRequest(string Email, string Password);
+
+public sealed record AuthResponse(
+    string AccessToken,
+    AuthUserResponse User,
+    TenantResponse Tenant,
+    LicenseResponse? License);
+
+public sealed record AuthUserResponse(
+    Guid Id,
+    Guid TenantId,
+    string FullName,
+    string Email,
+    BuildTrackUserRole Role,
+    BuildTrackUserStatus Status);
+
+public sealed record TenantResponse(
+    Guid Id,
+    string CompanyName,
+    string Code,
+    TenantStatus Status);
+
+public sealed record LicenseResponse(
+    Guid Id,
+    Guid TenantId,
+    LicensePlan Plan,
+    LicenseStatus Status,
+    DateTimeOffset StartsAt,
+    DateTimeOffset? ExpiresAt,
+    int? MaxProjects,
+    int? MaxUsers,
+    int? MaxCameras);
+
+public sealed record AuthMeResponse(
+    AuthUserResponse User,
+    TenantResponse Tenant,
+    LicenseResponse? License);
+
+public sealed record ActivateLicenseRequest(string LicenseKey);
+
+public sealed record CreateLicenseRequest(
+    Guid TenantId,
+    LicensePlan Plan,
+    DateTimeOffset? ExpiresAt,
+    int? MaxProjects,
+    int? MaxUsers,
+    int? MaxCameras);
+
+public sealed record CreateLicenseResponse(string LicenseKey, LicenseResponse License);
+
 
 
 

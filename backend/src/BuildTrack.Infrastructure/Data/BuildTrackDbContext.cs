@@ -1,10 +1,24 @@
 ﻿using BuildTrack.Domain.Entities;
+using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildTrack.Infrastructure.Data;
 
-public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> options) : DbContext(options)
+public sealed class BuildTrackDbContext : DbContext
 {
+    private readonly ITenantContext? tenantContext;
+
+    public BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> options, ITenantContext? tenantContext = null)
+        : base(options)
+    {
+        this.tenantContext = tenantContext;
+    }
+
+    private Guid? CurrentTenantId => tenantContext?.TenantId;
+
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<License> Licenses => Set<License>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<Worker> Workers => Set<Worker>();
     public DbSet<Device> Devices => Set<Device>();
@@ -17,23 +31,65 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Tenant>(entity =>
+        {
+            entity.ToTable("tenants");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CompanyName).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Code).HasMaxLength(60).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.Code).IsUnique();
+        });
+
+        modelBuilder.Entity<AppUser>(entity =>
+        {
+            entity.ToTable("users");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.FullName).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Email).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.Email).IsUnique();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany(x => x.Users).HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<License>(entity =>
+        {
+            entity.ToTable("licenses");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.LicenseKeyHash).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.Plan).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.LicenseKeyHash).IsUnique();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany(x => x.Licenses).HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Site>(entity =>
         {
             entity.ToTable("sites");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Address).HasMaxLength(300);
             entity.Property(x => x.TimeZone).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Worker>(entity =>
         {
             entity.ToTable("workers");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.ExternalWorkerCode).HasMaxLength(80).IsRequired();
             entity.Property(x => x.FullName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
-            entity.HasIndex(x => new { x.SiteId, x.ExternalWorkerCode }).IsUnique();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.SiteId, x.ExternalWorkerCode }).IsUnique();
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany(x => x.Workers).HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -41,6 +97,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("devices");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Vendor).HasMaxLength(60).IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120).IsRequired();
@@ -51,7 +108,9 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.Username).HasMaxLength(120).IsRequired();
             entity.Property(x => x.EncryptedPassword).HasMaxLength(700).IsRequired();
             entity.Property(x => x.CgiLastRecNo);
+            entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => x.RegisterDeviceId).IsUnique();
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany(x => x.Devices).HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -59,6 +118,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("attendance_events");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.WorkerExternalId).HasMaxLength(80);
             entity.Property(x => x.WorkerName).HasMaxLength(180);
             entity.Property(x => x.Direction).HasConversion<string>().HasMaxLength(30).IsRequired();
@@ -67,6 +127,8 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.SnapshotPath).HasMaxLength(500);
             entity.Property(x => x.Source).HasMaxLength(80).IsRequired();
             entity.Property(x => x.RawPayloadJson).HasColumnType("jsonb");
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Device).WithMany(x => x.AttendanceEvents).HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Worker).WithMany().HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.SetNull);
@@ -80,12 +142,15 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("attendance_sessions");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.WorkerExternalId).HasMaxLength(80).IsRequired();
             entity.Property(x => x.WorkerName).HasMaxLength(180);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
             entity.Property(x => x.CloseReason).HasMaxLength(50);
             entity.Property(x => x.PresenceStatus).HasMaxLength(50);
             entity.Property(x => x.Source).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Worker).WithMany().HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.SetNull);
@@ -107,6 +172,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("security_events");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.EventType).HasConversion<string>().HasMaxLength(50).IsRequired();
             entity.Property(x => x.Severity).HasConversion<string>().HasMaxLength(30).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
@@ -124,6 +190,8 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.Source).HasMaxLength(80).IsRequired();
             entity.Property(x => x.RawPayloadJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.ReviewNote).HasMaxLength(500);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(x => new { x.SiteId, x.EventDate });
@@ -180,6 +248,7 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("dahua_active_register_raw_events");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.RegisterDeviceId).HasMaxLength(160);
             entity.Property(x => x.RemoteIp).HasMaxLength(80);
             entity.Property(x => x.CallbackCommandName).HasMaxLength(120);
@@ -187,6 +256,8 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
             entity.Property(x => x.PayloadBase64);
             entity.Property(x => x.DecodeStatus).HasMaxLength(80).IsRequired();
             entity.Property(x => x.DecodedJson).HasColumnType("jsonb");
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
             entity.HasIndex(x => x.CreatedAt);
             entity.HasIndex(x => x.CallbackCommand);
@@ -196,11 +267,14 @@ public sealed class BuildTrackDbContext(DbContextOptions<BuildTrackDbContext> op
         {
             entity.ToTable("device_connection_logs");
             entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
             entity.Property(x => x.RegisterDeviceId).HasMaxLength(160);
             entity.Property(x => x.RemoteIp).HasMaxLength(80);
             entity.Property(x => x.EventType).HasMaxLength(80).IsRequired();
             entity.Property(x => x.Message).HasMaxLength(1000).IsRequired();
             entity.Property(x => x.RawPayloadJson).HasColumnType("jsonb");
+            entity.HasIndex(x => x.TenantId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(x => x.Device).WithMany(x => x.ConnectionLogs).HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
         });
     }

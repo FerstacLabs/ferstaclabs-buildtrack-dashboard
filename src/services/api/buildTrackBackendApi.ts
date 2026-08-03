@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../../shared/api/client'
+import { authHeader } from '../../features/auth/authToken'
 
 export type DeviceMode = 'ActiveRegister' | 'CgiPollingFallback' | 'Simulator'
 export type DeviceStatus = 'Pending' | 'Online' | 'Offline' | 'Error'
@@ -281,12 +282,12 @@ const normalizeAttendanceDaily = (payload: unknown): AttendanceDailySummary => {
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const url = `${API_BASE}${path}`
+  const headers = new Headers(init?.headers)
+  headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
+  Object.entries(authHeader()).forEach(([key, value]) => headers.set(key, value))
   const response = await fetch(url, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   })
   const text = response.status === 204 ? '' : await response.text()
   const parsed = parseJsonBody(text)

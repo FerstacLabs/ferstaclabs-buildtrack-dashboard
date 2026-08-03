@@ -4,6 +4,7 @@ import type { CustomReportRow, ReportFilters } from '../../types/reports'
 import { DEFAULT_END_DATE, DEFAULT_MONTH, DEFAULT_START_DATE } from '../../utils/dateUtils'
 import { clearDataset, loadDataset, saveDataset } from '../storage/db'
 import { generateBuildTrackData } from './mockGenerator'
+import { useAuthStore } from '../../features/auth/authStore'
 
 export const defaultFilters: ReportFilters = {
   dateRange: [DEFAULT_START_DATE, DEFAULT_END_DATE],
@@ -21,6 +22,7 @@ export const defaultFilters: ReportFilters = {
 
 interface BuildTrackStore {
   data: BuildTrackData | null
+  tenantWorkspaceId?: string
   filters: ReportFilters
   customReports: CustomReportRow[]
   loading: boolean
@@ -50,8 +52,27 @@ const saveCustomReports = (reports: CustomReportRow[]) => {
   window.localStorage.setItem(customReportStorageKey, JSON.stringify(reports))
 }
 
+const emptyTenantData = (): BuildTrackData => ({
+  company: [],
+  sites: [],
+  workers: [],
+  assignments: [],
+  workPhases: [],
+  attendanceRecords: [],
+  riskRecords: [],
+  payrollRecords: [],
+  supervisorAuditRecords: [],
+  costCodeRecords: [],
+  generatedAt: new Date().toISOString(),
+  source: 'sample',
+})
+
+const isDemoTenant = () => useAuthStore.getState().tenant?.code?.toUpperCase() === 'DEMO'
+const currentTenantWorkspaceId = () => useAuthStore.getState().tenant?.id ?? 'anonymous'
+
 export const useBuildTrackStore = create<BuildTrackStore>((set, get) => ({
   data: null,
+  tenantWorkspaceId: undefined,
   filters: defaultFilters,
   customReports: loadCustomReports(),
   loading: false,
@@ -69,23 +90,30 @@ export const useBuildTrackStore = create<BuildTrackStore>((set, get) => ({
       return { customReports }
     }),
   loadData: async () => {
-    if (get().loading || get().initialized) return
+    const tenantWorkspaceId = currentTenantWorkspaceId()
+    if (get().loading || (get().initialized && get().tenantWorkspaceId === tenantWorkspaceId)) return
 
     set({ loading: true, error: '' })
     try {
+      if (!isDemoTenant()) {
+        set({ data: emptyTenantData(), tenantWorkspaceId, loading: false, initialized: true })
+        return
+      }
+
       const stored = await loadDataset()
       if (stored) {
-        set({ data: stored, loading: false, initialized: true })
+        set({ data: stored, tenantWorkspaceId, loading: false, initialized: true })
         return
       }
 
       const sample = generateBuildTrackData()
       await saveDataset(sample)
-      set({ data: sample, loading: false, initialized: true })
+      set({ data: sample, tenantWorkspaceId, loading: false, initialized: true })
     } catch (error) {
       const sample = generateBuildTrackData()
       set({
         data: sample,
+        tenantWorkspaceId,
         loading: false,
         initialized: true,
         error: error instanceof Error ? error.message : 'Məlumat yüklənmədi',
@@ -96,19 +124,19 @@ export const useBuildTrackStore = create<BuildTrackStore>((set, get) => ({
     set({ loading: true, error: '' })
     const generated = generateBuildTrackData(baseData)
     await saveDataset(generated)
-    set({ data: generated, loading: false, initialized: true, filters: defaultFilters })
+    set({ data: generated, tenantWorkspaceId: currentTenantWorkspaceId(), loading: false, initialized: true, filters: defaultFilters })
   },
   resetDemoData: async () => {
     set({ loading: true, error: '' })
     await clearDataset()
     const sample = generateBuildTrackData()
     await saveDataset(sample)
-    set({ data: sample, loading: false, initialized: true, filters: defaultFilters })
+    set({ data: sample, tenantWorkspaceId: currentTenantWorkspaceId(), loading: false, initialized: true, filters: defaultFilters })
   },
   generateSampleData: async () => {
     set({ loading: true, error: '' })
     const sample = generateBuildTrackData()
     await saveDataset(sample)
-    set({ data: sample, loading: false, initialized: true, filters: defaultFilters })
+    set({ data: sample, tenantWorkspaceId: currentTenantWorkspaceId(), loading: false, initialized: true, filters: defaultFilters })
   },
 }))

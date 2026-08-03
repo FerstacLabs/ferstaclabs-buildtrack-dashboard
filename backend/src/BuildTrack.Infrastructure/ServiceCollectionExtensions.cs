@@ -2,6 +2,7 @@
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Security;
 using BuildTrack.Infrastructure.Services;
+using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,7 @@ public static class ServiceCollectionExtensions
             ?? "Host=localhost;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack";
 
         services.AddDbContext<BuildTrackDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IPasswordProtector, AesPasswordProtector>();
         services.AddScoped<IAttendanceIngestionService, AttendanceIngestionService>();
         services.AddScoped<IDahuaAccessRecordIngestionPipeline, DahuaAccessRecordIngestionPipeline>();

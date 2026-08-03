@@ -1,3 +1,5 @@
+import { authHeader } from '../../auth/authToken'
+
 const devLog = (message: string, details?: unknown) => {
   if (import.meta.env.DEV) console.log(`[AI TTS] ${message}`, details ?? '')
 }
@@ -12,7 +14,10 @@ export const fetchTtsAudio = async (text: string): Promise<Blob> => {
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      ...authHeader(),
+    },
     body: JSON.stringify({
       text: textToSpeak,
       language: 'az-AZ',

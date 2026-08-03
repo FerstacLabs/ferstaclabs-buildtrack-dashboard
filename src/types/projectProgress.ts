@@ -247,6 +247,7 @@ export interface AiAssistantMessage {
 }
 
 export interface ProjectProgressData {
+  workspaceTenantId?: string
   projects: Project[]
   activeProjectId: string
   objects: ConstructionObject[]

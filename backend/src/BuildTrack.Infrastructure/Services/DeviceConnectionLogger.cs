@@ -20,8 +20,16 @@ public sealed class DeviceConnectionLogger(
         object? raw = null,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = deviceId is null
+            ? null
+            : await db.Devices
+                .AsNoTracking()
+                .Where(x => x.Id == deviceId)
+                .Select(x => (Guid?)x.TenantId)
+                .FirstOrDefaultAsync(cancellationToken);
         var item = new DeviceConnectionLog
         {
+            TenantId = tenantId,
             DeviceId = deviceId,
             RegisterDeviceId = registerDeviceId,
             RemoteIp = remoteIp,

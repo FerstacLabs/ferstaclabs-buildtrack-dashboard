@@ -3,6 +3,8 @@
 public sealed class DahuaActiveRegisterRawEvent
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
     public Guid? DeviceId { get; set; }
     public Device? Device { get; set; }
     public string? RegisterDeviceId { get; set; }

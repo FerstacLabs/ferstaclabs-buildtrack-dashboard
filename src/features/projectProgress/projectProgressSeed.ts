@@ -436,6 +436,7 @@ const objectSummary: ProjectEstimateSummary = {
 }
 
 export const projectProgressSeed: ProjectProgressData = {
+  workspaceTenantId: 'DEMO',
   projects: [villaProject],
   activeProjectId: villaProject.id,
   objects: constructionObjects,
@@ -453,4 +454,51 @@ export const projectProgressSeed: ProjectProgressData = {
   issues: objectIssues,
   risks: objectRisks,
   assistantMessages: [],
+}
+
+export const createEmptyProjectProgressData = (tenantId: string, companyName?: string): ProjectProgressData => {
+  const now = new Date().toISOString()
+  const project: Project = {
+    id: `project-${tenantId}`,
+    name: companyName ? `${companyName} layihəsi` : 'Yeni tikinti layihəsi',
+    currency: 'AZN',
+    location: '',
+    clientName: companyName,
+    createdAt: now,
+    activeEstimateVersionId: `estimate-${tenantId}`,
+  }
+
+  return {
+    workspaceTenantId: tenantId,
+    projects: [project],
+    activeProjectId: project.id,
+    objects: [],
+    project,
+    estimateVersions: [{
+      id: project.activeEstimateVersionId,
+      projectId: project.id,
+      name: 'Boş smeta',
+      createdAt: now,
+      totalAmount: 0,
+      notes: 'Yeni tenant üçün boş iş sahəsi.',
+    }],
+    summary: {
+      totalAmount: 0,
+      laborAmount: 0,
+      materialAmount: 0,
+      hiddenCostAmount: 0,
+      currency: 'AZN',
+    },
+    stages: [],
+    workItems: [],
+    crews: [],
+    workerAssignments: [],
+    materials: [],
+    attendanceSessions: [],
+    workHourAllocations: [],
+    dailyReports: [],
+    issues: [],
+    risks: [],
+    assistantMessages: [],
+  }
 }

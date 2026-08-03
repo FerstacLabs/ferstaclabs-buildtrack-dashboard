@@ -1784,6 +1784,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             var externalWorkerCode = DahuaWorkerCodeGenerator.NextWorkerCode(allSiteWorkers);
             resolvedWorker = new Worker
             {
+                TenantId = device.TenantId,
                 SiteId = device.SiteId,
                 ExternalWorkerCode = externalWorkerCode,
                 FullName = displayName,
@@ -2199,8 +2200,17 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
         try
         {
+            var tenantId = deviceId is null
+                ? null
+                : await db.Devices
+                    .AsNoTracking()
+                    .Where(x => x.Id == deviceId)
+                    .Select(x => (Guid?)x.TenantId)
+                    .FirstOrDefaultAsync(cancellationToken);
+
             db.DahuaActiveRegisterRawEvents.Add(new DahuaActiveRegisterRawEvent
             {
+                TenantId = tenantId,
                 DeviceId = deviceId,
                 RegisterDeviceId = registerDeviceId,
                 RemoteIp = remoteIp,
