@@ -1,7 +1,7 @@
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuthStore } from './authStore'
+import { LOGIN_FAILED_MESSAGE, useAuthStore } from './authStore'
 
 export const LoginPage = () => {
   const navigate = useNavigate()
@@ -13,7 +13,7 @@ export const LoginPage = () => {
       message.success('Giriş uğurludur')
       navigate(useAuthStore.getState().hasActiveLicense || hasActiveLicense ? '/' : '/license', { replace: true })
     } catch {
-      message.error('Email və ya şifrə düzgün deyil')
+      message.error(LOGIN_FAILED_MESSAGE)
     }
   }
 

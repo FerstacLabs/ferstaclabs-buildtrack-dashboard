@@ -63,10 +63,23 @@ interface AuthState {
   logout: () => Promise<void>
 }
 
+export const LOGIN_FAILED_MESSAGE = 'Giriş alınmadı. Email və ya şifrə yanlışdır.'
+
 const normalizeError = (error: unknown) => {
   if (error instanceof ApiClientError) return error.message || error.details || 'Sorğu alınmadı'
   if (error instanceof Error) return error.message
   return 'Sorğu alınmadı'
+}
+
+const normalizeLoginError = (error: unknown) => {
+  if (error instanceof ApiClientError) {
+    const apiMessage = error.message?.trim()
+    if (error.status === 401 || !apiMessage || apiMessage === '""') return LOGIN_FAILED_MESSAGE
+    return apiMessage
+  }
+
+  if (error instanceof Error && error.message) return error.message
+  return LOGIN_FAILED_MESSAGE
 }
 
 const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string) => {
@@ -115,7 +128,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       })
       set({ ...applyAuthResponse(response), loading: false, initialized: true })
     } catch (error) {
-      set({ loading: false, error: normalizeError(error) })
+      set({ loading: false, error: normalizeLoginError(error) })
       throw error
     }
   },

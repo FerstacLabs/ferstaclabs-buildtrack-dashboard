@@ -325,6 +325,7 @@ ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQuery
         var password = configuration["SEED_ADMIN_PASSWORD"];
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
 
+        var resetPassword = ParseBool(configuration["SEED_ADMIN_RESET_PASSWORD"]);
         var normalizedEmail = email.Trim().ToLowerInvariant();
         var fullName = string.IsNullOrWhiteSpace(configuration["SEED_ADMIN_FULL_NAME"])
             ? "BuildTrack Admin"
@@ -372,9 +373,22 @@ ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQuery
             user.Role = BuildTrackUserRole.Owner;
             user.Status = BuildTrackUserStatus.Active;
             user.UpdatedAt = DateTimeOffset.UtcNow;
+
+            if (resetPassword)
+            {
+                user.PasswordHash = BuildTrackPasswordHasher.HashPassword(password);
+                Console.WriteLine("Seed admin password hash updated from environment");
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool ParseBool(string? value)
+    {
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
     }
 }
 

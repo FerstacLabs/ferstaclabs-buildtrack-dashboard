@@ -55,6 +55,7 @@ JWT_EXPIRES_MINUTES=720
 
 SEED_ADMIN_EMAIL=admin@example.com
 SEED_ADMIN_PASSWORD=replace-with-secure-password
+SEED_ADMIN_RESET_PASSWORD=false
 SEED_ADMIN_FULL_NAME=FerstacLabs Admin
 SEED_ADMIN_TENANT_NAME=FerstacLabs Demo
 
@@ -62,6 +63,8 @@ CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://buildtrack.f
 ```
 
 If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure default admin password. The demo tenant still receives an active Unlimited license.
+
+To rotate the seeded admin password without deleting tenant or demo data, set `SEED_ADMIN_RESET_PASSWORD=true` together with the new `SEED_ADMIN_PASSWORD`, restart the API once, then set `SEED_ADMIN_RESET_PASSWORD=false` again.
 
 Create a tenant license as the demo/admin account:
 
