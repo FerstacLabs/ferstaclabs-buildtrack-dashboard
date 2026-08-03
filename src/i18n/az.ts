@@ -12,6 +12,7 @@ export const az = {
   'nav.supervisorAudit': 'Prorab Audit',
   'nav.export': 'Export / 1C',
   'nav.settings': 'Ayarlar',
+  'nav.adminLicenses': 'Admin lisenziyaları',
   'nav.attendanceGroup': 'Davamiyyət / Saatlar',
   'nav.attendanceHours': 'Davamiyyət / Saatlar',
   'nav.risksDelays': 'Risk və gecikmələr',

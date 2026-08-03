@@ -1,6 +1,7 @@
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
 import { Link, useNavigate } from 'react-router-dom'
+import { AuthLandingLink } from './AuthLandingLink'
 import { LOGIN_FAILED_MESSAGE, useAuthStore } from './authStore'
 
 export const LoginPage = () => {
@@ -20,6 +21,7 @@ export const LoginPage = () => {
   return (
     <div className="auth-page">
       <Card className="auth-card">
+        <AuthLandingLink />
         <Typography.Title level={2}>BuildTrack giriş</Typography.Title>
         <Typography.Paragraph>Şirkət hesabınıza daxil olun və layihələrinizi idarə edin.</Typography.Paragraph>
         {error && <Alert type="error" showIcon message={error} className="auth-alert" />}

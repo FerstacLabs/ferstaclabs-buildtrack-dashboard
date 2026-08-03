@@ -1,7 +1,8 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Result, Space, Tag, Typography, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore } from './authStore'
+import { AuthLandingLink } from './AuthLandingLink'
+import { LICENSE_ACTIVATION_FAILED_MESSAGE, useAuthStore } from './authStore'
 
 export const LicensePage = () => {
   const navigate = useNavigate()
@@ -14,19 +15,22 @@ export const LicensePage = () => {
       message.success('Lisenziya aktivləşdirildi')
       navigate('/', { replace: true })
     } catch {
-      message.error('Lisenziya aktivləşdirilmədi')
+      message.error(useAuthStore.getState().error ?? LICENSE_ACTIVATION_FAILED_MESSAGE)
     }
   }
 
   if (active) {
     return (
       <div className="auth-page">
+        <div className="auth-result-shell">
+          <AuthLandingLink />
         <Result
           status="success"
           title="Lisenziya aktivdir"
           subTitle={`${tenant?.companyName ?? 'Şirkət'} üçün giriş hazırdır.`}
           extra={<Button type="primary" onClick={() => navigate('/', { replace: true })}>Dashboard-a keç</Button>}
         />
+        </div>
       </div>
     )
   }
@@ -34,6 +38,7 @@ export const LicensePage = () => {
   return (
     <div className="auth-page">
       <Card className="auth-card license-card">
+        <AuthLandingLink />
         <Space direction="vertical" size={14} className="full-width">
           <SafetyCertificateOutlined className="license-icon" />
           <Typography.Title level={2}>Lisenziya tələb olunur</Typography.Title>

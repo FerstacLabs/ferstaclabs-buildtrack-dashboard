@@ -66,7 +66,9 @@ If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure
 
 To rotate the seeded admin password without deleting tenant or demo data, set `SEED_ADMIN_RESET_PASSWORD=true` together with the new `SEED_ADMIN_PASSWORD`, restart the API once, then set `SEED_ADMIN_RESET_PASSWORD=false` again.
 
-Create a tenant license as the demo/admin account:
+The seeded demo admin can manage tenant licenses from the app at `/admin/licenses`. The page lists all tenants, generates one-time raw license keys, and can directly activate a selected tenant license for onboarding/demo use.
+
+You can also create a tenant license as the demo/admin account with curl:
 
 ```bash
 curl -X POST https://api.ferstaclabs.com/api/admin/licenses \

@@ -25,14 +25,18 @@ export const MarketingLandingPage = () => (
         <Typography.Paragraph>
           Smeta, material, işçi davamiyyəti, kamera inteqrasiyası, maaş və risk hesabatları bir B2B SaaS platformasında.
         </Typography.Paragraph>
+        <Typography.Paragraph>
+          BuildTrack — FerstacLabs tərəfindən hazırlanmış tikinti idarəetmə platforması.
+        </Typography.Paragraph>
         <Space wrap>
           <Button type="primary" size="large" href={`${appBaseUrl}/register`} icon={<ArrowRightOutlined />}>Qeydiyyatdan keç</Button>
           <Button size="large" href={`${appBaseUrl}/login`}>Giriş</Button>
+          <Button size="large" href="#contact">Demo sorğusu</Button>
         </Space>
       </div>
     </section>
 
-    <section className="marketing-section">
+    <section className="marketing-section" id="contact">
       <Typography.Title level={2}>Tikinti sahəsində nəzarət boşluğu azalır</Typography.Title>
       <Row gutter={[18, 18]}>
         {['Əl ilə davamiyyət və gecikmiş maaş hesabatları', 'Material itkisi və smeta nəzarətsizliyi', 'Gecikən mərhələlər və riskli qərarlar'].map((item) => (

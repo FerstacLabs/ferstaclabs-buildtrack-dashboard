@@ -196,6 +196,22 @@ public sealed record CreateLicenseRequest(
 
 public sealed record CreateLicenseResponse(string LicenseKey, LicenseResponse License);
 
+public sealed record AdminTenantLicenseResponse(
+    Guid TenantId,
+    string CompanyName,
+    string? OwnerEmail,
+    TenantStatus TenantStatus,
+    LicensePlan? LicensePlan,
+    LicenseStatus? LicenseStatus,
+    DateTimeOffset? ExpiresAt,
+    int? MaxProjects,
+    int? MaxUsers,
+    int? MaxCameras,
+    DateTimeOffset CreatedAt,
+    Guid? LicenseId);
+
+public sealed record AdminActivateTenantLicenseRequest(Guid? LicenseId);
+
 
 
 

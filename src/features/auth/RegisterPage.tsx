@@ -1,6 +1,7 @@
 import { BankOutlined, LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
 import { Link, useNavigate } from 'react-router-dom'
+import { AuthLandingLink } from './AuthLandingLink'
 import { useAuthStore } from './authStore'
 
 export const RegisterPage = () => {
@@ -20,6 +21,7 @@ export const RegisterPage = () => {
   return (
     <div className="auth-page">
       <Card className="auth-card">
+        <AuthLandingLink />
         <Typography.Title level={2}>Şirkət qeydiyyatı</Typography.Title>
         <Typography.Paragraph>Yeni tenant boş iş sahəsi ilə yaradılır. Demo məlumatlar yalnız DEMO hesabında qalır.</Typography.Paragraph>
         {error && <Alert type="error" showIcon message={error} className="auth-alert" />}

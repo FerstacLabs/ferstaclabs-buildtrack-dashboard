@@ -66,6 +66,41 @@ export interface AttendanceLiveEvent {
   createdAt: string
 }
 
+export type LicensePlan = 'Trial' | 'Starter' | 'Business' | 'Enterprise' | 'Unlimited'
+export type LicenseStatus = 'Pending' | 'Active' | 'Expired' | 'Revoked'
+
+export interface LicenseResponse {
+  id: string
+  tenantId: string
+  plan: LicensePlan
+  status: LicenseStatus
+  startsAt: string
+  expiresAt?: string
+  maxProjects?: number
+  maxUsers?: number
+  maxCameras?: number
+}
+
+export interface AdminTenantLicenseRow {
+  tenantId: string
+  companyName: string
+  ownerEmail?: string
+  tenantStatus: 'Active' | 'Suspended'
+  licensePlan?: LicensePlan
+  licenseStatus?: LicenseStatus
+  expiresAt?: string
+  maxProjects?: number
+  maxUsers?: number
+  maxCameras?: number
+  createdAt: string
+  licenseId?: string
+}
+
+export interface CreateAdminLicenseResponse {
+  licenseKey: string
+  license: LicenseResponse
+}
+
 export interface AttendanceLiveWorker {
   workerExternalId: string
   workerName?: string
@@ -323,6 +358,11 @@ export const buildTrackBackendApi = {
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
   getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),
   getActiveRegisterRawEvents: async (limit = 100) => unwrapArray<ActiveRegisterRawEventRow>(await request<unknown>(`/api/dahua/active-register/raw-events?limit=${limit}`)),
+  getAdminLicenses: async () => unwrapArray<AdminTenantLicenseRow>(await request<unknown>('/api/admin/licenses')),
+  createAdminLicense: (body: { tenantId: string; plan: LicensePlan; expiresAt?: string; maxProjects?: number; maxUsers?: number; maxCameras?: number }) =>
+    request<CreateAdminLicenseResponse>('/api/admin/licenses', { method: 'POST', body: JSON.stringify(body) }),
+  activateTenantLicense: (tenantId: string, licenseId?: string) =>
+    request<LicenseResponse>(`/api/admin/licenses/${tenantId}/activate`, { method: 'POST', body: JSON.stringify({ licenseId }) }),
 }
 
 

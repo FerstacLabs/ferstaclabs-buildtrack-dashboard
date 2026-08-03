@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from '../components/layout/AppLayout'
 import { LicensePage } from '../features/auth/LicensePage'
+import { AdminLicensesPage } from '../features/admin/AdminLicensesPage'
 import { LoginPage } from '../features/auth/LoginPage'
 import { PublicAuthPage, RequireAuth, RequireLogin } from '../features/auth/AuthGate'
 import { RegisterPage } from '../features/auth/RegisterPage'
@@ -63,6 +64,7 @@ export const router = createBrowserRouter([
       { path: 'custom-reports', element: <CustomReportsPage /> },
       { path: 'export', element: <ExportPage /> },
       { path: 'devices', element: <DevicesPage /> },
+      { path: 'admin/licenses', element: <AdminLicensesPage /> },
       { path: 'security-events', element: <SecurityEventsPage /> },
       { path: 'project-progress', element: <Navigate to="/" replace /> },
       { path: 'project-progress/estimate', element: <ProjectEstimatePage /> },

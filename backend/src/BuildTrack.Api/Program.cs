@@ -208,6 +208,54 @@ app.MapPost("/api/licenses/activate", async (
     return Results.Ok(ToLicenseResponse(license));
 });
 
+app.MapGet("/api/admin/licenses", async (
+    BuildTrackDbContext db,
+    ITenantContext tenantContext,
+    CancellationToken ct) =>
+{
+    var currentTenantId = RequireTenantId(tenantContext);
+    var currentTenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == currentTenantId, ct);
+    if (currentTenant?.Code != "DEMO" || !IsAdminRole(tenantContext.Role)) return Results.Forbid();
+
+    var tenants = await db.Tenants.AsNoTracking().OrderBy(x => x.CompanyName).ToListAsync(ct);
+    var tenantIds = tenants.Select(x => x.Id).ToArray();
+    var users = await db.Users.AsNoTracking()
+        .Where(x => tenantIds.Contains(x.TenantId))
+        .OrderBy(x => x.Role == BuildTrackUserRole.Owner ? 0 : 1)
+        .ThenBy(x => x.CreatedAt)
+        .ToListAsync(ct);
+    var licenses = await db.Licenses.AsNoTracking()
+        .Where(x => tenantIds.Contains(x.TenantId))
+        .OrderByDescending(x => x.Status == LicenseStatus.Active)
+        .ThenByDescending(x => x.ActivatedAt ?? x.CreatedAt)
+        .ToListAsync(ct);
+
+    var ownerEmailByTenant = users
+        .GroupBy(x => x.TenantId)
+        .ToDictionary(group => group.Key, group => group.FirstOrDefault()?.Email);
+    var licenseByTenant = licenses
+        .GroupBy(x => x.TenantId)
+        .ToDictionary(group => group.Key, group => group.FirstOrDefault());
+
+    return Results.Ok(tenants.Select(tenant =>
+    {
+        licenseByTenant.TryGetValue(tenant.Id, out var license);
+        return new AdminTenantLicenseResponse(
+            tenant.Id,
+            tenant.CompanyName,
+            ownerEmailByTenant.GetValueOrDefault(tenant.Id),
+            tenant.Status,
+            license?.Plan,
+            license?.Status,
+            license?.ExpiresAt,
+            license?.MaxProjects,
+            license?.MaxUsers,
+            license?.MaxCameras,
+            tenant.CreatedAt,
+            license?.Id);
+    }));
+});
+
 app.MapPost("/api/admin/licenses", async (
     CreateLicenseRequest request,
     BuildTrackDbContext db,
@@ -244,6 +292,38 @@ app.MapPost("/api/admin/licenses", async (
     db.Licenses.Add(license);
     await db.SaveChangesAsync(ct);
     return Results.Ok(new CreateLicenseResponse(rawKey, ToLicenseResponse(license)));
+});
+
+app.MapPost("/api/admin/licenses/{tenantId:guid}/activate", async (
+    Guid tenantId,
+    AdminActivateTenantLicenseRequest request,
+    BuildTrackDbContext db,
+    ITenantContext tenantContext,
+    CancellationToken ct) =>
+{
+    var currentTenantId = RequireTenantId(tenantContext);
+    var currentTenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == currentTenantId, ct);
+    if (currentTenant?.Code != "DEMO" || !IsAdminRole(tenantContext.Role)) return Results.Forbid();
+
+    var tenantExists = await db.Tenants.AnyAsync(x => x.Id == tenantId, ct);
+    if (!tenantExists) return Results.NotFound(new { error = "Tenant was not found" });
+
+    var license = request.LicenseId is not null
+        ? await db.Licenses.FirstOrDefaultAsync(x => x.Id == request.LicenseId && x.TenantId == tenantId, ct)
+        : await db.Licenses
+            .Where(x => x.TenantId == tenantId && x.Status != LicenseStatus.Revoked)
+            .OrderByDescending(x => x.Status == LicenseStatus.Pending)
+            .ThenByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+
+    if (license is null) return Results.NotFound(new { error = "License was not found" });
+    if (license.Status == LicenseStatus.Revoked) return Results.BadRequest(new { error = "License cannot be activated" });
+
+    license.Status = LicenseStatus.Active;
+    license.ActivatedAt = DateTimeOffset.UtcNow;
+    license.StartsAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(ToLicenseResponse(license));
 });
 
 app.MapGet("/api/ai/project-assistant/status", (AiOptions options) =>

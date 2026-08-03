@@ -64,6 +64,9 @@ interface AuthState {
 }
 
 export const LOGIN_FAILED_MESSAGE = 'Giriş alınmadı. Email və ya şifrə yanlışdır.'
+export const LICENSE_INVALID_TENANT_MESSAGE = 'Bu lisenziya açarı bu şirkət hesabı üçün nəzərdə tutulmayıb.'
+export const LICENSE_INVALID_MESSAGE = 'Lisenziya açarı yanlışdır və ya aktiv deyil.'
+export const LICENSE_ACTIVATION_FAILED_MESSAGE = 'Lisenziya aktivləşdirilə bilmədi. Yenidən yoxlayın.'
 
 const normalizeError = (error: unknown) => {
   if (error instanceof ApiClientError) return error.message || error.details || 'Sorğu alınmadı'
@@ -80,6 +83,17 @@ const normalizeLoginError = (error: unknown) => {
 
   if (error instanceof Error && error.message) return error.message
   return LOGIN_FAILED_MESSAGE
+}
+
+const normalizeLicenseError = (error: unknown) => {
+  if (error instanceof ApiClientError) {
+    const payload = `${error.message} ${error.details}`.toLowerCase()
+    if (payload.includes('not valid for this tenant')) return LICENSE_INVALID_TENANT_MESSAGE
+    if (payload.includes('cannot be activated') || payload.includes('revoked') || payload.includes('expired')) return LICENSE_INVALID_MESSAGE
+    if (error.status === 400 || error.status === 404 || !error.message?.trim() || error.message.trim() === '""') return LICENSE_ACTIVATION_FAILED_MESSAGE
+  }
+
+  return LICENSE_ACTIVATION_FAILED_MESSAGE
 }
 
 const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string) => {
@@ -141,7 +155,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       })
       set({ ...applyAuthResponse(response), loading: false, initialized: true })
     } catch (error) {
-      set({ loading: false, error: normalizeError(error) })
+      set({ loading: false, error: normalizeLicenseError(error) })
       throw error
     }
   },

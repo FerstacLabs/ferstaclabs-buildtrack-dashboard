@@ -1,5 +1,6 @@
-import { Spin } from 'antd'
-import { useEffect } from 'react'
+import { MenuOutlined } from '@ant-design/icons'
+import { Button, Drawer, Spin } from 'antd'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { AiAssistant } from '../../features/aiAssistant/AiAssistant'
 import { useProjectProgressStore } from '../../features/projectProgress/projectProgressStore'
@@ -10,6 +11,7 @@ import { Sidebar } from './Sidebar'
 
 export const AppLayout = () => {
   const { data, initialized, loadData, loading } = useBuildTrackStore()
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const location = useLocation()
   const objects = useProjectProgressStore((state) => state.objects)
   const selectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
@@ -37,6 +39,13 @@ export const AppLayout = () => {
     <div className="app-shell">
       <Sidebar />
       <main className="app-main">
+        <Button
+          className="mobile-menu-toggle"
+          icon={<MenuOutlined />}
+          onClick={() => setMobileSidebarOpen(true)}
+        >
+          Menyu
+        </Button>
         <ApiConnectionStatus />
         {showProjectDebug && (
           <div
@@ -59,6 +68,16 @@ export const AppLayout = () => {
           </div>
         ) : <Spin size="large" />}
       </main>
+      <Drawer
+        className="mobile-sidebar-drawer"
+        open={mobileSidebarOpen}
+        placement="left"
+        width={300}
+        closable={false}
+        onClose={() => setMobileSidebarOpen(false)}
+      >
+        <Sidebar embedded onNavigate={() => setMobileSidebarOpen(false)} />
+      </Drawer>
       <AiAssistant />
     </div>
   )

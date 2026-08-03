@@ -10,6 +10,7 @@ import {
   EyeInvisibleOutlined,
   FieldTimeOutlined,
   FileSearchOutlined,
+  KeyOutlined,
   RightOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -21,6 +22,7 @@ import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useI18n } from '../../i18n'
+import { useAuthStore } from '../../features/auth/authStore'
 
 interface SidebarItem {
   labelKey: string
@@ -34,6 +36,11 @@ interface SidebarGroup {
   labelKey: string
   icon: ReactNode
   children: SidebarItem[]
+}
+
+interface SidebarProps {
+  embedded?: boolean
+  onNavigate?: () => void
 }
 
 const mainItems: SidebarItem[] = [
@@ -79,13 +86,14 @@ const isActivePath = (pathname: string, item: SidebarItem) => {
   return pathname === item.path || pathname.startsWith(`${item.path}/`)
 }
 
-const SidebarLink = ({ item, child = false }: { item: SidebarItem; child?: boolean }) => {
+const SidebarLink = ({ item, child = false, onNavigate }: { item: SidebarItem; child?: boolean; onNavigate?: () => void }) => {
   const { t } = useI18n()
   return (
   <NavLink
     to={item.path}
     end={item.end ?? item.path === '/'}
     className={({ isActive }) => `sidebar-link${child ? ' sidebar-child' : ''}${isActive ? ' active' : ''}`}
+    onClick={onNavigate}
   >
     <span className="sidebar-icon">{item.icon}</span>
     <span>{t(item.labelKey)}</span>
@@ -93,9 +101,11 @@ const SidebarLink = ({ item, child = false }: { item: SidebarItem; child?: boole
   )
 }
 
-export const Sidebar = () => {
+export const Sidebar = ({ embedded = false, onNavigate }: SidebarProps) => {
   const { t } = useI18n()
+  const { tenant, user } = useAuthStore()
   const location = useLocation()
+  const showAdminLicenses = tenant?.code === 'DEMO' && (user?.role === 'Owner' || user?.role === 'Admin')
   const activeGroupIds = useMemo(
     () => new Set(groups.filter((group) => group.children.some((item) => isActivePath(location.pathname, item))).map((group) => group.id)),
     [location.pathname],
@@ -113,7 +123,7 @@ export const Sidebar = () => {
   const cameraOpen = openGroups.camera || activeGroupIds.has('camera')
 
   return (
-    <aside className="app-sidebar">
+    <aside className={`app-sidebar${embedded ? ' sidebar-embedded' : ''}`}>
       <div className="sidebar-brand">
         <div className="sidebar-logo">BT</div>
         <div>
@@ -123,7 +133,7 @@ export const Sidebar = () => {
       </div>
 
       <nav className="sidebar-nav">
-        {mainItems.map((item) => <SidebarLink key={item.path} item={item} />)}
+        {mainItems.map((item) => <SidebarLink key={item.path} item={item} onNavigate={onNavigate} />)}
 
         <div className="sidebar-group">
           <button
@@ -135,10 +145,10 @@ export const Sidebar = () => {
             <span>{t(groups[0].labelKey)}</span>
             <span className="sidebar-caret">{attendanceOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
-          {attendanceOpen && groups[0].children.map((item) => <SidebarLink key={item.path} item={item} child />)}
+          {attendanceOpen && groups[0].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
         </div>
 
-        {footerItems.slice(0, 2).map((item) => <SidebarLink key={item.path} item={item} />)}
+        {footerItems.slice(0, 2).map((item) => <SidebarLink key={item.path} item={item} onNavigate={onNavigate} />)}
 
         <div className="sidebar-group">
           <button
@@ -150,10 +160,11 @@ export const Sidebar = () => {
             <span>{t(groups[1].labelKey)}</span>
             <span className="sidebar-caret">{cameraOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
-          {cameraOpen && groups[1].children.map((item) => <SidebarLink key={item.path} item={item} child />)}
+          {cameraOpen && groups[1].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
         </div>
 
-        {footerItems.slice(2).map((item) => <SidebarLink key={item.path} item={item} />)}
+        {showAdminLicenses && <SidebarLink item={{ labelKey: 'nav.adminLicenses', path: '/admin/licenses', icon: <KeyOutlined /> }} onNavigate={onNavigate} />}
+        {footerItems.slice(2).map((item) => <SidebarLink key={item.path} item={item} onNavigate={onNavigate} />)}
       </nav>
     </aside>
   )

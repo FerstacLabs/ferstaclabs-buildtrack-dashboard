@@ -21,7 +21,7 @@ type DeviceFormValues = {
   name: string
   model: string
   mode: DeviceMode
-  registerDeviceId: string
+  registerDeviceId?: string
   registerPort: number
   username: string
   password: string
@@ -127,7 +127,7 @@ export const DevicesPage = () => {
     setLoading(true)
     try {
       await buildTrackBackendApi.createDevice({ ...values, vendor: 'dahua' })
-      form.setFieldsValue({ registerDeviceId: `BT-${Date.now()}`, password: '' })
+      form.setFieldsValue({ registerDeviceId: '', password: '' })
       message.success('Kamera cihazı yaradıldı')
       await loadData()
     } catch (err) {
@@ -166,7 +166,7 @@ export const DevicesPage = () => {
     { title: 'Obyekt', dataIndex: 'siteId', render: (value) => siteNameById.get(value) ?? value },
     { title: 'Model', dataIndex: 'model' },
     { title: 'Rejim', dataIndex: 'mode', render: (value: DeviceMode) => <Tag color="blue">{modeLabel[value] ?? value}</Tag> },
-    { title: 'Device ID', dataIndex: 'registerDeviceId' },
+    { title: 'Sub-device ID', dataIndex: 'registerDeviceId' },
     { title: 'Register port', dataIndex: 'registerPort' },
     { title: 'Status', dataIndex: 'status', render: (value: DeviceStatus) => <Tag color={statusColor[value] ?? 'default'}>{statusLabel[value] ?? value}</Tag> },
     { title: 'NetSDK decode', dataIndex: 'netSdkDecodeStatus', render: (value) => <Tag color={value === 'Active' ? 'green' : value === 'Error' ? 'red' : 'orange'}>{value ?? 'Unknown'}</Tag> },
@@ -244,7 +244,7 @@ export const DevicesPage = () => {
           <Form<DeviceFormValues>
             form={form}
             layout="vertical"
-            initialValues={{ model: 'DHI-ASI6213J-MW', mode: 'ActiveRegister', registerPort: 9500, username: 'admin', registerDeviceId: `BT-${Date.now()}` }}
+            initialValues={{ model: 'DHI-ASI6213J-MW', mode: 'ActiveRegister', registerPort: 7000, username: 'admin' }}
             onFinish={createDevice}
           >
             <Form.Item label="Obyekt" name="siteId" rules={[{ required: true, message: 'Obyekt seçin' }]}>
@@ -259,8 +259,8 @@ export const DevicesPage = () => {
             <Form.Item label="Rejim" name="mode">
               <Select options={modeOptions} />
             </Form.Item>
-            <Form.Item label="Register Device ID" name="registerDeviceId" rules={[{ required: true, message: 'Device ID yazın' }]}>
-              <Input placeholder="BT-SITE001-ENTRANCE1" />
+            <Form.Item label="Sub-device ID" name="registerDeviceId" extra="Boş saxlasanız sistem BT-<TENANTCODE>-CAM001 formatında yaradacaq.">
+              <Input placeholder="Sistem tərəfindən avtomatik verilir" />
             </Form.Item>
             <Form.Item label="Register port" name="registerPort">
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
@@ -282,9 +282,9 @@ export const DevicesPage = () => {
           <ol>
             <li>Kamera terminalında Connection &gt; Network &gt; Active Register bölməsinə keçin.</li>
             <li>Active Register Enable = ON edin.</li>
-            <li>Server IP: BuildTrack backend public IP.</li>
-            <li>Port: cihazda göstərilən register port, adətən 9500.</li>
-            <li>Device ID: BuildTrack-də yaradılan Register Device ID.</li>
+            <li>Server IP: 46.101.182.202.</li>
+            <li>Port: 7000.</li>
+            <li>Sub-device ID: BuildTrack-də yaradılan Register Device ID.</li>
           </ol>
         </aside>
         <aside className="panel-card instruction-panel">

@@ -12,6 +12,7 @@ export const ru = {
   'nav.supervisorAudit': 'Аудит прораба',
   'nav.export': 'Экспорт / 1C',
   'nav.settings': 'Настройки',
+  'nav.adminLicenses': 'Админ лицензии',
   'nav.attendanceGroup': 'Посещаемость / часы',
   'nav.attendanceHours': 'Посещаемость / часы',
   'nav.risksDelays': 'Риски и задержки',

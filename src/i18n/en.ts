@@ -12,6 +12,7 @@ export const en = {
   'nav.supervisorAudit': 'Foreman Audit',
   'nav.export': 'Export / 1C',
   'nav.settings': 'Settings',
+  'nav.adminLicenses': 'Admin licenses',
   'nav.attendanceGroup': 'Attendance / Hours',
   'nav.attendanceHours': 'Attendance / Hours',
   'nav.risksDelays': 'Risks and delays',

@@ -1,40 +1,17 @@
-import { ClockCircleOutlined, ExportOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
-import { Button, Form, Input, InputNumber, Select, Tag, message } from 'antd'
+import { ApiOutlined, GlobalOutlined, LockOutlined, LogoutOutlined, RobotOutlined, SafetyCertificateOutlined, SettingOutlined } from '@ant-design/icons'
+import { Button, Descriptions, Select, Space, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { languageOptions, type AppLanguage, useI18n } from '../../i18n'
+import { buildTrackBackendApi, type ActiveRegisterStatus, type BackendDevice } from '../../services/api/buildTrackBackendApi'
 import { tryApiRequest } from '../../shared/api/client'
-import { useBuildTrackStore } from '../../services/data/dataService'
-import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
-
-interface AppSettings {
-  companyDisplayName: string
-  defaultWorkStart: string
-  defaultWorkEnd: string
-  defaultGeofenceRadius: number
-  lowRiskThreshold: number
-  mediumRiskThreshold: number
-  highRiskThreshold: number
-  exportFormatPreference: string
-  language: AppLanguage
-}
+import { useAuthStore } from '../auth/authStore'
 
 interface AiAssistantStatus {
   enabled: boolean
   configured: boolean
-  model: string
 }
-
-const settingsStorageKey = 'buildtrack-app-settings'
-
-const settingCards = [
-  ['settings.card.company.title', 'settings.card.company.text', <SettingOutlined />],
-  ['settings.card.hours.title', 'settings.card.hours.text', <ClockCircleOutlined />],
-  ['settings.card.risk.title', 'settings.card.risk.text', <SafetyCertificateOutlined />],
-  ['settings.card.export.title', 'settings.card.export.text', <ExportOutlined />],
-  ['settings.card.roles.title', 'settings.card.roles.text', <TeamOutlined />],
-  ['settings.card.ai.title', 'settings.card.ai.text', <RobotOutlined />],
-]
 
 const languageSavedMessages: Record<AppLanguage, string> = {
   az: 'Dil ayarı yadda saxlandı',
@@ -42,170 +19,134 @@ const languageSavedMessages: Record<AppLanguage, string> = {
   ru: 'Настройка языка сохранена',
 }
 
-const loadSettings = (fallbackName: string, fallbackLanguage: AppLanguage): AppSettings => {
-  const fallback: AppSettings = {
-    companyDisplayName: fallbackName,
-    defaultWorkStart: '08:00',
-    defaultWorkEnd: '17:00',
-    defaultGeofenceRadius: 200,
-    lowRiskThreshold: 40,
-    mediumRiskThreshold: 60,
-    highRiskThreshold: 80,
-    exportFormatPreference: 'Excel',
-    language: fallbackLanguage,
-  }
-
-  try {
-    const raw = window.localStorage.getItem(settingsStorageKey)
-    return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<AppSettings>) } : fallback
-  } catch {
-    return fallback
-  }
-}
+const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString('az-AZ') : '-'
+const formatDateTime = (value?: string) => value ? new Date(value).toLocaleString('az-AZ') : '-'
 
 export const SettingsPage = () => {
+  const navigate = useNavigate()
   const { language, setLanguage, t } = useI18n()
-  const { data, resetDemoData } = useBuildTrackStore()
-  const project = useProjectProgressStore((state) => state.project)
-  const refreshSeedData = useProjectProgressStore((state) => state.refreshSeedData)
-  const [form] = Form.useForm<AppSettings>()
-  const [riskForm] = Form.useForm<AppSettings>()
+  const { tenant, user, license, logout } = useAuthStore()
   const [aiStatus, setAiStatus] = useState<AiAssistantStatus | null>(null)
-  const [aiChecking, setAiChecking] = useState(false)
-  const companyName = data?.company[0]?.company_name ?? project.name
+  const [devices, setDevices] = useState<BackendDevice[]>([])
+  const [activeRegisterStatus, setActiveRegisterStatus] = useState<ActiveRegisterStatus | null>(null)
 
-  useEffect(() => {
-    const settings = loadSettings(companyName, language)
-    form.setFieldsValue(settings)
-    riskForm.setFieldsValue(settings)
-  }, [companyName, form, language, riskForm])
-
-  const checkAiStatus = useCallback(async () => {
-    setAiChecking(true)
-    const status = await tryApiRequest<AiAssistantStatus>('/api/ai/project-assistant/status')
-    setAiChecking(false)
-    if (status) {
-      setAiStatus(status)
-      void message.success('AI bağlantısı yoxlanıldı')
-    } else {
-      setAiStatus({ enabled: false, configured: false, model: 'Naməlum' })
-      void message.warning('Backend AI statusu əlçatan deyil')
-    }
+  const loadOperationalStatus = useCallback(async () => {
+    const [ai, deviceRows, activeStatus] = await Promise.all([
+      tryApiRequest<AiAssistantStatus>('/api/ai/project-assistant/status'),
+      buildTrackBackendApi.getDevices().catch(() => []),
+      buildTrackBackendApi.getActiveRegisterStatus().catch(() => null),
+    ])
+    setAiStatus(ai ?? { enabled: false, configured: false })
+    setDevices(deviceRows)
+    setActiveRegisterStatus(activeStatus)
   }, [])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void checkAiStatus(), 0)
-    return () => window.clearTimeout(timer)
-  }, [checkAiStatus])
-
-  if (!data) return null
-
-  const saveSettings = (values: AppSettings) => {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify({ ...loadSettings(companyName, language), ...values, language }))
-    void message.success(t('settings.saved'))
-  }
+    void loadOperationalStatus()
+  }, [loadOperationalStatus])
 
   const changeLanguage = (nextLanguage: AppLanguage) => {
     setLanguage(nextLanguage)
-    const settings = { ...loadSettings(companyName, language), language: nextLanguage }
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
-    form.setFieldValue('language', nextLanguage)
     void message.success(languageSavedMessages[nextLanguage])
   }
 
-  const refreshSampleData = async () => {
-    refreshSeedData()
-    await resetDemoData()
-    void message.success('Nümunə məlumatları yeniləndi')
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login', { replace: true })
   }
+
+  const lastCameraEvent = devices
+    .map((device) => device.lastEventAt ?? device.lastSeenAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1)
 
   return (
     <div className="page-stack">
-      <PageTitle title={t('settings.title')} subtitle={t('settings.subtitle')} />
+      <PageTitle title={t('settings.title')} subtitle="Şirkət hesabı, lisenziya, dil və kamera inteqrasiyası" />
 
-      <section className="settings-grid">
-        {settingCards.map(([title, text, icon]) => (
-          <section className="panel-card" key={String(title)}>
-            <div className="kpi-icon kpi-blue">{icon}</div>
-            <h2>{t(String(title))}</h2>
-            <p>{t(String(text))}</p>
-          </section>
-        ))}
-      </section>
-
-      <section className="content-grid">
+      <section className="settings-overview-grid">
         <section className="panel-card">
-          <h2>{t('settings.language.title')}</h2>
-          <Form layout="vertical">
-            <Form.Item label={t('settings.language.field')}>
-              <Select
-                value={language}
-                options={languageOptions.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
-                onChange={changeLanguage}
-              />
-            </Form.Item>
-          </Form>
-        </section>
-
-        <section className="panel-card">
-          <h2>{t('settings.main')}</h2>
-          <Form form={form} layout="vertical" onFinish={saveSettings}>
-            <Form.Item label="Şirkət görünüş adı" name="companyDisplayName">
-              <Input />
-            </Form.Item>
-            <Form.Item label="Standart iş başlama vaxtı" name="defaultWorkStart">
-              <Select options={[{ label: '07:00', value: '07:00' }, { label: '08:00', value: '08:00' }, { label: '09:00', value: '09:00' }]} />
-            </Form.Item>
-            <Form.Item label="Standart iş bitmə vaxtı" name="defaultWorkEnd">
-              <Select options={[{ label: '16:00', value: '16:00' }, { label: '17:00', value: '17:00' }, { label: '18:00', value: '18:00' }]} />
-            </Form.Item>
-            <Form.Item label="Default geofence radiusu" name="defaultGeofenceRadius">
-              <InputNumber min={50} max={1000} addonAfter="m" />
-            </Form.Item>
-            <Button type="primary" htmlType="submit">{t('settings.save')}</Button>
-          </Form>
-        </section>
-
-        <section className="panel-card">
-          <h2>Risk və export qaydaları</h2>
-          <Form form={riskForm} layout="vertical" onFinish={saveSettings}>
-            <Form.Item label="Orta risk başlanğıcı" name="lowRiskThreshold">
-              <InputNumber min={0} max={100} />
-            </Form.Item>
-            <Form.Item label="Yüksək risk başlanğıcı" name="mediumRiskThreshold">
-              <InputNumber min={0} max={100} />
-            </Form.Item>
-            <Form.Item label="Kritik risk başlanğıcı" name="highRiskThreshold">
-              <InputNumber min={0} max={100} />
-            </Form.Item>
-            <Form.Item label="Export formatı seçimi" name="exportFormatPreference">
-              <Select options={[{ label: 'Excel', value: 'Excel' }, { label: 'CSV', value: 'CSV' }, { label: '1C XML', value: '1C XML' }]} />
-            </Form.Item>
-            <Button type="primary" htmlType="submit">{t('settings.save')}</Button>
-          </Form>
-          <div className="settings-reset">
-            <Button danger onClick={() => void refreshSampleData()}>Nümunə məlumatları yenilə</Button>
+          <div className="settings-section-title">
+            <SettingOutlined />
+            <h2>Şirkət / hesab</h2>
           </div>
+          <Descriptions column={1} size="small">
+            <Descriptions.Item label="Şirkət adı">{tenant?.companyName ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Owner/Admin email">{user?.email ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Rol">{user?.role ?? '-'}</Descriptions.Item>
+          </Descriptions>
+          <p className="muted-text">Şirkət adını dəyişmək üçün administratorla əlaqə saxlayın.</p>
         </section>
 
         <section className="panel-card">
-          <h2>AI köməkçi</h2>
-          <div className="settings-ai-status">
-            <div>
-              <span className="muted-text">Status</span>
-              <Tag color={aiStatus?.enabled && aiStatus.configured ? 'success' : 'warning'}>
-                {aiStatus?.enabled && aiStatus.configured ? 'Aktiv' : 'Deaktiv'}
-              </Tag>
-            </div>
-            <div>
-              <span className="muted-text">Model</span>
-              <strong>{aiStatus?.model ?? 'Yoxlanılır'}</strong>
-            </div>
-            <Button loading={aiChecking} onClick={() => void checkAiStatus()}>API bağlantısını yoxla</Button>
+          <div className="settings-section-title">
+            <SafetyCertificateOutlined />
+            <h2>Lisenziya</h2>
           </div>
-          <p className="muted-text">
-            OpenAI API açarı yalnız backend serverdə saxlanmalıdır. Frontend, Vercel env və localStorage daxilində heç bir AI açarı saxlanmır.
-          </p>
+          <Descriptions column={1} size="small">
+            <Descriptions.Item label="Plan">{license?.plan ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Status">
+              <Tag color={license?.status === 'Active' ? 'green' : 'orange'}>{license?.status ?? 'Pending'}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="Max layihə">{license?.maxProjects ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Max istifadəçi">{license?.maxUsers ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Max kamera">{license?.maxCameras ?? '-'}</Descriptions.Item>
+            <Descriptions.Item label="Bitmə tarixi">{formatDate(license?.expiresAt)}</Descriptions.Item>
+          </Descriptions>
+          {license?.status !== 'Active' && <Button onClick={() => navigate('/license')}>Lisenziyanı aktivləşdir</Button>}
+        </section>
+
+        <section className="panel-card compact-settings-card">
+          <div className="settings-section-title">
+            <GlobalOutlined />
+            <h2>Dil</h2>
+          </div>
+          <Select
+            value={language}
+            options={languageOptions.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+            onChange={changeLanguage}
+            style={{ width: '100%' }}
+          />
+        </section>
+
+        <section className="panel-card">
+          <div className="settings-section-title">
+            <RobotOutlined />
+            <h2>AI köməkçi</h2>
+          </div>
+          <Tag color={aiStatus?.enabled && aiStatus.configured ? 'green' : 'default'}>
+            {aiStatus?.enabled && aiStatus.configured ? 'AI köməkçi aktivdir' : 'AI köməkçi hazırda aktiv deyil'}
+          </Tag>
+          <p className="muted-text">Layihə məlumatları və hesabatlarla işləmək üçün köməkçi modul.</p>
+        </section>
+
+        <section className="panel-card">
+          <div className="settings-section-title">
+            <ApiOutlined />
+            <h2>Kamera inteqrasiyası</h2>
+          </div>
+          <Descriptions column={1} size="small">
+            <Descriptions.Item label="Server IP">46.101.182.202</Descriptions.Item>
+            <Descriptions.Item label="Active Register port">7000</Descriptions.Item>
+            <Descriptions.Item label="Qeydiyyatlı kamera">{devices.length}</Descriptions.Item>
+            <Descriptions.Item label="Son kamera hadisəsi">{formatDateTime(lastCameraEvent)}</Descriptions.Item>
+            <Descriptions.Item label="Listener">
+              <Tag color={activeRegisterStatus?.listenerActive ? 'green' : 'orange'}>{activeRegisterStatus?.listenerActive ? 'Aktiv' : 'Gözləyir'}</Tag>
+            </Descriptions.Item>
+          </Descriptions>
+          <Button onClick={() => navigate('/devices')}>Kamera cihazlarına keç</Button>
+        </section>
+
+        <section className="panel-card">
+          <div className="settings-section-title">
+            <LockOutlined />
+            <h2>Təhlükəsizlik</h2>
+          </div>
+          <Space wrap>
+            <Button disabled>Şifrəni dəyiş — Tezliklə əlavə olunacaq</Button>
+            <Button danger icon={<LogoutOutlined />} onClick={() => void handleLogout()}>Çıxış</Button>
+          </Space>
         </section>
       </section>
     </div>
