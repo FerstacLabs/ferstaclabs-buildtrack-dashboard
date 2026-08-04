@@ -27,6 +27,8 @@ interface WorkerFormValues {
   dahuaCardName?: string
   dahuaUserId?: string
   cameraDeviceId?: string
+  assignedSiteIds?: string[]
+  primarySiteId?: string
 }
 
 interface WorkerRow {
@@ -57,6 +59,12 @@ interface WorkerRow {
   dahuaUserId?: string
   cameraDeviceId?: string
   cameraDeviceName?: string
+  siteAssignments?: BackendWorker['siteAssignments']
+  assignedSiteIds?: string[]
+  primarySiteId?: string
+  assignedSiteNames?: string[]
+  isCurrentlyActive?: boolean
+  lastSeenAt?: string
 }
 
 const sourceLabel: Record<AttendanceSource, string> = {
@@ -84,6 +92,11 @@ const toBackendStatus = (status: WorkerStatus): SaveWorkerBody['status'] => (sta
 const toUiStatus = (status: BackendWorker['status']): WorkerStatus => (status === 'Active' ? 'active' : 'inactive')
 const hasCameraIdentity = (values: Pick<WorkerFormValues, 'dahuaCardName' | 'dahuaUserId'>) =>
   Boolean(values.dahuaCardName?.trim() || values.dahuaUserId?.trim())
+const resolveBackendSiteId = (selectedObjectId: string, siteRows: BackendSite[], objectName?: string) => {
+  if (selectedObjectId === ALL_OBJECTS_ID) return undefined
+  if (siteRows.some((site) => site.id === selectedObjectId)) return selectedObjectId
+  return objectName ? siteRows.find((site) => site.name.trim().toLowerCase() === objectName.trim().toLowerCase())?.id : undefined
+}
 
 export const WorkersPage = () => {
   const store = useProjectProgressStore()
@@ -118,11 +131,12 @@ export const WorkersPage = () => {
     setLoadingBackend(true)
     setBackendError('')
     try {
-      const [siteRows, deviceRows, workerRows] = await Promise.all([
+      const [siteRows, deviceRows] = await Promise.all([
         buildTrackBackendApi.getSites(),
         buildTrackBackendApi.getDevices(),
-        buildTrackBackendApi.getWorkers(),
       ])
+      const selectedObjectName = store.objects.find((object) => object.id === selectedObjectId)?.name
+      const workerRows = await buildTrackBackendApi.getWorkers(resolveBackendSiteId(selectedObjectId, siteRows, selectedObjectName))
       setSites(siteRows)
       setDevices(deviceRows)
       setBackendWorkers(workerRows)
@@ -135,7 +149,11 @@ export const WorkersPage = () => {
 
   useEffect(() => {
     void loadBackendWorkers()
-  }, [])
+    const timer = window.setInterval(() => {
+      void loadBackendWorkers()
+    }, 30000)
+    return () => window.clearInterval(timer)
+  }, [selectedObjectId])
 
   const backendRows: WorkerRow[] = backendWorkers.map((worker) => {
     const primaryIdentity = worker.cameraIdentities?.[0]
@@ -160,6 +178,12 @@ export const WorkersPage = () => {
       riskScore: Number(worker.riskScore ?? 0),
       status: toUiStatus(worker.status),
       notes: worker.notes,
+      siteAssignments: worker.siteAssignments ?? [],
+      assignedSiteIds: (worker.siteAssignments ?? []).filter((assignment) => assignment.status === 'Active').map((assignment) => assignment.siteId),
+      primarySiteId: (worker.siteAssignments ?? []).find((assignment) => assignment.isPrimary && assignment.status === 'Active')?.siteId ?? worker.siteId,
+      assignedSiteNames: (worker.siteAssignments ?? []).filter((assignment) => assignment.status === 'Active').map((assignment) => assignment.siteName || assignment.siteId),
+      isCurrentlyActive: Boolean(worker.payrollSummary?.isCurrentlyActive),
+      lastSeenAt: worker.payrollSummary?.lastSeenAt,
       cameraIdentityId: primaryIdentity?.id,
       dahuaCardName: primaryIdentity?.cardName,
       dahuaUserId: primaryIdentity?.externalUserId,
@@ -205,6 +229,8 @@ export const WorkersPage = () => {
     .filter((worker) => riskFilter === 'all' || (riskFilter === 'high' ? worker.riskScore >= 35 : worker.riskScore < 35))
 
   const openDrawer = (worker?: WorkerRow) => {
+    const selectedObjectName = store.objects.find((object) => object.id === selectedObjectId)?.name
+    const selectedBackendSiteId = resolveBackendSiteId(selectedObjectId, sites, selectedObjectName)
     setEditingWorker(worker)
     form.setFieldsValue(worker ? {
       workerName: worker.workerName,
@@ -220,6 +246,8 @@ export const WorkersPage = () => {
       dahuaCardName: worker.dahuaCardName,
       dahuaUserId: worker.dahuaUserId,
       cameraDeviceId: worker.cameraDeviceId ?? 'all',
+      assignedSiteIds: worker.assignedSiteIds,
+      primarySiteId: worker.primarySiteId,
     } : {
       workerName: '',
       workerExternalId: generateNextWorkerCode(localWorkers),
@@ -231,6 +259,8 @@ export const WorkersPage = () => {
       status: 'active',
       riskScore: 0,
       cameraDeviceId: 'all',
+      assignedSiteIds: selectedBackendSiteId ? [selectedBackendSiteId] : [],
+      primarySiteId: selectedBackendSiteId,
     })
     setDrawerOpen(true)
   }
@@ -241,7 +271,17 @@ export const WorkersPage = () => {
     }
 
     if (sites.length > 0) {
-      const siteId = editingWorker?.siteId ?? sites[0].id
+      const assignedSiteIds = [...new Set((values.assignedSiteIds ?? []).filter((siteId) => sites.some((site) => site.id === siteId)))]
+      const primarySiteId = values.primarySiteId && assignedSiteIds.includes(values.primarySiteId)
+        ? values.primarySiteId
+        : assignedSiteIds[0]
+      const siteId = primarySiteId ?? editingWorker?.siteId ?? sites[0].id
+      if (assignedSiteIds.length === 0) {
+        void message.warning('Obyekt təyinatı seçilməyib. Bu işçi yalnız “Bütün obyektlər” görünüşündə qalacaq.')
+      }
+      if (values.attendanceSource === 'Manual' && hasCameraIdentity(values)) {
+        void message.warning('Kamera identifikasiyası daxil edilib, amma saat mənbəyi Manual seçilib.')
+      }
       const body: SaveWorkerBody = {
         siteId,
         externalWorkerCode: values.workerExternalId,
@@ -254,6 +294,7 @@ export const WorkersPage = () => {
         attendanceSource: values.attendanceSource,
         riskScore: values.riskScore,
         notes: values.notes,
+        siteAssignments: assignedSiteIds.map((assignedSiteId) => ({ siteId: assignedSiteId, isPrimary: assignedSiteId === primarySiteId })),
         cameraIdentity: hasCameraIdentity(values)
           ? {
               deviceId: values.cameraDeviceId && values.cameraDeviceId !== 'all' ? values.cameraDeviceId : undefined,
@@ -323,7 +364,7 @@ export const WorkersPage = () => {
   const remapWorker = async () => {
     if (!editingWorker?.isBackend) return
     try {
-      const result = await buildTrackBackendApi.remapWorkerCameraIdentity(editingWorker.id, editingWorker.cameraIdentityId)
+      const result = await buildTrackBackendApi.remapWorkerCameraEvents(editingWorker.id, editingWorker.cameraIdentityId)
       await loadBackendWorkers()
       void message.success(`Keçmiş qeydlər bağlandı: ${result.attendanceEventsUpdated} event, ${result.attendanceSessionsUpdated} sessiya`)
     } catch (err) {
@@ -332,10 +373,12 @@ export const WorkersPage = () => {
   }
 
   const cameraWorkersCount = rowsSource.filter((worker) => worker.attendanceSource === 'Camera' || Boolean(worker.dahuaCardName || worker.dahuaUserId)).length
+  const siteOptions = sites.map((site) => ({ value: site.id, label: site.name }))
 
   const columns: TableColumnsType<WorkerRow> = [
     { title: 'İşçi', dataIndex: 'workerName', render: (value, row) => <strong>{value}<br /><span className="muted-text">İşçi kodu: {row.workerExternalId}</span></strong> },
     { title: 'Briqada', dataIndex: 'crewName' },
+    { title: 'Obyekt təyinatı', render: (_, row) => row.assignedSiteNames?.length ? row.assignedSiteNames.join(', ') : <Tag>Yalnız bütün obyektlər</Tag> },
     { title: 'Rol', dataIndex: 'role' },
     { title: 'Kamera identifikasiyası', render: (_, row) => row.dahuaCardName || row.dahuaUserId ? <span>Dahua CardName: {row.dahuaCardName || '-'}<br /><span className="muted-text">UserID: {row.dahuaUserId || '-'} | {row.cameraDeviceName || 'Bütün kameralar'}</span></span> : <Tag>Bağlanmayıb</Tag> },
     { title: 'Saat mənbəyi', dataIndex: 'attendanceSource', render: (value: AttendanceSource) => sourceLabel[value] },
@@ -370,7 +413,7 @@ export const WorkersPage = () => {
 
       <section className="kpi-grid four">
         <KpiCard icon={<UserOutlined />} title="İşçi sayı" value={formatNumber(rowsSource.length)} tone="blue" />
-        <KpiCard icon={<TeamOutlined />} title="Aktiv işçi" value={formatNumber(rowsSource.filter((worker) => worker.status === 'active').length)} tone="green" />
+        <KpiCard icon={<TeamOutlined />} title="Aktiv işçi" value={formatNumber(rowsSource.filter((worker) => worker.isCurrentlyActive).length)} tone="green" />
         <KpiCard icon={<UserOutlined />} title="Kamera mənbəli" value={formatNumber(cameraWorkersCount)} tone="purple" />
         <KpiCard icon={<UserOutlined />} title="Risk nəzarəti" value={formatNumber(rowsSource.filter((worker) => worker.riskScore >= 35).length)} tone="orange" />
       </section>
@@ -389,7 +432,16 @@ export const WorkersPage = () => {
       </section>
 
       <Drawer title={editingWorker ? 'İşçini redaktə et' : 'Yeni işçi'} open={drawerOpen} width={620} onClose={() => setDrawerOpen(false)}>
-        <Form form={form} layout="vertical" onFinish={saveWorker}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={saveWorker}
+          onValuesChange={(changed, allValues) => {
+            if ((changed.dahuaCardName !== undefined || changed.dahuaUserId !== undefined) && hasCameraIdentity(allValues) && allValues.attendanceSource !== 'Manual') {
+              form.setFieldValue('attendanceSource', 'Camera')
+            }
+          }}
+        >
           <Form.Item name="workerName" label="İşçi adı" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="workerExternalId" label="İşçi kodu" rules={[{ required: true }]} extra="Daxili HR/payroll kodudur. Dahua UserID ilə eyni olmaq məcburiyyətində deyil.">
             <Input />
@@ -406,6 +458,24 @@ export const WorkersPage = () => {
           </Space.Compact>
           <Form.Item name="attendanceSource" label="Kamera mənbəyi"><Select options={[{ value: 'Camera', label: 'Kamera' }, { value: 'Manual', label: 'Manual' }, { value: 'ForemanTablet', label: 'Qarışıq / Prorab tablet' }]} /></Form.Item>
           <Form.Item name="status" label="Status"><Select options={[{ value: 'active', label: 'Aktiv' }, { value: 'inactive', label: 'Passiv' }]} /></Form.Item>
+
+          <Divider>Obyekt təyinatı</Divider>
+          <Typography.Paragraph type="secondary">
+            İşçi seçilmiş obyektlərdə görünəcək. Təyinat boş saxlanarsa, işçi yalnız “Bütün obyektlər” görünüşündə göstərilir.
+          </Typography.Paragraph>
+          <Form.Item name="assignedSiteIds" label="Obyektlər">
+            <Select mode="multiple" allowClear showSearch options={siteOptions} placeholder="Obyekt seçin" />
+          </Form.Item>
+          <Form.Item shouldUpdate={(prev, current) => prev.assignedSiteIds !== current.assignedSiteIds} noStyle>
+            {({ getFieldValue }) => {
+              const assignedSiteIds = getFieldValue('assignedSiteIds') ?? []
+              return (
+                <Form.Item name="primarySiteId" label="Əsas obyekt">
+                  <Select allowClear options={siteOptions.filter((site) => assignedSiteIds.includes(site.value))} placeholder="Əsas obyekti seçin" />
+                </Form.Item>
+              )
+            }}
+          </Form.Item>
 
           <Divider>Kamera identifikasiyası</Divider>
           <Typography.Paragraph type="secondary">

@@ -20,4 +20,5 @@ public sealed class Worker
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
     public ICollection<WorkerCameraIdentity> CameraIdentities { get; set; } = new List<WorkerCameraIdentity>();
+    public ICollection<WorkerSiteAssignment> SiteAssignments { get; set; } = new List<WorkerSiteAssignment>();
 }

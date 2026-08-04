@@ -81,10 +81,14 @@ public sealed class WorkerCameraIdentityResolverTests
         Assert.Equal(1, result.AttendanceSessionsUpdated);
         Assert.Contains(db.AttendanceEvents.IgnoreQueryFilters().Where(x => x.TenantId == tenantA), x => x.WorkerExternalId == "W-0001" && x.WorkerName == "Ilham Sadixov");
         Assert.Contains(db.AttendanceEvents.IgnoreQueryFilters().Where(x => x.TenantId == tenantB), x => x.WorkerExternalId == "1" && x.WorkerName == "ilham");
+        Assert.Contains(db.WorkerSiteAssignments.IgnoreQueryFilters().Where(x => x.TenantId == tenantA), x => x.WorkerId == idsA.WorkerId && x.SiteId == idsA.SiteId && x.Status == WorkerSiteAssignmentStatus.Active);
     }
 
     private static WorkerCameraIdentityResolver CreateResolver(BuildTrackDbContext db) =>
-        new(db, NullLogger<WorkerCameraIdentityResolver>.Instance);
+        new(
+            db,
+            new WorkerSiteAssignmentService(db, NullLogger<WorkerSiteAssignmentService>.Instance),
+            NullLogger<WorkerCameraIdentityResolver>.Instance);
 
     private static BuildTrackDbContext CreateDbContext(Guid tenantId)
     {

@@ -22,6 +22,7 @@ public sealed class BuildTrackDbContext : DbContext
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<Worker> Workers => Set<Worker>();
     public DbSet<WorkerCameraIdentity> WorkerCameraIdentities => Set<WorkerCameraIdentity>();
+    public DbSet<WorkerSiteAssignment> WorkerSiteAssignments => Set<WorkerSiteAssignment>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<AttendanceEvent> AttendanceEvents => Set<AttendanceEvent>();
     public DbSet<AttendanceSession> AttendanceSessions => Set<AttendanceSession>();
@@ -121,6 +122,23 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Worker).WithMany(x => x.CameraIdentities).HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<WorkerSiteAssignment>(entity =>
+        {
+            entity.ToTable("worker_site_assignments");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.WorkerId);
+            entity.HasIndex(x => x.SiteId);
+            entity.HasIndex(x => new { x.TenantId, x.WorkerId, x.SiteId, x.Status })
+                .IsUnique()
+                .HasFilter("\"Status\" = 'Active'");
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Worker).WithMany(x => x.SiteAssignments).HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Device>(entity =>

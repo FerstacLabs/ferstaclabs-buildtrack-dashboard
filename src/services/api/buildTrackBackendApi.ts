@@ -48,6 +48,17 @@ export interface WorkerCameraIdentity {
   updatedAt?: string
 }
 
+export interface WorkerSiteAssignment {
+  id: string
+  workerId: string
+  siteId: string
+  siteName?: string
+  isPrimary: boolean
+  status: 'Active' | 'Inactive'
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface BackendWorker {
   id: string
   siteId: string
@@ -64,11 +75,14 @@ export interface BackendWorker {
   createdAt: string
   updatedAt?: string
   cameraIdentities: WorkerCameraIdentity[]
+  siteAssignments: WorkerSiteAssignment[]
   payrollSummary: {
     todayCameraHours: number
     todayEstimatedPay: number
     monthlyCameraHours: number
     monthlyEstimatedPay: number
+    isCurrentlyActive: boolean
+    lastSeenAt?: string
   }
 }
 
@@ -84,6 +98,10 @@ export interface SaveWorkerBody {
   attendanceSource?: 'Camera' | 'Manual' | 'ForemanTablet'
   riskScore?: number
   notes?: string
+  siteAssignments?: {
+    siteId: string
+    isPrimary?: boolean
+  }[]
   cameraIdentity?: {
     deviceId?: string
     externalUserId?: string
@@ -408,6 +426,8 @@ export const buildTrackBackendApi = {
     request<{ matched: boolean; workerId?: string; workerName?: string; workerCode?: string; resolvedBy?: string; status?: string; reason?: string }>(`/api/workers/${id}/camera-identities/test`, { method: 'POST', body: JSON.stringify(body) }),
   remapWorkerCameraIdentity: (id: string, identityId?: string) =>
     request<{ attendanceEventsUpdated: number; attendanceSessionsUpdated: number }>(`/api/workers/${id}/camera-identities/remap${identityId ? `?identityId=${encodeURIComponent(identityId)}` : ''}`, { method: 'POST' }),
+  remapWorkerCameraEvents: (id: string, identityId?: string) =>
+    request<{ attendanceEventsUpdated: number; attendanceSessionsUpdated: number }>(`/api/workers/${id}/remap-camera-events${identityId ? `?identityId=${encodeURIComponent(identityId)}` : ''}`, { method: 'POST' }),
   getDevices: async () => unwrapArray<BackendDevice>(await request<unknown>('/api/devices')),
   getDeviceLogs: async (id: string) => unwrapArray<DeviceConnectionLog>(await request<unknown>(`/api/devices/${id}/logs`)),
   createDevice: (body: Record<string, unknown>) => request<BackendDevice>('/api/devices', { method: 'POST', body: JSON.stringify(body) }),

@@ -104,6 +104,33 @@ WHERE "NormalizedCardName" IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "UX_worker_camera_identities_external_user"
 ON worker_camera_identities ("TenantId", COALESCE("DeviceId", '00000000-0000-0000-0000-000000000000'::uuid), "ExternalUserId")
 WHERE "ExternalUserId" IS NOT NULL;
+CREATE TABLE IF NOT EXISTS worker_site_assignments (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "WorkerId" uuid NOT NULL REFERENCES workers("Id") ON DELETE CASCADE,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "IsPrimary" boolean NOT NULL DEFAULT false,
+    "Status" character varying(40) NOT NULL DEFAULT 'Active',
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_worker_site_assignments_TenantId" ON worker_site_assignments ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_worker_site_assignments_WorkerId" ON worker_site_assignments ("WorkerId");
+CREATE INDEX IF NOT EXISTS "IX_worker_site_assignments_SiteId" ON worker_site_assignments ("SiteId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_worker_site_assignments_active_site"
+ON worker_site_assignments ("TenantId", "WorkerId", "SiteId", "Status")
+WHERE "Status" = 'Active';
+INSERT INTO worker_site_assignments ("Id", "TenantId", "WorkerId", "SiteId", "IsPrimary", "Status", "CreatedAt", "UpdatedAt")
+SELECT w."Id", w."TenantId", w."Id", w."SiteId", true, 'Active', now(), now()
+FROM workers w
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM worker_site_assignments a
+    WHERE a."TenantId" = w."TenantId"
+      AND a."WorkerId" = w."Id"
+      AND a."SiteId" = w."SiteId"
+      AND a."Status" = 'Active'
+);
 CREATE TABLE IF NOT EXISTS attendance_sessions (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,

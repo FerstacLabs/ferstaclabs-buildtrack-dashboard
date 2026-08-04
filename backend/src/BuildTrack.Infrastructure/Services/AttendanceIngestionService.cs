@@ -13,6 +13,7 @@ public sealed class AttendanceIngestionService(
     BuildTrackDbContext db,
     IAttendanceSessionService attendanceSessionService,
     IWorkerCameraIdentityResolver workerCameraIdentityResolver,
+    IWorkerSiteAssignmentService workerSiteAssignmentService,
     IConfiguration configuration,
     ILogger<AttendanceIngestionService> logger) : IAttendanceIngestionService
 {
@@ -70,6 +71,14 @@ public sealed class AttendanceIngestionService(
 
         var effectiveWorkerExternalId = worker?.ExternalWorkerCode ?? (string.IsNullOrWhiteSpace(record.UserId) ? null : record.UserId.Trim());
         var effectiveWorkerName = worker?.FullName ?? (!string.IsNullOrWhiteSpace(record.CardName) ? record.CardName : null);
+        if (worker is not null && IsDahuaCameraSource(source))
+        {
+            await workerSiteAssignmentService.EnsureAssignmentAsync(
+                worker.Id,
+                device.SiteId,
+                "Worker auto-assigned to site from camera attendance",
+                cancellationToken);
+        }
 
         if (!string.IsNullOrWhiteSpace(effectiveWorkerExternalId))
         {

@@ -11,6 +11,7 @@ namespace BuildTrack.Infrastructure.Services;
 
 public sealed class WorkerCameraIdentityResolver(
     BuildTrackDbContext db,
+    IWorkerSiteAssignmentService workerSiteAssignmentService,
     ILogger<WorkerCameraIdentityResolver> logger) : IWorkerCameraIdentityResolver
 {
     public string? NormalizeCardName(string? value)
@@ -171,11 +172,13 @@ public sealed class WorkerCameraIdentityResolver(
             .ToListAsync(cancellationToken);
 
         var updatedEvents = 0;
+        var remappedSiteIds = new HashSet<Guid>();
         foreach (var attendanceEvent in eventCandidates.Where(x => MatchesIdentity(x, rawCardNames, normalizedCardNames, externalUserIds)))
         {
             attendanceEvent.WorkerId = worker.Id;
             attendanceEvent.WorkerExternalId = worker.ExternalWorkerCode;
             attendanceEvent.WorkerName = worker.FullName;
+            remappedSiteIds.Add(attendanceEvent.SiteId);
             attendanceEvent.RawPayloadJson = MergeRawPayload(attendanceEvent.RawPayloadJson, new Dictionary<string, string?>
             {
                 ["WorkerResolutionStatus"] = "RemappedWorkerCameraIdentity",
@@ -197,11 +200,20 @@ public sealed class WorkerCameraIdentityResolver(
             session.WorkerId = worker.Id;
             session.WorkerExternalId = worker.ExternalWorkerCode;
             session.WorkerName = worker.FullName;
+            remappedSiteIds.Add(session.SiteId);
             session.UpdatedAt = DateTimeOffset.UtcNow;
             updatedSessions++;
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var siteId in remappedSiteIds)
+        {
+            await workerSiteAssignmentService.EnsureAssignmentAsync(
+                worker.Id,
+                siteId,
+                "Worker auto-assigned to site from camera attendance remap",
+                cancellationToken);
+        }
         logger.LogInformation(
             "Worker camera identity remap completed. WorkerId={WorkerId}, AttendanceEventsUpdated={AttendanceEventsUpdated}, AttendanceSessionsUpdated={AttendanceSessionsUpdated}",
             worker.Id,

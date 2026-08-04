@@ -8,11 +8,11 @@ import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { exportRowsTo1CMock, exportRowsToCsv, exportRowsToExcel } from '../../services/data/exportService'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
-import { getPayrollRowsByObject, type ProjectPayrollRow } from '../projectProgress/projectSelectors'
+import { ALL_OBJECTS_ID, getPayrollRowsByObject, type ProjectPayrollRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { useEffect, useMemo, useState } from 'react'
-import { buildTrackBackendApi, type BackendWorker } from '../../services/api/buildTrackBackendApi'
+import { buildTrackBackendApi, type BackendSite, type BackendWorker } from '../../services/api/buildTrackBackendApi'
 
 const statusColor: Record<ProjectPayrollRow['exportStatus'], string> = {
   Hazır: 'green',
@@ -27,19 +27,39 @@ export const PayrollPage = () => {
   const [crewFilter, setCrewFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [backendWorkers, setBackendWorkers] = useState<BackendWorker[]>([])
+  const [sites, setSites] = useState<BackendSite[]>([])
 
   useEffect(() => {
-    buildTrackBackendApi.getWorkers()
-      .then(setBackendWorkers)
-      .catch(() => setBackendWorkers([]))
-  }, [])
+    let mounted = true
+    const loadBackendPayroll = async () => {
+      try {
+        const siteRows = await buildTrackBackendApi.getSites()
+        const selectedObjectName = store.objects.find((object) => object.id === selectedObjectId)?.name
+        const selectedSiteId = selectedObjectId === ALL_OBJECTS_ID
+          ? undefined
+          : siteRows.find((site) => site.id === selectedObjectId || site.name.trim().toLowerCase() === selectedObjectName?.trim().toLowerCase())?.id
+        const workers = await buildTrackBackendApi.getWorkers(selectedSiteId)
+        if (!mounted) return
+        setSites(siteRows)
+        setBackendWorkers(workers)
+      } catch {
+        if (mounted) setBackendWorkers([])
+      }
+    }
+    void loadBackendPayroll()
+    const timer = window.setInterval(loadBackendPayroll, 60000)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+    }
+  }, [selectedObjectId])
 
   const backendPayrollRows = useMemo<ProjectPayrollRow[]>(() => backendWorkers.map((worker) => {
     const approvedHours = Number(worker.payrollSummary?.monthlyCameraHours ?? 0)
     const grossAmount = Number(worker.payrollSummary?.monthlyEstimatedPay ?? approvedHours * Number(worker.hourlyRate ?? 0))
     return {
       id: `backend-payroll-${worker.id}`,
-      objectName: 'Backend kamera davamiyyəti',
+      objectName: worker.siteAssignments?.find((assignment) => assignment.isPrimary)?.siteName || sites.find((site) => site.id === worker.siteId)?.name || 'Backend kamera davamiyyəti',
       workerId: worker.id,
       workerName: worker.fullName,
       workerExternalId: worker.externalWorkerCode,

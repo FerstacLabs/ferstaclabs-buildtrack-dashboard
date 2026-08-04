@@ -61,7 +61,11 @@ public sealed class AttendanceIngestionServiceTests
         return new AttendanceIngestionService(
             db,
             new NoopAttendanceSessionService(),
-            new WorkerCameraIdentityResolver(db, NullLogger<WorkerCameraIdentityResolver>.Instance),
+            new WorkerCameraIdentityResolver(
+                db,
+                new WorkerSiteAssignmentService(db, NullLogger<WorkerSiteAssignmentService>.Instance),
+                NullLogger<WorkerCameraIdentityResolver>.Instance),
+            new WorkerSiteAssignmentService(db, NullLogger<WorkerSiteAssignmentService>.Instance),
             configuration,
             NullLogger<AttendanceIngestionService>.Instance);
     }

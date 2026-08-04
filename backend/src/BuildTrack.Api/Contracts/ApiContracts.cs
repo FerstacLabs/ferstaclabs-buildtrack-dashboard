@@ -16,6 +16,7 @@ public sealed record CreateWorkerRequest(
     string AttendanceSource = "Manual",
     int RiskScore = 0,
     string? Notes = null,
+    IReadOnlyList<SaveWorkerSiteAssignmentRequest>? SiteAssignments = null,
     SaveWorkerCameraIdentityRequest? CameraIdentity = null);
 
 public sealed record UpdateWorkerRequest(
@@ -30,7 +31,10 @@ public sealed record UpdateWorkerRequest(
     string AttendanceSource = "Manual",
     int RiskScore = 0,
     string? Notes = null,
+    IReadOnlyList<SaveWorkerSiteAssignmentRequest>? SiteAssignments = null,
     SaveWorkerCameraIdentityRequest? CameraIdentity = null);
+
+public sealed record SaveWorkerSiteAssignmentRequest(Guid SiteId, bool IsPrimary = false);
 
 public sealed record SaveWorkerCameraIdentityRequest(
     Guid? DeviceId,
@@ -55,7 +59,19 @@ public sealed record WorkerPayrollSummaryResponse(
     double TodayCameraHours,
     decimal TodayEstimatedPay,
     double MonthlyCameraHours,
-    decimal MonthlyEstimatedPay);
+    decimal MonthlyEstimatedPay,
+    bool IsCurrentlyActive,
+    DateTimeOffset? LastSeenAt);
+
+public sealed record WorkerSiteAssignmentResponse(
+    Guid Id,
+    Guid WorkerId,
+    Guid SiteId,
+    string? SiteName,
+    bool IsPrimary,
+    WorkerSiteAssignmentStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt);
 
 public sealed record WorkerResponse(
     Guid Id,
@@ -73,6 +89,7 @@ public sealed record WorkerResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset? UpdatedAt,
     IReadOnlyList<WorkerCameraIdentityResponse> CameraIdentities,
+    IReadOnlyList<WorkerSiteAssignmentResponse> SiteAssignments,
     WorkerPayrollSummaryResponse PayrollSummary);
 
 public sealed record TestWorkerCameraIdentityRequest(Guid? DeviceId, string? ExternalUserId, string? CardName);
