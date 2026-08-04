@@ -4,7 +4,84 @@ namespace BuildTrack.Api.Contracts;
 
 public sealed record CreateSiteRequest(string Name, string Address, string TimeZone);
 
-public sealed record CreateWorkerRequest(Guid SiteId, string ExternalWorkerCode, string FullName, WorkerStatus Status = WorkerStatus.Active);
+public sealed record CreateWorkerRequest(
+    Guid SiteId,
+    string ExternalWorkerCode,
+    string FullName,
+    WorkerStatus Status = WorkerStatus.Active,
+    string? Brigade = null,
+    string? Role = null,
+    decimal HourlyRate = 0,
+    decimal PlannedDailyHours = 8,
+    string AttendanceSource = "Manual",
+    int RiskScore = 0,
+    string? Notes = null,
+    SaveWorkerCameraIdentityRequest? CameraIdentity = null);
+
+public sealed record UpdateWorkerRequest(
+    Guid SiteId,
+    string ExternalWorkerCode,
+    string FullName,
+    WorkerStatus Status = WorkerStatus.Active,
+    string? Brigade = null,
+    string? Role = null,
+    decimal HourlyRate = 0,
+    decimal PlannedDailyHours = 8,
+    string AttendanceSource = "Manual",
+    int RiskScore = 0,
+    string? Notes = null,
+    SaveWorkerCameraIdentityRequest? CameraIdentity = null);
+
+public sealed record SaveWorkerCameraIdentityRequest(
+    Guid? DeviceId,
+    string? ExternalUserId,
+    string? CardName,
+    bool IsPrimary = true);
+
+public sealed record WorkerCameraIdentityResponse(
+    Guid Id,
+    Guid WorkerId,
+    Guid? DeviceId,
+    string? DeviceName,
+    string Vendor,
+    string? ExternalUserId,
+    string? CardName,
+    string? NormalizedCardName,
+    bool IsPrimary,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt);
+
+public sealed record WorkerPayrollSummaryResponse(
+    double TodayCameraHours,
+    decimal TodayEstimatedPay,
+    double MonthlyCameraHours,
+    decimal MonthlyEstimatedPay);
+
+public sealed record WorkerResponse(
+    Guid Id,
+    Guid SiteId,
+    string ExternalWorkerCode,
+    string FullName,
+    WorkerStatus Status,
+    string? Brigade,
+    string? Role,
+    decimal HourlyRate,
+    decimal PlannedDailyHours,
+    string AttendanceSource,
+    int RiskScore,
+    string? Notes,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt,
+    IReadOnlyList<WorkerCameraIdentityResponse> CameraIdentities,
+    WorkerPayrollSummaryResponse PayrollSummary);
+
+public sealed record TestWorkerCameraIdentityRequest(Guid? DeviceId, string? ExternalUserId, string? CardName);
+
+public sealed record TestWorkerCameraIdentityResponse(bool Matched, Guid? WorkerId, string? WorkerName, string? WorkerCode, string? ResolvedBy, string? Status, string? Reason);
+
+public sealed record WorkerCameraIdentityRemapResponse(int AttendanceEventsUpdated, int AttendanceSessionsUpdated);
+
+public sealed record LinkSecurityEventToWorkerRequest(Guid WorkerId, Guid? DeviceId = null, bool RemapRecent = true, string? ReviewNote = null);
 
 public sealed record CreateDeviceRequest(
     Guid SiteId,
@@ -136,7 +213,9 @@ public sealed record SecurityEventResponse(
     string? SnapshotDownloadError,
     string? SnapshotSource,
     string? Message,
-    long? RawRecNo);
+    long? RawRecNo,
+    string? CameraExternalUserId = null,
+    string? CameraCardName = null);
 
 public sealed record ReviewSecurityEventRequest(SecurityEventStatus Status, string? ReviewNote);
 

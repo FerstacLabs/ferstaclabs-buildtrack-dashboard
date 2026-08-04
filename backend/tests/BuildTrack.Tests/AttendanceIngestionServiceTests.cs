@@ -61,6 +61,7 @@ public sealed class AttendanceIngestionServiceTests
         return new AttendanceIngestionService(
             db,
             new NoopAttendanceSessionService(),
+            new WorkerCameraIdentityResolver(db, NullLogger<WorkerCameraIdentityResolver>.Instance),
             configuration,
             NullLogger<AttendanceIngestionService>.Instance);
     }
@@ -95,11 +96,23 @@ public sealed class AttendanceIngestionServiceTests
         });
         db.Workers.Add(new Worker
         {
+            Id = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
             TenantId = tenantId,
             SiteId = siteId,
-            ExternalWorkerCode = "1",
+            ExternalWorkerCode = "W-0001",
             FullName = "ilham",
             Status = WorkerStatus.Active,
+        });
+        db.WorkerCameraIdentities.Add(new WorkerCameraIdentity
+        {
+            TenantId = tenantId,
+            WorkerId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            DeviceId = deviceId,
+            Vendor = "Dahua",
+            ExternalUserId = "1",
+            CardName = "ilham",
+            NormalizedCardName = "ilham",
+            IsPrimary = true,
         });
         db.SecurityEvents.Add(new SecurityEvent
         {

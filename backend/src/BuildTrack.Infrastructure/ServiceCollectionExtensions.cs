@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAttendanceIngestionService, AttendanceIngestionService>();
         services.AddScoped<IDahuaAccessRecordIngestionPipeline, DahuaAccessRecordIngestionPipeline>();
         services.AddScoped<IAttendanceSessionService, AttendanceSessionService>();
+        services.AddScoped<IWorkerCameraIdentityResolver, WorkerCameraIdentityResolver>();
         services.AddScoped<ISecuritySnapshotStore, SecuritySnapshotStore>();
         services.AddScoped<ISecurityEventService, SecurityEventService>();
         services.AddScoped<IDeviceConnectionLogger, DeviceConnectionLogger>();

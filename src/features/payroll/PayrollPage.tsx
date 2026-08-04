@@ -11,7 +11,8 @@ import { formatCurrency, formatHours, formatNumber } from '../../utils/formatter
 import { getPayrollRowsByObject, type ProjectPayrollRow } from '../projectProgress/projectSelectors'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { buildTrackBackendApi, type BackendWorker } from '../../services/api/buildTrackBackendApi'
 
 const statusColor: Record<ProjectPayrollRow['exportStatus'], string> = {
   Hazır: 'green',
@@ -25,7 +26,39 @@ export const PayrollPage = () => {
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const [crewFilter, setCrewFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  const allRows = getPayrollRowsByObject(store, selectedObjectId)
+  const [backendWorkers, setBackendWorkers] = useState<BackendWorker[]>([])
+
+  useEffect(() => {
+    buildTrackBackendApi.getWorkers()
+      .then(setBackendWorkers)
+      .catch(() => setBackendWorkers([]))
+  }, [])
+
+  const backendPayrollRows = useMemo<ProjectPayrollRow[]>(() => backendWorkers.map((worker) => {
+    const approvedHours = Number(worker.payrollSummary?.monthlyCameraHours ?? 0)
+    const grossAmount = Number(worker.payrollSummary?.monthlyEstimatedPay ?? approvedHours * Number(worker.hourlyRate ?? 0))
+    return {
+      id: `backend-payroll-${worker.id}`,
+      objectName: 'Backend kamera davamiyyəti',
+      workerId: worker.id,
+      workerName: worker.fullName,
+      workerExternalId: worker.externalWorkerCode,
+      crewName: worker.brigade || 'Təyin edilməyib',
+      role: worker.role || 'Təyin edilməyib',
+      hourlyRate: Number(worker.hourlyRate ?? 0),
+      normalHours: approvedHours,
+      overtimeHours: 0,
+      approvedHours,
+      riskHours: worker.riskScore >= 60 ? Math.round(approvedHours * 0.08 * 10) / 10 : 0,
+      manualAdjustment: 0,
+      grossAmount,
+      correctionAmount: 0,
+      finalAmount: grossAmount,
+      exportStatus: worker.status === 'Active' ? 'Hazır' : 'Xəbərdarlıq',
+    }
+  }), [backendWorkers])
+
+  const allRows = backendPayrollRows.length > 0 ? backendPayrollRows : getPayrollRowsByObject(store, selectedObjectId)
   const rows = allRows
     .filter((row) => crewFilter === 'all' || row.crewName === crewFilter)
     .filter((row) => statusFilter === 'all' || row.exportStatus === statusFilter)

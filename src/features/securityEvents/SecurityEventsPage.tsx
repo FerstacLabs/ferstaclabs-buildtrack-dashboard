@@ -6,7 +6,7 @@ import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
-import { buildTrackBackendApi, type BackendSite, type SecurityEventRow, type SecurityEventStatus } from '../../services/api/buildTrackBackendApi'
+import { buildTrackBackendApi, type BackendSite, type BackendWorker, type SecurityEventRow, type SecurityEventStatus } from '../../services/api/buildTrackBackendApi'
 
 const statusColor: Record<SecurityEventStatus, string> = {
   Open: 'orange',
@@ -28,6 +28,7 @@ const eventLabel: Record<string, string> = {
   IdentityMismatch: 'Şübhəli tanıma',
   IdentityMappingConflict: 'Şübhəli tanıma',
   ParserUncertainSmartEvent: 'Şübhəli tanıma',
+  UnmappedCameraIdentity: 'İşçiyə bağlanmayıb',
 }
 
 const eventColor: Record<string, string> = {
@@ -36,6 +37,7 @@ const eventColor: Record<string, string> = {
   IdentityMismatch: 'red',
   IdentityMappingConflict: 'red',
   ParserUncertainSmartEvent: 'purple',
+  UnmappedCameraIdentity: 'blue',
 }
 
 const showDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
@@ -105,11 +107,16 @@ export const SecurityEventsPage = () => {
   const [requestedDate, setRequestedDate] = useState('')
   const [selectedSecurityEvent, setSelectedSecurityEvent] = useState<SecurityEventRow | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [workers, setWorkers] = useState<BackendWorker[]>([])
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkingEvent, setLinkingEvent] = useState<SecurityEventRow | null>(null)
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>()
 
   const loadSites = async () => {
     try {
       const siteRows = await buildTrackBackendApi.getSites()
       setSites(siteRows)
+      buildTrackBackendApi.getWorkers().then(setWorkers).catch(() => setWorkers([]))
       const initialSiteId = resolveInitialSiteId(siteRows, siteId)
       if (initialSiteId && initialSiteId !== siteId) setSiteId(initialSiteId)
     } catch (err) {
@@ -164,6 +171,29 @@ export const SecurityEventsPage = () => {
     }
   }
 
+  const openLinkWorker = (row: SecurityEventRow) => {
+    setLinkingEvent(row)
+    setSelectedWorkerId(undefined)
+    setLinkOpen(true)
+  }
+
+  const linkWorker = async () => {
+    if (!linkingEvent || !selectedWorkerId) return
+    try {
+      await buildTrackBackendApi.linkSecurityEventToWorker(linkingEvent.id, {
+        workerId: selectedWorkerId,
+        remapRecent: true,
+        reviewNote: 'Security hadisəsindən işçi-camera mapping yaradıldı',
+      })
+      message.success('Kamera hadisəsi işçiyə bağlandı')
+      setLinkOpen(false)
+      setLinkingEvent(null)
+      await loadEvents()
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : 'İşçiyə bağlama alınmadı')
+    }
+  }
+
   useEffect(() => {
     void loadSites()
   }, [])
@@ -203,6 +233,9 @@ export const SecurityEventsPage = () => {
         <Space>
           <Button size="small" disabled={row.status !== 'Open'} onClick={() => reviewEvent(row.id, 'Reviewed')}>Baxıldı</Button>
           <Button size="small" disabled={row.status !== 'Open'} onClick={() => reviewEvent(row.id, 'Ignored')}>Yox say</Button>
+          {(row.cameraCardName || row.cameraExternalUserId || row.eventType === 'UnmappedCameraIdentity') && (
+            <Button size="small" disabled={row.status !== 'Open'} onClick={() => openLinkWorker(row)}>İşçiyə bağla</Button>
+          )}
         </Space>
       ),
     },
@@ -288,7 +321,34 @@ export const SecurityEventsPage = () => {
             )}
           </div>
         )}
-      </Modal>    </div>
+      </Modal>
+      <Modal
+        title="Kamera hadisəsini işçiyə bağla"
+        open={linkOpen}
+        onCancel={() => setLinkOpen(false)}
+        onOk={linkWorker}
+        okText="Bağla"
+        cancelText="İmtina"
+        okButtonProps={{ disabled: !selectedWorkerId }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message={`Dahua CardName: ${linkingEvent?.cameraCardName || '-'} | UserID: ${linkingEvent?.cameraExternalUserId || '-'}`}
+            description="Seçilən işçi üçün worker-camera identity yaradılacaq və uyğun keçmiş kamera qeydləri həmin işçiyə bağlanacaq."
+          />
+          <Select
+            showSearch
+            placeholder="İşçi seçin"
+            value={selectedWorkerId}
+            onChange={setSelectedWorkerId}
+            style={{ width: '100%' }}
+            options={workers.map((worker) => ({ value: worker.id, label: `${worker.fullName} / ${worker.externalWorkerCode}` }))}
+          />
+        </Space>
+      </Modal>
+    </div>
   )
 }
 

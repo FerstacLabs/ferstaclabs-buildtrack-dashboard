@@ -6,7 +6,8 @@ public enum SecurityEventType
     SuspiciousRecognition,
     IdentityMismatch,
     IdentityMappingConflict,
-    ParserUncertainSmartEvent
+    ParserUncertainSmartEvent,
+    UnmappedCameraIdentity
 }
 
 public enum SecurityEventSeverity

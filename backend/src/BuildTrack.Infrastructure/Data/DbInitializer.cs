@@ -55,6 +55,14 @@ VALUES ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-1111111
 ON CONFLICT ("LicenseKeyHash") DO UPDATE SET "TenantId" = EXCLUDED."TenantId", "Plan" = 'Unlimited', "Status" = 'Active', "ExpiresAt" = NULL, "ActivatedAt" = COALESCE(licenses."ActivatedAt", now());
 ALTER TABLE sites ADD COLUMN IF NOT EXISTS "TenantId" uuid NULL;
 ALTER TABLE workers ADD COLUMN IF NOT EXISTS "TenantId" uuid NULL;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "Brigade" character varying(120) NULL;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "Role" character varying(120) NULL;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "HourlyRate" numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "PlannedDailyHours" numeric(8,2) NOT NULL DEFAULT 8;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "AttendanceSource" character varying(40) NOT NULL DEFAULT 'Manual';
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "RiskScore" integer NOT NULL DEFAULT 0;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "Notes" character varying(500) NULL;
+ALTER TABLE workers ADD COLUMN IF NOT EXISTS "UpdatedAt" timestamp with time zone NULL;
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS "TenantId" uuid NULL;
 ALTER TABLE attendance_events ADD COLUMN IF NOT EXISTS "TenantId" uuid NULL;
 ALTER TABLE device_connection_logs ADD COLUMN IF NOT EXISTS "TenantId" uuid NULL;
@@ -74,6 +82,28 @@ CREATE INDEX IF NOT EXISTS "IX_workers_TenantId" ON workers ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_devices_TenantId" ON devices ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_attendance_events_TenantId" ON attendance_events ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_device_connection_logs_TenantId" ON device_connection_logs ("TenantId");
+CREATE TABLE IF NOT EXISTS worker_camera_identities (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "WorkerId" uuid NOT NULL REFERENCES workers("Id") ON DELETE CASCADE,
+    "DeviceId" uuid NULL REFERENCES devices("Id") ON DELETE SET NULL,
+    "Vendor" character varying(60) NOT NULL DEFAULT 'Dahua',
+    "ExternalUserId" character varying(80) NULL,
+    "CardName" character varying(180) NULL,
+    "NormalizedCardName" character varying(180) NULL,
+    "IsPrimary" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_worker_camera_identities_TenantId" ON worker_camera_identities ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_worker_camera_identities_WorkerId" ON worker_camera_identities ("WorkerId");
+CREATE INDEX IF NOT EXISTS "IX_worker_camera_identities_DeviceId" ON worker_camera_identities ("DeviceId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_worker_camera_identities_cardname"
+ON worker_camera_identities ("TenantId", COALESCE("DeviceId", '00000000-0000-0000-0000-000000000000'::uuid), "NormalizedCardName")
+WHERE "NormalizedCardName" IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_worker_camera_identities_external_user"
+ON worker_camera_identities ("TenantId", COALESCE("DeviceId", '00000000-0000-0000-0000-000000000000'::uuid), "ExternalUserId")
+WHERE "ExternalUserId" IS NOT NULL;
 CREATE TABLE IF NOT EXISTS attendance_sessions (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,

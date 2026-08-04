@@ -379,12 +379,16 @@ app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext 
 
 app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, CancellationToken ct) =>
 {
-    var query = db.Workers.AsNoTracking();
+    var query = db.Workers
+        .AsNoTracking()
+        .Include(x => x.CameraIdentities)
+        .AsQueryable();
     if (siteId is not null) query = query.Where(x => x.SiteId == siteId);
-    return await query.OrderBy(x => x.FullName).ToListAsync(ct);
+    var workers = await query.OrderBy(x => x.FullName).ToListAsync(ct);
+    return Results.Ok(await MapWorkerResponsesAsync(db, workers, ct));
 });
 
-app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
+app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
 {
     if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     if (string.IsNullOrWhiteSpace(request.ExternalWorkerCode) || string.IsNullOrWhiteSpace(request.FullName))
@@ -398,11 +402,142 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
         SiteId = request.SiteId,
         ExternalWorkerCode = request.ExternalWorkerCode.Trim(),
         FullName = request.FullName.Trim(),
+        Brigade = Clean(request.Brigade),
+        Role = Clean(request.Role),
+        HourlyRate = Math.Max(0, request.HourlyRate),
+        PlannedDailyHours = request.PlannedDailyHours <= 0 ? 8 : request.PlannedDailyHours,
+        AttendanceSource = NormalizeAttendanceSource(request.AttendanceSource),
+        RiskScore = Math.Clamp(request.RiskScore, 0, 100),
+        Notes = Clean(request.Notes),
         Status = request.Status,
     };
     db.Workers.Add(worker);
     await db.SaveChangesAsync(ct);
-    return Results.Created($"/api/workers/{worker.Id}", worker);
+    if (request.CameraIdentity is not null && HasCameraIdentityValues(request.CameraIdentity))
+    {
+        var identity = await identityResolver.UpsertAsync(worker.Id, request.CameraIdentity.DeviceId, request.CameraIdentity.ExternalUserId, request.CameraIdentity.CardName, request.CameraIdentity.IsPrimary, ct);
+        await identityResolver.RemapRecentAsync(worker.Id, identity.Id, ct);
+    }
+
+    var responseWorker = await db.Workers.AsNoTracking().Include(x => x.CameraIdentities).FirstAsync(x => x.Id == worker.Id, ct);
+    var response = (await MapWorkerResponsesAsync(db, [responseWorker], ct)).Single();
+    return Results.Created($"/api/workers/{worker.Id}", response);
+});
+
+app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request, BuildTrackDbContext db, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+{
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (worker is null) return Results.NotFound();
+    if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
+    if (string.IsNullOrWhiteSpace(request.ExternalWorkerCode) || string.IsNullOrWhiteSpace(request.FullName))
+    {
+        return Results.BadRequest(new { error = "External worker code and full name are required" });
+    }
+
+    worker.SiteId = request.SiteId;
+    worker.ExternalWorkerCode = request.ExternalWorkerCode.Trim();
+    worker.FullName = request.FullName.Trim();
+    worker.Brigade = Clean(request.Brigade);
+    worker.Role = Clean(request.Role);
+    worker.HourlyRate = Math.Max(0, request.HourlyRate);
+    worker.PlannedDailyHours = request.PlannedDailyHours <= 0 ? 8 : request.PlannedDailyHours;
+    worker.AttendanceSource = NormalizeAttendanceSource(request.AttendanceSource);
+    worker.RiskScore = Math.Clamp(request.RiskScore, 0, 100);
+    worker.Notes = Clean(request.Notes);
+    worker.Status = request.Status;
+    worker.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+
+    if (request.CameraIdentity is not null && HasCameraIdentityValues(request.CameraIdentity))
+    {
+        var identity = await identityResolver.UpsertAsync(worker.Id, request.CameraIdentity.DeviceId, request.CameraIdentity.ExternalUserId, request.CameraIdentity.CardName, request.CameraIdentity.IsPrimary, ct);
+        await identityResolver.RemapRecentAsync(worker.Id, identity.Id, ct);
+    }
+
+    var responseWorker = await db.Workers.AsNoTracking().Include(x => x.CameraIdentities).FirstAsync(x => x.Id == worker.Id, ct);
+    var response = (await MapWorkerResponsesAsync(db, [responseWorker], ct)).Single();
+    return Results.Ok(response);
+});
+
+app.MapDelete("/api/workers/{id:guid}", async (Guid id, BuildTrackDbContext db, CancellationToken ct) =>
+{
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (worker is null) return Results.NotFound();
+    db.Workers.Remove(worker);
+    await db.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+
+app.MapPost("/api/workers/{id:guid}/camera-identities", async (Guid id, SaveWorkerCameraIdentityRequest request, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+{
+    var identity = await identityResolver.UpsertAsync(id, request.DeviceId, request.ExternalUserId, request.CardName, request.IsPrimary, ct);
+    return Results.Ok(new { identity.Id, identity.WorkerId, identity.DeviceId, identity.ExternalUserId, identity.CardName, identity.NormalizedCardName, identity.IsPrimary });
+});
+
+app.MapPost("/api/workers/{id:guid}/camera-identities/test", async (Guid id, TestWorkerCameraIdentityRequest request, BuildTrackDbContext db, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+{
+    var worker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+    if (worker is null) return Results.NotFound();
+    var device = request.DeviceId is not null
+        ? await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId.Value, ct)
+        : await db.Devices.AsNoTracking().Where(x => x.SiteId == worker.SiteId).OrderBy(x => x.Name).FirstOrDefaultAsync(ct);
+    if (device is null) return Results.BadRequest(new { error = "Device was not found" });
+    var record = new DahuaAccessRecord
+    {
+        UserId = Clean(request.ExternalUserId),
+        CardName = Clean(request.CardName),
+        StatusRaw = "1",
+        MethodRaw = "15",
+        Type = "Entry",
+        RawFields = new Dictionary<string, string?>
+        {
+            ["UserID"] = Clean(request.ExternalUserId),
+            ["CardName"] = Clean(request.CardName),
+            ["ReceivedCardName"] = Clean(request.CardName),
+            ["Status"] = "1",
+            ["Method"] = "15",
+            ["Type"] = "Entry",
+        },
+    };
+    var resolution = await identityResolver.ResolveAsync(device, record, ct);
+    return Results.Ok(new TestWorkerCameraIdentityResponse(
+        resolution.Worker?.Id == worker.Id,
+        resolution.Worker?.Id,
+        resolution.Worker?.FullName,
+        resolution.Worker?.ExternalWorkerCode,
+        resolution.ResolvedBy,
+        resolution.Status,
+        resolution.Reason));
+});
+
+app.MapPost("/api/workers/{id:guid}/camera-identities/remap", async (Guid id, Guid? identityId, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+{
+    var result = await identityResolver.RemapRecentAsync(id, identityId, ct);
+    return Results.Ok(new WorkerCameraIdentityRemapResponse(result.AttendanceEventsUpdated, result.AttendanceSessionsUpdated));
+});
+
+app.MapGet("/api/worker-camera-identities", async (BuildTrackDbContext db, CancellationToken ct) =>
+{
+    var identities = await db.WorkerCameraIdentities
+        .AsNoTracking()
+        .Include(x => x.Worker)
+        .Include(x => x.Device)
+        .OrderBy(x => x.Worker!.FullName)
+        .ThenBy(x => x.CardName)
+        .ToListAsync(ct);
+
+    return Results.Ok(identities.Select(identity => new WorkerCameraIdentityResponse(
+        identity.Id,
+        identity.WorkerId,
+        identity.DeviceId,
+        identity.Device?.Name,
+        identity.Vendor,
+        identity.ExternalUserId,
+        identity.CardName,
+        identity.NormalizedCardName,
+        identity.IsPrimary,
+        identity.CreatedAt,
+        identity.UpdatedAt)).ToArray());
 });
 
 app.MapGet("/api/devices", async (BuildTrackDbContext db, IDahuaActiveRegisterSdk sdk, CancellationToken ct) =>
@@ -931,22 +1066,28 @@ app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, strin
         .Where(x => deviceIds.Contains(x.Id))
         .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
 
-    return Results.Ok(events.Select(securityEvent => new SecurityEventResponse(
-        securityEvent.Id,
-        securityEvent.EventTime,
-        FormatLocalTime(securityEvent.EventTime, timeZone),
-        securityEvent.EventType,
-        securityEvent.Severity,
-        securityEvent.Status,
-        deviceNames.GetValueOrDefault(securityEvent.DeviceId),
-        site.Name,
-        PublicSnapshotPath(securityEvent.StoredSnapshotPath) ?? PublicSnapshotPath(securityEvent.SnapshotPath),
-        BuildSnapshotUrl(securityEvent.StoredSnapshotPath) ?? BuildSnapshotUrl(securityEvent.SnapshotPath),
-        securityEvent.SnapshotDownloadStatus,
-        securityEvent.SnapshotDownloadError,
-        securityEvent.SnapshotSource,
-        securityEvent.Message,
-        ShouldExposeSecurityRecNo(securityEvent) ? securityEvent.RawRecNo : null)).ToArray());
+    return Results.Ok(events.Select(securityEvent =>
+    {
+        var (cameraUserId, cameraCardName) = ExtractCameraIdentity(securityEvent.RawPayloadJson);
+        return new SecurityEventResponse(
+            securityEvent.Id,
+            securityEvent.EventTime,
+            FormatLocalTime(securityEvent.EventTime, timeZone),
+            securityEvent.EventType,
+            securityEvent.Severity,
+            securityEvent.Status,
+            deviceNames.GetValueOrDefault(securityEvent.DeviceId),
+            site.Name,
+            PublicSnapshotPath(securityEvent.StoredSnapshotPath) ?? PublicSnapshotPath(securityEvent.SnapshotPath),
+            BuildSnapshotUrl(securityEvent.StoredSnapshotPath) ?? BuildSnapshotUrl(securityEvent.SnapshotPath),
+            securityEvent.SnapshotDownloadStatus,
+            securityEvent.SnapshotDownloadError,
+            securityEvent.SnapshotSource,
+            securityEvent.Message,
+            ShouldExposeSecurityRecNo(securityEvent) ? securityEvent.RawRecNo : null,
+            cameraUserId,
+            cameraCardName);
+    }).ToArray());
 });
 
 app.MapPatch("/api/security-events/{eventId:guid}/review", async (Guid eventId, ReviewSecurityEventRequest request, BuildTrackDbContext db, CancellationToken ct) =>
@@ -964,6 +1105,54 @@ app.MapPatch("/api/security-events/{eventId:guid}/review", async (Guid eventId, 
     securityEvent.ReviewedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { securityEvent.Id, securityEvent.Status, securityEvent.ReviewedAt });
+});
+
+app.MapPost("/api/security-events/{eventId:guid}/link-worker", async (
+    Guid eventId,
+    LinkSecurityEventToWorkerRequest request,
+    BuildTrackDbContext db,
+    IWorkerCameraIdentityResolver identityResolver,
+    CancellationToken ct) =>
+{
+    var securityEvent = await db.SecurityEvents.FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    if (securityEvent is null) return Results.NotFound();
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == request.WorkerId, ct);
+    if (worker is null) return Results.BadRequest(new { error = "Worker was not found" });
+    if (worker.TenantId != securityEvent.TenantId || worker.SiteId != securityEvent.SiteId)
+    {
+        return Results.BadRequest(new { error = "Worker belongs to another tenant or site" });
+    }
+
+    var (cameraUserId, cameraCardName) = ExtractCameraIdentity(securityEvent.RawPayloadJson);
+    var identity = await identityResolver.UpsertAsync(
+        worker.Id,
+        request.DeviceId ?? securityEvent.DeviceId,
+        cameraUserId,
+        cameraCardName,
+        true,
+        ct);
+    var remap = request.RemapRecent
+        ? await identityResolver.RemapRecentAsync(worker.Id, identity.Id, ct)
+        : new WorkerCameraIdentityRemapResult(0, 0);
+
+    securityEvent.Status = SecurityEventStatus.Reviewed;
+    securityEvent.ReviewedAt = DateTimeOffset.UtcNow;
+    securityEvent.ReviewNote = string.IsNullOrWhiteSpace(request.ReviewNote)
+        ? $"Isciye baglandi: {worker.FullName} / {worker.ExternalWorkerCode}"
+        : request.ReviewNote.Trim();
+    await db.SaveChangesAsync(ct);
+
+    return Results.Ok(new
+    {
+        securityEvent.Id,
+        securityEvent.Status,
+        workerId = worker.Id,
+        worker.ExternalWorkerCode,
+        worker.FullName,
+        identityId = identity.Id,
+        remap.AttendanceEventsUpdated,
+        remap.AttendanceSessionsUpdated,
+    });
 });
 
 app.MapGet("/api/security-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, CancellationToken ct) =>
@@ -1693,6 +1882,134 @@ static async Task<AttendanceEventResponse[]> MapAttendanceEventsAsync(
             siteNames.GetValueOrDefault(attendanceEvent.SiteId),
             deviceNames.GetValueOrDefault(attendanceEvent.DeviceId)))
         .ToArray();
+}
+
+static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext db, IReadOnlyCollection<Worker> workers, CancellationToken ct)
+{
+    if (workers.Count == 0) return [];
+
+    var workerIds = workers.Select(x => x.Id).ToArray();
+    var deviceIds = workers
+        .SelectMany(x => x.CameraIdentities.Select(identity => identity.DeviceId))
+        .Where(id => id is not null)
+        .Select(id => id!.Value)
+        .Distinct()
+        .ToArray();
+    var deviceNames = deviceIds.Length == 0
+        ? new Dictionary<Guid, string>()
+        : await db.Devices.AsNoTracking().Where(x => deviceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+
+    var bakuTimeZone = ResolveApiTimeZone("Asia/Baku");
+    var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, bakuTimeZone).DateTime);
+    var monthStart = new DateOnly(today.Year, today.Month, 1);
+    var sessions = await db.AttendanceSessions.AsNoTracking()
+        .Where(x => x.WorkerId != null && workerIds.Contains(x.WorkerId.Value) && x.WorkDate >= monthStart)
+        .ToListAsync(ct);
+    var payrollByWorker = sessions
+        .GroupBy(x => x.WorkerId!.Value)
+        .ToDictionary(
+            group => group.Key,
+            group => new
+            {
+                TodayHours = group.Where(x => x.WorkDate == today).Sum(CalculatePresenceHours),
+                MonthlyHours = group.Sum(CalculatePresenceHours),
+            });
+
+    return workers.Select(worker =>
+    {
+        payrollByWorker.TryGetValue(worker.Id, out var payroll);
+        var todayHours = Math.Round(payroll?.TodayHours ?? 0, 2);
+        var monthlyHours = Math.Round(payroll?.MonthlyHours ?? 0, 2);
+        return new WorkerResponse(
+            worker.Id,
+            worker.SiteId,
+            worker.ExternalWorkerCode,
+            worker.FullName,
+            worker.Status,
+            worker.Brigade,
+            worker.Role,
+            worker.HourlyRate,
+            worker.PlannedDailyHours,
+            worker.AttendanceSource,
+            worker.RiskScore,
+            worker.Notes,
+            worker.CreatedAt,
+            worker.UpdatedAt,
+            worker.CameraIdentities
+                .OrderByDescending(identity => identity.IsPrimary)
+                .ThenBy(identity => identity.CreatedAt)
+                .Select(identity => new WorkerCameraIdentityResponse(
+                    identity.Id,
+                    identity.WorkerId,
+                    identity.DeviceId,
+                    identity.DeviceId is not null ? deviceNames.GetValueOrDefault(identity.DeviceId.Value) : null,
+                    identity.Vendor,
+                    identity.ExternalUserId,
+                    identity.CardName,
+                    identity.NormalizedCardName,
+                    identity.IsPrimary,
+                    identity.CreatedAt,
+                    identity.UpdatedAt))
+                .ToArray(),
+            new WorkerPayrollSummaryResponse(
+                todayHours,
+                Math.Round((decimal)todayHours * worker.HourlyRate, 2),
+                monthlyHours,
+                Math.Round((decimal)monthlyHours * worker.HourlyRate, 2)));
+    }).ToArray();
+}
+
+static double CalculatePresenceHours(AttendanceSession session)
+{
+    var end = session.CheckOutTime ?? session.LastSeenTime ?? session.CheckInTime;
+    return Math.Max(0, (end - session.CheckInTime).TotalHours);
+}
+
+static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+static string NormalizeAttendanceSource(string? value)
+{
+    if (string.Equals(value, "Camera", StringComparison.OrdinalIgnoreCase)) return "Camera";
+    if (string.Equals(value, "ForemanTablet", StringComparison.OrdinalIgnoreCase)) return "ForemanTablet";
+    return "Manual";
+}
+
+static bool HasCameraIdentityValues(SaveWorkerCameraIdentityRequest request) =>
+    !string.IsNullOrWhiteSpace(request.CardName) || !string.IsNullOrWhiteSpace(request.ExternalUserId);
+
+static (string? ExternalUserId, string? CardName) ExtractCameraIdentity(string rawPayloadJson)
+{
+    try
+    {
+        using var document = JsonDocument.Parse(rawPayloadJson);
+        var root = document.RootElement;
+        return (
+            FirstJsonString(root, "DahuaUserID", "CameraUserID", "UserID", "UserId", "WorkerExternalId"),
+            FirstJsonString(root, "DahuaCardName", "ReceivedCardName", "TrustedCardName", "CardName"));
+    }
+    catch (JsonException)
+    {
+        return (null, null);
+    }
+}
+
+static string? FirstJsonString(JsonElement root, params string[] propertyNames)
+{
+    foreach (var propertyName in propertyNames)
+    {
+        if (!root.TryGetProperty(propertyName, out var value)) continue;
+        var candidate = value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null,
+        };
+        if (!string.IsNullOrWhiteSpace(candidate)) return candidate.Trim();
+    }
+
+    return null;
 }
 static async Task<string> GetPersistedNetSdkStatusAsync(BuildTrackDbContext db, IDahuaActiveRegisterSdk sdk, CancellationToken ct)
 {

@@ -1438,6 +1438,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
         var connectionLogger = scope.ServiceProvider.GetRequiredService<IDeviceConnectionLogger>();
         var pipeline = scope.ServiceProvider.GetRequiredService<IDahuaAccessRecordIngestionPipeline>();
+        var workerCameraIdentityResolver = scope.ServiceProvider.GetRequiredService<IWorkerCameraIdentityResolver>();
 
         Device? device = null;
         if (_deviceIdBySmartEventAttachHandle.TryGetValue(analyzerHandle, out var mappedDeviceId))
@@ -1521,6 +1522,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
         var decodedTrustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decoded.Record, decoded.RawStructSummaryJson, null);
         var rawCameraUserId = decodedTrustedRecord.UserId;
+        var cameraIdentityResolution = await workerCameraIdentityResolver.ResolveAsync(device, decodedTrustedRecord, CancellationToken.None);
         var identityResolutionMode = DahuaIdentityResolutionModeParser.Parse(configuration["DAHUA_IDENTITY_RESOLUTION_MODE"]);
         var identityPolicy = DahuaIdentityMatchPolicyParser.Parse(configuration["DAHUA_IDENTITY_MATCH_POLICY"]);
         var allowCardNameMismatchAttendance = IsEnabled(configuration["DAHUA_ALLOW_CARDNAME_MISMATCH_ATTENDANCE"]);
@@ -1530,7 +1532,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
         var cardNameAutoProvisionAllowlist = ParseCsv(configuration["DAHUA_CARDNAME_AUTOPROVISION_ALLOWLIST"]);
         var cardNameAutoProvisionDenylist = ParseCsv(configuration["DAHUA_CARDNAME_AUTOPROVISION_DENYLIST"]);
 
-        var mappedWorkers = string.IsNullOrWhiteSpace(rawCameraUserId)
+        var mappedWorkers = cameraIdentityResolution.Worker is not null
+            ? new List<Worker> { cameraIdentityResolution.Worker }
+            : string.IsNullOrWhiteSpace(rawCameraUserId) || !LooksLikeSafeLegacyInternalWorkerCode(rawCameraUserId)
             ? new List<Worker>()
             : await db.Workers.AsNoTracking()
                 .Where(x => x.SiteId == device.SiteId
@@ -1541,7 +1545,23 @@ public sealed class DahuaNetSdkActiveRegisterService(
                 .ToListAsync(CancellationToken.None);
         var mappingConflict = mappedWorkers.Count > 1;
         var resolvedWorker = mappedWorkers.Count == 1 ? mappedWorkers[0] : null;
-        var trustedRecord = DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
+        var trustedRecord = cameraIdentityResolution.Resolved && resolvedWorker is not null
+            ? DahuaSmartEventClassification.BuildCardNamePrimaryRecognizedRecord(
+                decodedTrustedRecord,
+                decoded.RawStructSummaryJson,
+                resolvedWorker,
+                rawCameraUserId,
+                userIdCollision: false,
+                originalUserIdMappedWorkerName: null,
+                autoProvisioned: false)
+            : DahuaSmartEventClassification.BuildTrustedRecord(decodedTrustedRecord, decoded.RawStructSummaryJson, resolvedWorker);
+        if (cameraIdentityResolution.Identity is not null)
+        {
+            trustedRecord.RawFields["IdentityResolvedBy"] = cameraIdentityResolution.ResolvedBy;
+            trustedRecord.RawFields["WorkerCameraIdentityId"] = cameraIdentityResolution.Identity.Id.ToString();
+            trustedRecord.RawFields["DahuaUserID"] = rawCameraUserId;
+            trustedRecord.RawFields["DahuaCardName"] = decodedTrustedRecord.RawFields.GetValueOrDefault("ReceivedCardName") ?? decodedTrustedRecord.CardName;
+        }
         var workerResolved = resolvedWorker is not null;
         if (identityPolicy == DahuaIdentityMatchPolicy.UserIdPrimary)
         {
@@ -1829,6 +1849,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
         DahuaIdentityResolutionMode.Hybrid => "hybrid",
         _ => "strict_userid",
     };
+
+    private static bool LooksLikeSafeLegacyInternalWorkerCode(string value) =>
+        value.StartsWith("W-", StringComparison.OrdinalIgnoreCase);
 
     private sealed record CardNameIdentityResolutionResult(
         DahuaAccessRecord? Record,

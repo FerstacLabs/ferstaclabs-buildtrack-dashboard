@@ -21,6 +21,7 @@ public sealed class BuildTrackDbContext : DbContext
     public DbSet<License> Licenses => Set<License>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<Worker> Workers => Set<Worker>();
+    public DbSet<WorkerCameraIdentity> WorkerCameraIdentities => Set<WorkerCameraIdentity>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<AttendanceEvent> AttendanceEvents => Set<AttendanceEvent>();
     public DbSet<AttendanceSession> AttendanceSessions => Set<AttendanceSession>();
@@ -86,11 +87,40 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.ExternalWorkerCode).HasMaxLength(80).IsRequired();
             entity.Property(x => x.FullName).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Brigade).HasMaxLength(120);
+            entity.Property(x => x.Role).HasMaxLength(120);
+            entity.Property(x => x.HourlyRate).HasPrecision(18, 2);
+            entity.Property(x => x.PlannedDailyHours).HasPrecision(8, 2);
+            entity.Property(x => x.AttendanceSource).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Notes).HasMaxLength(500);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => new { x.TenantId, x.SiteId, x.ExternalWorkerCode }).IsUnique();
             entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany(x => x.Workers).HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WorkerCameraIdentity>(entity =>
+        {
+            entity.ToTable("worker_camera_identities");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Vendor).HasMaxLength(60).IsRequired();
+            entity.Property(x => x.ExternalUserId).HasMaxLength(80);
+            entity.Property(x => x.CardName).HasMaxLength(180);
+            entity.Property(x => x.NormalizedCardName).HasMaxLength(180);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.WorkerId);
+            entity.HasIndex(x => x.DeviceId);
+            entity.HasIndex(x => new { x.TenantId, x.DeviceId, x.NormalizedCardName })
+                .IsUnique()
+                .HasFilter("\"NormalizedCardName\" IS NOT NULL");
+            entity.HasIndex(x => new { x.TenantId, x.DeviceId, x.ExternalUserId })
+                .IsUnique()
+                .HasFilter("\"ExternalUserId\" IS NOT NULL");
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Worker).WithMany(x => x.CameraIdentities).HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Device>(entity =>

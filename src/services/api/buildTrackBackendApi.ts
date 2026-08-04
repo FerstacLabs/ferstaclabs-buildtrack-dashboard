@@ -34,6 +34,64 @@ export interface BackendDevice {
   netSdkDecodeStatus: string
 }
 
+export interface WorkerCameraIdentity {
+  id: string
+  workerId: string
+  deviceId?: string
+  deviceName?: string
+  vendor: string
+  externalUserId?: string
+  cardName?: string
+  normalizedCardName?: string
+  isPrimary: boolean
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface BackendWorker {
+  id: string
+  siteId: string
+  externalWorkerCode: string
+  fullName: string
+  status: 'Active' | 'Inactive'
+  brigade?: string
+  role?: string
+  hourlyRate: number
+  plannedDailyHours: number
+  attendanceSource: 'Camera' | 'Manual' | 'ForemanTablet'
+  riskScore: number
+  notes?: string
+  createdAt: string
+  updatedAt?: string
+  cameraIdentities: WorkerCameraIdentity[]
+  payrollSummary: {
+    todayCameraHours: number
+    todayEstimatedPay: number
+    monthlyCameraHours: number
+    monthlyEstimatedPay: number
+  }
+}
+
+export interface SaveWorkerBody {
+  siteId: string
+  externalWorkerCode: string
+  fullName: string
+  status?: 'Active' | 'Inactive'
+  brigade?: string
+  role?: string
+  hourlyRate?: number
+  plannedDailyHours?: number
+  attendanceSource?: 'Camera' | 'Manual' | 'ForemanTablet'
+  riskScore?: number
+  notes?: string
+  cameraIdentity?: {
+    deviceId?: string
+    externalUserId?: string
+    cardName?: string
+    isPrimary?: boolean
+  }
+}
+
 export interface DeviceConnectionLog {
   id: string
   deviceId?: string
@@ -171,7 +229,7 @@ export interface SecurityEventRow {
   id: string
   eventTime: string
   eventTimeLocal: string
-  eventType: 'UnknownFace' | 'SuspiciousRecognition' | 'IdentityMismatch' | 'IdentityMappingConflict' | 'ParserUncertainSmartEvent'
+  eventType: 'UnknownFace' | 'SuspiciousRecognition' | 'IdentityMismatch' | 'IdentityMappingConflict' | 'ParserUncertainSmartEvent' | 'UnmappedCameraIdentity'
   severity: 'Warning'
   status: SecurityEventStatus
   deviceName?: string
@@ -183,6 +241,8 @@ export interface SecurityEventRow {
   snapshotSource?: string
   message?: string
   rawRecNo?: number
+  cameraExternalUserId?: string
+  cameraCardName?: string
 }
 
 
@@ -340,7 +400,14 @@ export const buildTrackBackendApi = {
   baseUrl: API_BASE,
   getSites: async () => unwrapArray<BackendSite>(await request<unknown>('/api/sites')),
   createSite: (body: { name: string; address: string; timeZone: string }) => request<BackendSite>('/api/sites', { method: 'POST', body: JSON.stringify(body) }),
-  createWorker: (body: { siteId: string; externalWorkerCode: string; fullName: string; status?: string }) => request('/api/workers', { method: 'POST', body: JSON.stringify(body) }),
+  getWorkers: async (siteId?: string) => unwrapArray<BackendWorker>(await request<unknown>(`/api/workers${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  createWorker: (body: SaveWorkerBody) => request<BackendWorker>('/api/workers', { method: 'POST', body: JSON.stringify(body) }),
+  updateWorker: (id: string, body: SaveWorkerBody) => request<BackendWorker>(`/api/workers/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteWorker: (id: string) => request<void>(`/api/workers/${id}`, { method: 'DELETE' }),
+  testWorkerCameraIdentity: (id: string, body: { deviceId?: string; externalUserId?: string; cardName?: string }) =>
+    request<{ matched: boolean; workerId?: string; workerName?: string; workerCode?: string; resolvedBy?: string; status?: string; reason?: string }>(`/api/workers/${id}/camera-identities/test`, { method: 'POST', body: JSON.stringify(body) }),
+  remapWorkerCameraIdentity: (id: string, identityId?: string) =>
+    request<{ attendanceEventsUpdated: number; attendanceSessionsUpdated: number }>(`/api/workers/${id}/camera-identities/remap${identityId ? `?identityId=${encodeURIComponent(identityId)}` : ''}`, { method: 'POST' }),
   getDevices: async () => unwrapArray<BackendDevice>(await request<unknown>('/api/devices')),
   getDeviceLogs: async (id: string) => unwrapArray<DeviceConnectionLog>(await request<unknown>(`/api/devices/${id}/logs`)),
   createDevice: (body: Record<string, unknown>) => request<BackendDevice>('/api/devices', { method: 'POST', body: JSON.stringify(body) }),
@@ -353,6 +420,8 @@ export const buildTrackBackendApi = {
   getAttendanceSnapshots: async (siteId: string, workerExternalId: string, date: string) => unwrapArray<AttendanceSnapshotRow>(await request<unknown>(`/api/attendance-events/snapshots?siteId=${encodeURIComponent(siteId)}&workerExternalId=${encodeURIComponent(workerExternalId)}&date=${encodeURIComponent(date)}`)),
   getSecurityEvents: async (siteId: string, date?: string) => unwrapArray<SecurityEventRow>(await request<unknown>(`/api/sites/${siteId}/security-events${date ? `?date=${date}` : ''}`)),
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
+  linkSecurityEventToWorker: (id: string, body: { workerId: string; deviceId?: string; remapRecent?: boolean; reviewNote?: string }) =>
+    request(`/api/security-events/${id}/link-worker`, { method: 'POST', body: JSON.stringify(body) }),
   securitySnapshotUrl: (snapshotUrl?: string) => withApiBase(snapshotUrl),
   attendanceSnapshotUrl: (snapshotUrl?: string) => withApiBase(snapshotUrl),
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
