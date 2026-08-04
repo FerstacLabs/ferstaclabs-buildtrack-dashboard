@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
+import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type AttendanceSnapshotRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
 
 const API_TEST_SITE_ID = 'c235fd3e-2f5b-4cac-bb1d-92a94dd54b23'
@@ -54,13 +55,14 @@ const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPr
 
   return (
     <button type="button" className="snapshot-thumb-button" onClick={() => onPreview(row)} aria-label="Davamiyyət şəkillərini aç">
-      <img
+      <AuthenticatedSnapshotImage
         src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
         alt="Davamiyyət snapshot"
         width={84}
         height={54}
         className="snapshot-thumb-image"
-        onError={() => setFailed(true)}
+        placeholder={<span className="snapshot-placeholder">Şəkil yüklənir...</span>}
+        onUnavailable={() => setFailed(true)}
       />
       <span className="snapshot-zoom-label">Qalereya</span>
     </button>
@@ -204,6 +206,7 @@ export const AttendanceLivePage = () => {
   const totalCheckedIn = summary?.totalWorkersCheckedIn || sessions.length
   const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
   const totalWorkedHours = Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
+  const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -328,11 +331,15 @@ export const AttendanceLivePage = () => {
         </div>
         {galleryLoading ? (
           <Alert type="info" showIcon message="Şəkillər yüklənir..." />
-        ) : gallerySnapshots.length ? (
+        ) : visibleGallerySnapshots.length ? (
           <div className="snapshot-gallery-grid">
-            {gallerySnapshots.map((snapshot) => (
+            {visibleGallerySnapshots.map((snapshot) => (
               <figure key={snapshot.id} className="snapshot-gallery-item">
-                <img src={buildTrackBackendApi.attendanceSnapshotUrl(snapshot.snapshotUrl)} alt="Davamiyyət snapshot" />
+                <AuthenticatedSnapshotImage
+                  src={buildTrackBackendApi.attendanceSnapshotUrl(snapshot.snapshotUrl)}
+                  alt="Davamiyyət snapshot"
+                  placeholder={<span className="snapshot-placeholder">Şəkil yüklənir...</span>}
+                />
                 <figcaption>
                   <span>{snapshot.eventTimeLocal}</span>
                   <Tag color={snapshot.source.includes('active_register') ? 'purple' : 'cyan'}>{sourceLabel(snapshot.source)}</Tag>

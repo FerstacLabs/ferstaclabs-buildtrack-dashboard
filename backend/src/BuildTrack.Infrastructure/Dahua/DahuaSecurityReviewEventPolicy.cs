@@ -27,12 +27,12 @@ public static class DahuaSecurityReviewEventPolicy
 
     public static string ResolveMessage(SecurityEventType eventType) => eventType switch
     {
-        SecurityEventType.UnknownFace => "Taninmayan uz askarlandi",
-        SecurityEventType.IdentityMismatch => "Subheli tanima / worker identity mismatch",
-        SecurityEventType.IdentityMappingConflict => "Subheli tanima / duplicate camera UserID mapping",
-        SecurityEventType.SuspiciousRecognition => "Subheli tanima / worker identity mismatch",
-        SecurityEventType.ParserUncertainSmartEvent => "Subheli tanima / worker identity mismatch",
-        _ => "Yoxlanilmali uz hadisesi",
+        SecurityEventType.UnknownFace => "Tanınmayan üz aşkarlandı",
+        SecurityEventType.IdentityMismatch => "Şübhəli tanıma: kamera məlumatı işçi profili ilə uyğun gəlmədi",
+        SecurityEventType.IdentityMappingConflict => "Şübhəli tanıma: kamera UserID bir neçə işçi ilə uyğunlaşır",
+        SecurityEventType.SuspiciousRecognition => "Şübhəli tanıma: təsdiq üçün yoxlanılmalıdır",
+        SecurityEventType.ParserUncertainSmartEvent => "Şübhəli tanıma: kamera məlumatı tam etibarlı oxunmadı",
+        _ => "Yoxlanılmalı üz hadisəsi",
     };
 
     private static bool IsClassification(DahuaAccessRecord record, string classification) =>

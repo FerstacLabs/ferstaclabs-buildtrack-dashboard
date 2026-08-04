@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
+import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { buildTrackBackendApi, type BackendSite, type SecurityEventRow, type SecurityEventStatus } from '../../services/api/buildTrackBackendApi'
 
 const API_TEST_SITE_ID = 'c235fd3e-2f5b-4cac-bb1d-92a94dd54b23'
@@ -14,12 +15,14 @@ const statusColor: Record<SecurityEventStatus, string> = {
   Open: 'orange',
   Reviewed: 'green',
   Ignored: 'default',
+  AutoResolved: 'blue',
 }
 
 const statusLabel: Record<SecurityEventStatus, string> = {
   Open: 'Açıq',
   Reviewed: 'Baxılıb',
   Ignored: 'Yox sayılıb',
+  AutoResolved: 'Avtomatik bağlanıb',
 }
 
 const eventLabel: Record<string, string> = {
@@ -39,6 +42,13 @@ const eventColor: Record<string, string> = {
 }
 
 const showDebug = import.meta.env.DEV || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
+const statusFilterOptions: Array<{ label: string; value: SecurityEventStatus | 'All' }> = [
+  { label: 'Açıq', value: 'Open' },
+  { label: 'Baxılıb', value: 'Reviewed' },
+  { label: 'Yox sayılıb', value: 'Ignored' },
+  { label: 'Avtomatik bağlanıb', value: 'AutoResolved' },
+  { label: 'Hamısı', value: 'All' },
+]
 
 const bakuIsoDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -62,19 +72,20 @@ const previousBakuIsoDate = (date = new Date()) => {
 
 const SnapshotThumbnail = ({ row, onPreview }: { row: SecurityEventRow; onPreview: (row: SecurityEventRow) => void }) => {
   const [failed, setFailed] = useState(false)
-  if (!row.snapshotPath || row.snapshotDownloadStatus === 'Failed' || failed) {
+  if (!row.snapshotUrl || row.snapshotDownloadStatus === 'Failed' || failed) {
     return <span className="snapshot-placeholder">Şəkil yüklənmədi</span>
   }
 
   return (
     <button type="button" className="snapshot-thumb-button" onClick={() => onPreview(row)} aria-label="Tanınmayan üz şəklini böyüt">
-      <img
+      <AuthenticatedSnapshotImage
         src={buildTrackBackendApi.securitySnapshotUrl(row.snapshotUrl)}
         alt="Tanınmayan üz"
         width={84}
         height={54}
         className="snapshot-thumb-image"
-        onError={() => setFailed(true)}
+        placeholder={<span className="snapshot-placeholder">Şəkil yüklənir...</span>}
+        onUnavailable={() => setFailed(true)}
       />
       <span className="snapshot-zoom-label">Böyüt</span>
     </button>
@@ -92,6 +103,7 @@ export const SecurityEventsPage = () => {
   const [siteId, setSiteId] = useState<string>()
   const [date, setDate] = useState(bakuIsoDate())
   const [rows, setRows] = useState<SecurityEventRow[]>([])
+  const [statusFilter, setStatusFilter] = useState<SecurityEventStatus | 'All'>('Open')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [requestedSiteId, setRequestedSiteId] = useState('')
@@ -171,10 +183,13 @@ export const SecurityEventsPage = () => {
     return options
   }, [sites])
 
-  const openCount = rows.filter((row) => row.status === 'Open').length
+  const openRows = rows.filter((row) => row.status === 'Open')
+  const filteredRows = statusFilter === 'All' ? rows : rows.filter((row) => row.status === statusFilter)
+  const openCount = openRows.length
   const reviewedCount = rows.filter((row) => row.status === 'Reviewed').length
-  const unknownCount = rows.filter((row) => row.eventType === 'UnknownFace').length
-  const suspiciousCount = rows.filter((row) => row.eventType !== 'UnknownFace').length
+  const autoResolvedCount = rows.filter((row) => row.status === 'AutoResolved').length
+  const unknownCount = openRows.filter((row) => row.eventType === 'UnknownFace').length
+  const suspiciousCount = openRows.filter((row) => row.eventType !== 'UnknownFace').length
 
   const columns: TableColumnsType<SecurityEventRow> = [
     { title: 'Vaxt', dataIndex: 'eventTimeLocal', sorter: (a, b) => a.eventTime.localeCompare(b.eventTime) },
@@ -193,8 +208,8 @@ export const SecurityEventsPage = () => {
       key: 'actions',
       render: (_, row) => (
         <Space>
-          <Button size="small" disabled={row.status === 'Reviewed'} onClick={() => reviewEvent(row.id, 'Reviewed')}>Reviewed</Button>
-          <Button size="small" disabled={row.status === 'Ignored'} onClick={() => reviewEvent(row.id, 'Ignored')}>Ignore</Button>
+          <Button size="small" disabled={row.status !== 'Open'} onClick={() => reviewEvent(row.id, 'Reviewed')}>Baxıldı</Button>
+          <Button size="small" disabled={row.status !== 'Open'} onClick={() => reviewEvent(row.id, 'Ignored')}>Yox say</Button>
         </Space>
       ),
     },
@@ -216,6 +231,7 @@ export const SecurityEventsPage = () => {
       <section className="filter-bar live-filter-bar">
         <Select value={siteId} onChange={setSiteId} options={siteOptions} placeholder="Obyekt seçin" />
         <input className="ant-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} style={{ maxWidth: 180 }} />
+        <Select value={statusFilter} onChange={setStatusFilter} options={statusFilterOptions} style={{ minWidth: 180 }} />
         <ToolbarButton icon={<ReloadOutlined />} onClick={() => loadEvents()}>Yenilə</ToolbarButton>
       </section>
 
@@ -232,17 +248,17 @@ export const SecurityEventsPage = () => {
         <KpiCard icon={<EyeInvisibleOutlined />} title="Tanınmayan üzlər" value={unknownCount.toString()} trend={date} tone="orange" />
         <KpiCard icon={<WarningOutlined />} title="Yoxlanılmalı" value={suspiciousCount.toString()} trend="şübhəli tanıma" tone="purple" />
         <KpiCard icon={<WarningOutlined />} title="Açıq hadisə" value={openCount.toString()} trend="baxış gözləyir" tone="red" />
-        <KpiCard icon={<SafetyCertificateOutlined />} title="Baxılıb" value={reviewedCount.toString()} trend="security review" tone="green" />
+        <KpiCard icon={<SafetyCertificateOutlined />} title="Bağlanıb" value={(reviewedCount + autoResolvedCount).toString()} trend={`${autoResolvedCount} avtomatik`} tone="green" />
       </section>
 
       <section className="table-card">
         <div className="card-heading">
           <h2>Yad şəxslər siyahısı</h2>
-          <Space>{rows.length > 0 && <Tag color="orange">{rows.length} hadisə</Tag>}</Space>
+          <Space>{filteredRows.length > 0 && <Tag color="orange">{filteredRows.length} hadisə</Tag>}</Space>
         </div>
         <Table<SecurityEventRow>
           columns={columns}
-          dataSource={rows}
+          dataSource={filteredRows}
           loading={loading}
           rowKey="id"
           pagination={{ pageSize: 10 }}
@@ -267,11 +283,16 @@ export const SecurityEventsPage = () => {
               <span>Cihaz: {selectedSecurityEvent.deviceName ?? '-'}</span>
               <span>RecNo: {selectedSecurityEvent.rawRecNo ?? '-'}</span>
             </div>
-            <img
-              src={buildTrackBackendApi.securitySnapshotUrl(selectedSecurityEvent.snapshotUrl)}
-              alt="Tanınmayan üz böyük görüntü"
-              className="snapshot-preview-image"
-            />
+            {selectedSecurityEvent.snapshotUrl ? (
+              <AuthenticatedSnapshotImage
+                src={buildTrackBackendApi.securitySnapshotUrl(selectedSecurityEvent.snapshotUrl)}
+                alt="Tanınmayan üz böyük görüntü"
+                className="snapshot-preview-image"
+                placeholder={<Alert type="info" showIcon message="Şəkil yüklənir..." />}
+              />
+            ) : (
+              <Alert type="warning" showIcon message="Şəkil yüklənmədi" />
+            )}
           </div>
         )}
       </Modal>    </div>

@@ -18,7 +18,8 @@ public enum SecurityEventStatus
 {
     Open,
     Reviewed,
-    Ignored
+    Ignored,
+    AutoResolved
 }
 
 public sealed class SecurityEvent

@@ -160,12 +160,12 @@ export interface AttendanceSnapshotRow {
   id: string
   eventTime: string
   eventTimeLocal: string
-  snapshotUrl: string
+  snapshotUrl?: string
   method: AttendanceMethod
   source: string
 }
 
-export type SecurityEventStatus = 'Open' | 'Reviewed' | 'Ignored'
+export type SecurityEventStatus = 'Open' | 'Reviewed' | 'Ignored' | 'AutoResolved'
 
 export interface SecurityEventRow {
   id: string
@@ -177,7 +177,7 @@ export interface SecurityEventRow {
   deviceName?: string
   siteName?: string
   snapshotPath?: string
-  snapshotUrl: string
+  snapshotUrl?: string
   snapshotDownloadStatus?: string
   snapshotDownloadError?: string
   snapshotSource?: string
@@ -353,7 +353,7 @@ export const buildTrackBackendApi = {
   getAttendanceSnapshots: async (siteId: string, workerExternalId: string, date: string) => unwrapArray<AttendanceSnapshotRow>(await request<unknown>(`/api/attendance-events/snapshots?siteId=${encodeURIComponent(siteId)}&workerExternalId=${encodeURIComponent(workerExternalId)}&date=${encodeURIComponent(date)}`)),
   getSecurityEvents: async (siteId: string, date?: string) => unwrapArray<SecurityEventRow>(await request<unknown>(`/api/sites/${siteId}/security-events${date ? `?date=${date}` : ''}`)),
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),
-  securitySnapshotUrl: (snapshotUrl: string) => withApiBase(snapshotUrl),
+  securitySnapshotUrl: (snapshotUrl?: string) => withApiBase(snapshotUrl),
   attendanceSnapshotUrl: (snapshotUrl?: string) => withApiBase(snapshotUrl),
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
   getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),

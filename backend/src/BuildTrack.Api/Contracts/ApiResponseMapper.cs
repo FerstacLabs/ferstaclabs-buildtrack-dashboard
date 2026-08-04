@@ -1,4 +1,5 @@
-﻿using BuildTrack.Domain.Entities;
+using BuildTrack.Domain.Entities;
+using BuildTrack.Infrastructure.Services;
 
 namespace BuildTrack.Api.Contracts;
 
@@ -39,8 +40,14 @@ public static class ApiResponseMapper
         attendanceEvent.Status,
         attendanceEvent.Method,
         attendanceEvent.RawRecNo,
-        attendanceEvent.SnapshotPath,
-        string.IsNullOrWhiteSpace(attendanceEvent.SnapshotPath) ? null : $"/api/attendance-events/{attendanceEvent.Id}/snapshot",
+        PublicSnapshotPath(attendanceEvent.SnapshotPath),
+        SnapshotUrl(attendanceEvent.SnapshotPath),
         attendanceEvent.Source,
         attendanceEvent.CreatedAt);
+
+    private static string? SnapshotUrl(string? snapshotPath) =>
+        SnapshotPathPolicy.TryCreateApiUrl(snapshotPath, out var snapshotUrl) ? snapshotUrl : null;
+
+    private static string? PublicSnapshotPath(string? snapshotPath) =>
+        SnapshotPathPolicy.TryCreateApiUrl(snapshotPath, out _) ? null : snapshotPath;
 }

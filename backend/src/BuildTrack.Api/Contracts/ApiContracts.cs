@@ -117,7 +117,7 @@ public sealed record AttendanceSnapshotResponse(
     Guid Id,
     DateTimeOffset EventTime,
     string EventTimeLocal,
-    string SnapshotUrl,
+    string? SnapshotUrl,
     AttendanceMethod Method,
     string Source);
 
@@ -131,7 +131,7 @@ public sealed record SecurityEventResponse(
     string? DeviceName,
     string? SiteName,
     string? SnapshotPath,
-    string SnapshotUrl,
+    string? SnapshotUrl,
     string? SnapshotDownloadStatus,
     string? SnapshotDownloadError,
     string? SnapshotSource,

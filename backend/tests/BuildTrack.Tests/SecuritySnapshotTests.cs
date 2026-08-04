@@ -114,6 +114,26 @@ public sealed class SecuritySnapshotTests
         Assert.False(result.Exists);
     }
 
+    [Fact]
+    public void SnapshotPathPolicy_CreatesSafeApiUrlForStoredSmartEventPath()
+    {
+        var ok = SnapshotPathPolicy.TryCreateApiUrl(
+            "/app/data/security-snapshots/smart-events/20260804113032875_40cdf585f52842d7ada0d5e5823356a6_cc3d2ae3ecb4477798dda1a552c22a07.jpg",
+            out var url);
+
+        Assert.True(ok);
+        Assert.Equal("/api/snapshots/smart-events/20260804113032875_40cdf585f52842d7ada0d5e5823356a6_cc3d2ae3ecb4477798dda1a552c22a07.jpg", url);
+    }
+
+    [Theory]
+    [InlineData("/app/data/security-snapshots/../secret.jpg")]
+    [InlineData("/app/data/security-snapshots/smart-events/../../secret.jpg")]
+    [InlineData("/etc/passwd")]
+    public void SnapshotPathPolicy_RejectsTraversalAndNonSnapshotPaths(string path)
+    {
+        Assert.False(SnapshotPathPolicy.TryCreateApiUrl(path, out _));
+    }
+
     private static byte[] NonBlackJpegBytes()
     {
         var bytes = new byte[1400];

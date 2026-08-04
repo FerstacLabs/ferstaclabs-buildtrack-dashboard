@@ -4,6 +4,7 @@ using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Dahua;
 using BuildTrack.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace BuildTrack.Infrastructure.Services;
@@ -11,6 +12,7 @@ namespace BuildTrack.Infrastructure.Services;
 public sealed class AttendanceIngestionService(
     BuildTrackDbContext db,
     IAttendanceSessionService attendanceSessionService,
+    IConfiguration configuration,
     ILogger<AttendanceIngestionService> logger) : IAttendanceIngestionService
 {
     public async Task<AttendanceEvent?> IngestDahuaRecordAsync(
@@ -116,6 +118,7 @@ public sealed class AttendanceIngestionService(
         }
 
         await attendanceSessionService.ProcessEventAsync(attendanceEvent, cancellationToken);
+        await AutoResolveSupersededFaceReviewEventsAsync(attendanceEvent, cancellationToken);
 
         logger.LogInformation("Attendance event inserted. Device {DeviceId}, WorkerExternalId {WorkerExternalId}, Status {Status}, Method {Method}, RecNo {RecNo}, Source {Source}",
             device.Id,
@@ -131,6 +134,76 @@ public sealed class AttendanceIngestionService(
     private static bool IsDuplicateException(DbUpdateException ex) =>
         ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true
         || ex.InnerException?.Message.Contains("unique", StringComparison.OrdinalIgnoreCase) == true;
+
+    private async Task AutoResolveSupersededFaceReviewEventsAsync(AttendanceEvent attendanceEvent, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(attendanceEvent.Source, DahuaEventSourceExtensions.ActiveRegisterSource, StringComparison.OrdinalIgnoreCase)) return;
+        if (attendanceEvent.Status != AttendanceEventStatus.Ok || string.IsNullOrWhiteSpace(attendanceEvent.WorkerExternalId)) return;
+        if (!DahuaVerifiedAttendancePayload.IsVerifiedAttendance(attendanceEvent)) return;
+
+        var window = TimeSpan.FromSeconds(ParsePositiveInt(configuration["DAHUA_PARSER_UNCERTAIN_AUTO_RESOLVE_SECONDS"], 90));
+        var windowStart = attendanceEvent.CreatedAt - window;
+        var windowEnd = attendanceEvent.CreatedAt.AddSeconds(5);
+        var candidates = await db.SecurityEvents
+            .Where(x => x.TenantId == attendanceEvent.TenantId
+                        && x.DeviceId == attendanceEvent.DeviceId
+                        && x.Status == SecurityEventStatus.Open
+                        && (x.EventType == SecurityEventType.ParserUncertainSmartEvent
+                            || x.EventType == SecurityEventType.SuspiciousRecognition)
+                        && x.CreatedAt >= windowStart
+                        && x.CreatedAt <= windowEnd)
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(20)
+            .ToListAsync(cancellationToken);
+        if (candidates.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        const string autoResolveNote = "Avtomatik bağlandı: eyni cihazdan təsdiqlənmiş davamiyyət qeydi alındı.";
+        var resolved = 0;
+        foreach (var securityEvent in candidates.Where(x => RawPayloadHasWorkerExternalId(x.RawPayloadJson, attendanceEvent.WorkerExternalId)))
+        {
+            securityEvent.Status = SecurityEventStatus.AutoResolved;
+            securityEvent.ReviewedAt = now;
+            securityEvent.ReviewNote = autoResolveNote;
+            securityEvent.Message = autoResolveNote;
+            resolved++;
+        }
+
+        if (resolved == 0) return;
+
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Auto-resolved {Count} parser-uncertain security events after verified attendance. Device {DeviceId}, WorkerExternalId {WorkerExternalId}", resolved, attendanceEvent.DeviceId, attendanceEvent.WorkerExternalId);
+    }
+
+    private static bool RawPayloadHasWorkerExternalId(string rawPayloadJson, string workerExternalId)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(rawPayloadJson);
+            var root = document.RootElement;
+            return string.Equals(GetJsonString(root, "UserID"), workerExternalId, StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(GetJsonString(root, "UserId"), workerExternalId, StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(GetJsonString(root, "WorkerExternalId"), workerExternalId, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string? GetJsonString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var value)) return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null,
+        };
+    }
+
+    private static int ParsePositiveInt(string? value, int defaultValue) =>
+        int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
 }
 
 

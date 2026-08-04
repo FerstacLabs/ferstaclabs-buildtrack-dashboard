@@ -562,6 +562,26 @@ app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId
     return Results.File(bytes, "image/jpeg");
 });
 
+app.MapGet("/api/snapshots/{**relativePath}", async (string relativePath, BuildTrackDbContext db, IConfiguration configuration, ITenantContext tenantContext, CancellationToken ct) =>
+{
+    if (tenantContext.TenantId is null) return Results.Unauthorized();
+
+    var storageRoot = configuration["SECURITY_SNAPSHOT_STORAGE_PATH"];
+    if (string.IsNullOrWhiteSpace(storageRoot)) storageRoot = SnapshotPathPolicy.DefaultStorageRoot;
+    if (!SnapshotPathPolicy.TryResolveLocalPath(storageRoot, relativePath, out var localPath)) return Results.NotFound();
+    if (!File.Exists(localPath)) return Results.NotFound();
+
+    var tenantOwnsSnapshot = await SnapshotReferenceExistsAsync(db, relativePath, tenantContext.TenantId.Value, ct);
+    if (!tenantOwnsSnapshot)
+    {
+        var referencedByAnotherTenant = await SnapshotReferenceExistsAsync(db, relativePath, null, ct);
+        return referencedByAnotherTenant ? Results.StatusCode(StatusCodes.Status403Forbidden) : Results.NotFound();
+    }
+
+    var bytes = await File.ReadAllBytesAsync(localPath, ct);
+    return Results.File(bytes, "image/jpeg");
+});
+
 app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? deviceId, string? workerExternalId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(workerExternalId)) return Results.BadRequest(new { error = "workerExternalId is required" });
@@ -601,7 +621,7 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
         attendanceEvent.Id,
         AttendanceEventOperationalClock.Resolve(attendanceEvent),
         FormatLocalTime(AttendanceEventOperationalClock.Resolve(attendanceEvent), timeZone),
-        $"/api/attendance-events/{attendanceEvent.Id}/snapshot",
+        BuildSnapshotUrl(attendanceEvent.SnapshotPath),
         attendanceEvent.Method,
         attendanceEvent.Source)).ToArray());
 });
@@ -791,8 +811,8 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
                     AttendanceSessionStatus.Open,
                     first.Source,
                     first.Method,
-                    first.SnapshotPath,
-                    string.IsNullOrWhiteSpace(first.SnapshotPath) ? null : $"/api/attendance-events/{first.Id}/snapshot");
+                    PublicSnapshotPath(first.SnapshotPath),
+                    BuildSnapshotUrl(first.SnapshotPath));
             })
             .OrderBy(x => x.CheckInTime)
             .ToArray();
@@ -877,8 +897,8 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
             row.Status,
             row.Source,
             snapshotEvent?.Method,
-            snapshotEvent?.SnapshotPath,
-            snapshotEvent is null || string.IsNullOrWhiteSpace(snapshotEvent.SnapshotPath) ? null : $"/api/attendance-events/{snapshotEvent.Id}/snapshot");
+            snapshotEvent is null ? null : PublicSnapshotPath(snapshotEvent.SnapshotPath),
+            snapshotEvent is null ? null : BuildSnapshotUrl(snapshotEvent.SnapshotPath));
     }).ToArray();
 
     return Results.Ok(new AttendanceDailyResponse(
@@ -920,13 +940,13 @@ app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, strin
         securityEvent.Status,
         deviceNames.GetValueOrDefault(securityEvent.DeviceId),
         site.Name,
-        securityEvent.SnapshotPath,
-        $"/api/security-events/{securityEvent.Id}/snapshot",
+        PublicSnapshotPath(securityEvent.StoredSnapshotPath) ?? PublicSnapshotPath(securityEvent.SnapshotPath),
+        BuildSnapshotUrl(securityEvent.StoredSnapshotPath) ?? BuildSnapshotUrl(securityEvent.SnapshotPath),
         securityEvent.SnapshotDownloadStatus,
         securityEvent.SnapshotDownloadError,
         securityEvent.SnapshotSource,
         securityEvent.Message,
-        securityEvent.RawRecNo)).ToArray());
+        ShouldExposeSecurityRecNo(securityEvent) ? securityEvent.RawRecNo : null)).ToArray());
 });
 
 app.MapPatch("/api/security-events/{eventId:guid}/review", async (Guid eventId, ReviewSecurityEventRequest request, BuildTrackDbContext db, CancellationToken ct) =>
@@ -1564,6 +1584,45 @@ static TimeZoneInfo ResolveApiTimeZone(string? timeZoneId)
 static bool IsCheckoutConfirmed(AttendanceSession session) => session.CheckOutTime is not null && session.CloseReason is not null && new[] { "Manual", "AutoEndOfDay", "ExitDevice", "DeviceDirection" }.Contains(session.CloseReason);
 static string FormatLocalTime(DateTimeOffset value, TimeZoneInfo timeZone) =>
     TimeZoneInfo.ConvertTime(value, timeZone).ToString("yyyy-MM-dd HH:mm:ss");
+
+static string? BuildSnapshotUrl(string? snapshotPath) =>
+    SnapshotPathPolicy.TryCreateApiUrl(snapshotPath, out var snapshotUrl) ? snapshotUrl : null;
+
+static string? PublicSnapshotPath(string? snapshotPath) =>
+    SnapshotPathPolicy.TryCreateApiUrl(snapshotPath, out _) ? null : snapshotPath;
+
+static bool ShouldExposeSecurityRecNo(SecurityEvent securityEvent) =>
+    securityEvent.EventType is not (SecurityEventType.ParserUncertainSmartEvent or SecurityEventType.SuspiciousRecognition);
+
+static async Task<bool> SnapshotReferenceExistsAsync(BuildTrackDbContext db, string relativePath, Guid? tenantId, CancellationToken ct)
+{
+    var normalized = relativePath.Trim().Replace('\\', '/').Trim('/');
+    var slashSuffix = "/" + normalized;
+    var backslashSuffix = "\\" + normalized.Replace('/', '\\');
+
+    var attendanceQuery = db.AttendanceEvents.IgnoreQueryFilters().AsNoTracking();
+    if (tenantId is not null) attendanceQuery = attendanceQuery.Where(x => x.TenantId == tenantId.Value);
+    var attendanceExists = await attendanceQuery.AnyAsync(
+        x => x.SnapshotPath != null
+             && (x.SnapshotPath.EndsWith(slashSuffix)
+                 || x.SnapshotPath.EndsWith(backslashSuffix)
+                 || x.SnapshotPath == normalized),
+        ct);
+    if (attendanceExists) return true;
+
+    var securityQuery = db.SecurityEvents.IgnoreQueryFilters().AsNoTracking();
+    if (tenantId is not null) securityQuery = securityQuery.Where(x => x.TenantId == tenantId.Value);
+    return await securityQuery.AnyAsync(
+        x => (x.SnapshotPath != null
+              && (x.SnapshotPath.EndsWith(slashSuffix)
+                  || x.SnapshotPath.EndsWith(backslashSuffix)
+                  || x.SnapshotPath == normalized))
+             || (x.StoredSnapshotPath != null
+                 && (x.StoredSnapshotPath.EndsWith(slashSuffix)
+                     || x.StoredSnapshotPath.EndsWith(backslashSuffix)
+                     || x.StoredSnapshotPath == normalized)),
+        ct);
+}
 
 static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(DateOnly workDate, TimeZoneInfo timeZone)
 {
