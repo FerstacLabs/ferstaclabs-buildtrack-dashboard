@@ -79,9 +79,12 @@ export interface BackendWorker {
   payrollSummary: {
     todayCameraHours: number
     todayEstimatedPay: number
+    todayEstimatedAmount?: number
     monthlyCameraHours: number
     monthlyEstimatedPay: number
+    monthlyEstimatedAmount?: number
     isCurrentlyActive: boolean
+    currentSessionStartedAt?: string
     lastSeenAt?: string
   }
 }

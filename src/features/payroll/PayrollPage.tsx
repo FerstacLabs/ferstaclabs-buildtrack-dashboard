@@ -56,7 +56,7 @@ export const PayrollPage = () => {
 
   const backendPayrollRows = useMemo<ProjectPayrollRow[]>(() => backendWorkers.map((worker) => {
     const approvedHours = Number(worker.payrollSummary?.monthlyCameraHours ?? 0)
-    const grossAmount = Number(worker.payrollSummary?.monthlyEstimatedPay ?? approvedHours * Number(worker.hourlyRate ?? 0))
+    const grossAmount = Number(worker.payrollSummary?.monthlyEstimatedAmount ?? worker.payrollSummary?.monthlyEstimatedPay ?? approvedHours * Number(worker.hourlyRate ?? 0))
     return {
       id: `backend-payroll-${worker.id}`,
       objectName: worker.siteAssignments?.find((assignment) => assignment.isPrimary)?.siteName || sites.find((site) => site.id === worker.siteId)?.name || 'Backend kamera davamiyyəti',

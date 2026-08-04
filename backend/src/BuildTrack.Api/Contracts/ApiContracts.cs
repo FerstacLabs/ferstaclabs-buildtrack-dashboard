@@ -58,9 +58,12 @@ public sealed record WorkerCameraIdentityResponse(
 public sealed record WorkerPayrollSummaryResponse(
     double TodayCameraHours,
     decimal TodayEstimatedPay,
+    decimal TodayEstimatedAmount,
     double MonthlyCameraHours,
     decimal MonthlyEstimatedPay,
+    decimal MonthlyEstimatedAmount,
     bool IsCurrentlyActive,
+    DateTimeOffset? CurrentSessionStartedAt,
     DateTimeOffset? LastSeenAt);
 
 public sealed record WorkerSiteAssignmentResponse(

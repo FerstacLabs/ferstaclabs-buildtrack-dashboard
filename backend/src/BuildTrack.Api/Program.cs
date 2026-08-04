@@ -377,31 +377,30 @@ app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext 
     return Results.Created($"/api/sites/{site.Id}", site);
 });
 
-app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, ILoggerFactory loggerFactory, CancellationToken ct) =>
 {
-    var query = db.Workers
+    var workers = await db.Workers
         .AsNoTracking()
         .Include(x => x.CameraIdentities)
         .Include(x => x.SiteAssignments)
-        .AsQueryable();
+        .OrderBy(x => x.FullName)
+        .ToListAsync(ct);
     if (siteId is not null)
     {
-        var assignedWorkerIds = await db.WorkerSiteAssignments
+        var assignedWorkerIds = (await db.WorkerSiteAssignments
             .AsNoTracking()
             .Where(x => x.SiteId == siteId.Value && x.Status == WorkerSiteAssignmentStatus.Active)
             .Select(x => x.WorkerId)
-            .ToListAsync(ct);
-        var sessionWorkerIds = await db.AttendanceSessions
+            .ToListAsync(ct)).ToHashSet();
+        var siteSessions = await db.AttendanceSessions
             .AsNoTracking()
-            .Where(x => x.SiteId == siteId.Value && x.WorkerId != null)
-            .Select(x => x.WorkerId!.Value)
-            .Distinct()
+            .Where(x => x.SiteId == siteId.Value)
             .ToListAsync(ct);
-        var scopedWorkerIds = assignedWorkerIds.Concat(sessionWorkerIds).Distinct().ToArray();
-        query = query.Where(x => scopedWorkerIds.Contains(x.Id));
+        workers = workers
+            .Where(worker => assignedWorkerIds.Contains(worker.Id) || siteSessions.Any(session => SessionMatchesWorker(session, worker)))
+            .ToList();
     }
-    var workers = await query.OrderBy(x => x.FullName).ToListAsync(ct);
-    return Results.Ok(await MapWorkerResponsesAsync(db, workers, siteId, ct));
+    return Results.Ok(await MapWorkerResponsesAsync(db, workers, siteId, loggerFactory.CreateLogger("WorkerStats"), ct));
 });
 
 app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, IWorkerSiteAssignmentService siteAssignmentService, CancellationToken ct) =>
@@ -422,7 +421,7 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
         Role = Clean(request.Role),
         HourlyRate = Math.Max(0, request.HourlyRate),
         PlannedDailyHours = request.PlannedDailyHours <= 0 ? 8 : request.PlannedDailyHours,
-        AttendanceSource = NormalizeAttendanceSource(request.AttendanceSource),
+        AttendanceSource = NormalizeAttendanceSourceForWorker(request.AttendanceSource, request.CameraIdentity),
         RiskScore = Math.Clamp(request.RiskScore, 0, 100),
         Notes = Clean(request.Notes),
         Status = request.Status,
@@ -437,7 +436,7 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
     }
 
     var responseWorker = await db.Workers.AsNoTracking().Include(x => x.CameraIdentities).Include(x => x.SiteAssignments).FirstAsync(x => x.Id == worker.Id, ct);
-    var response = (await MapWorkerResponsesAsync(db, [responseWorker], null, ct)).Single();
+    var response = (await MapWorkerResponsesAsync(db, [responseWorker], null, null, ct)).Single();
     return Results.Created($"/api/workers/{worker.Id}", response);
 });
 
@@ -458,7 +457,7 @@ app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request
     worker.Role = Clean(request.Role);
     worker.HourlyRate = Math.Max(0, request.HourlyRate);
     worker.PlannedDailyHours = request.PlannedDailyHours <= 0 ? 8 : request.PlannedDailyHours;
-    worker.AttendanceSource = NormalizeAttendanceSource(request.AttendanceSource);
+    worker.AttendanceSource = NormalizeAttendanceSourceForWorker(request.AttendanceSource, request.CameraIdentity);
     worker.RiskScore = Math.Clamp(request.RiskScore, 0, 100);
     worker.Notes = Clean(request.Notes);
     worker.Status = request.Status;
@@ -473,7 +472,7 @@ app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request
     }
 
     var responseWorker = await db.Workers.AsNoTracking().Include(x => x.CameraIdentities).Include(x => x.SiteAssignments).FirstAsync(x => x.Id == worker.Id, ct);
-    var response = (await MapWorkerResponsesAsync(db, [responseWorker], null, ct)).Single();
+    var response = (await MapWorkerResponsesAsync(db, [responseWorker], null, null, ct)).Single();
     return Results.Ok(response);
 });
 
@@ -1908,7 +1907,7 @@ static async Task<AttendanceEventResponse[]> MapAttendanceEventsAsync(
         .ToArray();
 }
 
-static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext db, IReadOnlyCollection<Worker> workers, Guid? selectedSiteId, CancellationToken ct)
+static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext db, IReadOnlyCollection<Worker> workers, Guid? selectedSiteId, ILogger? statsLogger, CancellationToken ct)
 {
     if (workers.Count == 0) return [];
 
@@ -1934,27 +1933,48 @@ static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext 
     var bakuTimeZone = ResolveApiTimeZone("Asia/Baku");
     var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, bakuTimeZone).DateTime);
     var monthStart = new DateOnly(today.Year, today.Month, 1);
+    var workerSessionKeys = workers.ToDictionary(x => x.Id, WorkerSessionKeys);
+    var externalSessionKeys = workerSessionKeys.Values.SelectMany(x => x).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     var sessionsQuery = db.AttendanceSessions.AsNoTracking()
-        .Where(x => x.WorkerId != null && workerIds.Contains(x.WorkerId.Value) && x.WorkDate >= monthStart);
+        .Where(x => x.WorkDate >= monthStart
+                    && ((x.WorkerId != null && workerIds.Contains(x.WorkerId.Value))
+                        || externalSessionKeys.Contains(x.WorkerExternalId)));
     if (selectedSiteId is not null) sessionsQuery = sessionsQuery.Where(x => x.SiteId == selectedSiteId.Value);
     var sessions = await sessionsQuery.ToListAsync(ct);
-    var payrollByWorker = sessions
-        .GroupBy(x => x.WorkerId!.Value)
-        .ToDictionary(
-            group => group.Key,
-            group => new
-            {
-                TodayHours = group.Where(x => x.WorkDate == today).Sum(CalculatePresenceHours),
-                MonthlyHours = group.Sum(CalculatePresenceHours),
-                IsCurrentlyActive = group.Any(x => x.WorkDate == today && x.Status == AttendanceSessionStatus.Open),
-                LastSeenAt = group.Max(x => x.LastSeenTime ?? x.CheckOutTime ?? x.CheckInTime),
-            });
+    var sessionsByWorker = workers.ToDictionary(worker => worker.Id, _ => new List<AttendanceSession>());
+    foreach (var session in sessions)
+    {
+        var workerId = session.WorkerId is not null && sessionsByWorker.ContainsKey(session.WorkerId.Value)
+            ? session.WorkerId.Value
+            : workers.FirstOrDefault(worker => SessionMatchesWorker(session, worker))?.Id;
+        if (workerId is not null) sessionsByWorker[workerId.Value].Add(session);
+    }
 
     return workers.Select(worker =>
     {
-        payrollByWorker.TryGetValue(worker.Id, out var payroll);
-        var todayHours = Math.Round(payroll?.TodayHours ?? 0, 2);
-        var monthlyHours = Math.Round(payroll?.MonthlyHours ?? 0, 2);
+        var workerSessions = sessionsByWorker.GetValueOrDefault(worker.Id) ?? new List<AttendanceSession>();
+        var todaySessions = workerSessions.Where(x => x.WorkDate == today).ToArray();
+        var todayHours = Math.Round(todaySessions.Sum(CalculatePresenceHours), 2);
+        var monthlyHours = Math.Round(workerSessions.Sum(CalculatePresenceHours), 2);
+        var isCurrentlyActive = todaySessions.Any(x => x.Status == AttendanceSessionStatus.Open);
+        DateTimeOffset? currentSessionStartedAt = todaySessions
+            .Where(x => x.Status == AttendanceSessionStatus.Open)
+            .OrderBy(x => x.CheckInTime)
+            .Select(x => (DateTimeOffset?)x.CheckInTime)
+            .FirstOrDefault();
+        DateTimeOffset? lastSeenAt = workerSessions.Count == 0 ? null : workerSessions.Max(x => x.LastSeenTime ?? x.CheckOutTime ?? x.CheckInTime);
+        var todayAmount = Math.Round((decimal)todayHours * worker.HourlyRate, 2);
+        var monthlyAmount = Math.Round((decimal)monthlyHours * worker.HourlyRate, 2);
+        statsLogger?.LogInformation(
+            "Worker camera stats calculated. WorkerId={WorkerId}, TenantId={TenantId}, SiteFilter={SiteFilter}, TodaySessionCount={TodaySessionCount}, ActiveSessionCount={ActiveSessionCount}, TodayHours={TodayHours}, HourlyRate={HourlyRate}, TodayAmount={TodayAmount}",
+            worker.Id,
+            worker.TenantId,
+            selectedSiteId,
+            todaySessions.Length,
+            todaySessions.Count(x => x.Status == AttendanceSessionStatus.Open),
+            todayHours,
+            worker.HourlyRate,
+            todayAmount);
         return new WorkerResponse(
             worker.Id,
             worker.SiteId,
@@ -1965,7 +1985,7 @@ static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext 
             worker.Role,
             worker.HourlyRate,
             worker.PlannedDailyHours,
-            worker.AttendanceSource,
+            ResolveWorkerAttendanceSource(worker),
             worker.RiskScore,
             worker.Notes,
             worker.CreatedAt,
@@ -2002,13 +2022,35 @@ static async Task<WorkerResponse[]> MapWorkerResponsesAsync(BuildTrackDbContext 
                 .ToArray(),
             new WorkerPayrollSummaryResponse(
                 todayHours,
-                Math.Round((decimal)todayHours * worker.HourlyRate, 2),
+                todayAmount,
+                todayAmount,
                 monthlyHours,
-                Math.Round((decimal)monthlyHours * worker.HourlyRate, 2),
-                payroll?.IsCurrentlyActive ?? false,
-                payroll?.LastSeenAt));
+                monthlyAmount,
+                monthlyAmount,
+                isCurrentlyActive,
+                currentSessionStartedAt,
+                lastSeenAt));
     }).ToArray();
 }
+
+static bool SessionMatchesWorker(AttendanceSession session, Worker worker)
+{
+    if (session.WorkerId == worker.Id) return true;
+    var keys = WorkerSessionKeys(worker);
+    return keys.Contains(session.WorkerExternalId, StringComparer.OrdinalIgnoreCase)
+           || (!string.IsNullOrWhiteSpace(session.WorkerName) && keys.Contains(session.WorkerName, StringComparer.OrdinalIgnoreCase));
+}
+
+static string[] WorkerSessionKeys(Worker worker) =>
+    new[]
+    {
+        worker.ExternalWorkerCode,
+    }
+    .Concat(worker.CameraIdentities.SelectMany(identity => new[] { identity.ExternalUserId, identity.CardName, identity.NormalizedCardName }))
+    .Where(value => !string.IsNullOrWhiteSpace(value))
+    .Select(value => value!.Trim())
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 
 static async Task SyncWorkerSiteAssignmentsFromRequestAsync(
     IWorkerSiteAssignmentService siteAssignmentService,
@@ -2047,6 +2089,19 @@ static string NormalizeAttendanceSource(string? value)
     if (string.Equals(value, "Camera", StringComparison.OrdinalIgnoreCase)) return "Camera";
     if (string.Equals(value, "ForemanTablet", StringComparison.OrdinalIgnoreCase)) return "ForemanTablet";
     return "Manual";
+}
+
+static string NormalizeAttendanceSourceForWorker(string? value, SaveWorkerCameraIdentityRequest? cameraIdentity)
+{
+    var normalized = NormalizeAttendanceSource(value);
+    if (normalized == "ForemanTablet") return normalized;
+    return cameraIdentity is not null && HasCameraIdentityValues(cameraIdentity) ? "Camera" : normalized;
+}
+
+static string ResolveWorkerAttendanceSource(Worker worker)
+{
+    if (string.Equals(worker.AttendanceSource, "ForemanTablet", StringComparison.OrdinalIgnoreCase)) return "ForemanTablet";
+    return worker.CameraIdentities.Count > 0 ? "Camera" : NormalizeAttendanceSource(worker.AttendanceSource);
 }
 
 static bool HasCameraIdentityValues(SaveWorkerCameraIdentityRequest request) =>

@@ -172,9 +172,9 @@ export const WorkersPage = () => {
       totalHours: Number(worker.payrollSummary?.monthlyCameraHours ?? 0),
       laborCost: Number(worker.payrollSummary?.monthlyEstimatedPay ?? 0),
       todayCameraHours: Number(worker.payrollSummary?.todayCameraHours ?? 0),
-      todayEstimatedPay: Number(worker.payrollSummary?.todayEstimatedPay ?? 0),
+      todayEstimatedPay: Number(worker.payrollSummary?.todayEstimatedAmount ?? worker.payrollSummary?.todayEstimatedPay ?? 0),
       monthlyCameraHours: Number(worker.payrollSummary?.monthlyCameraHours ?? 0),
-      monthlyEstimatedPay: Number(worker.payrollSummary?.monthlyEstimatedPay ?? 0),
+      monthlyEstimatedPay: Number(worker.payrollSummary?.monthlyEstimatedAmount ?? worker.payrollSummary?.monthlyEstimatedPay ?? 0),
       riskScore: Number(worker.riskScore ?? 0),
       status: toUiStatus(worker.status),
       notes: worker.notes,
@@ -378,7 +378,7 @@ export const WorkersPage = () => {
   const columns: TableColumnsType<WorkerRow> = [
     { title: 'İşçi', dataIndex: 'workerName', render: (value, row) => <strong>{value}<br /><span className="muted-text">İşçi kodu: {row.workerExternalId}</span></strong> },
     { title: 'Briqada', dataIndex: 'crewName' },
-    { title: 'Obyekt təyinatı', render: (_, row) => row.assignedSiteNames?.length ? row.assignedSiteNames.join(', ') : <Tag>Yalnız bütün obyektlər</Tag> },
+    { title: 'Obyekt təyinatı', render: (_, row) => row.assignedSiteNames?.length ? row.assignedSiteNames.join(', ') : <Tag>Təyin edilməyib</Tag> },
     { title: 'Rol', dataIndex: 'role' },
     { title: 'Kamera identifikasiyası', render: (_, row) => row.dahuaCardName || row.dahuaUserId ? <span>Dahua CardName: {row.dahuaCardName || '-'}<br /><span className="muted-text">UserID: {row.dahuaUserId || '-'} | {row.cameraDeviceName || 'Bütün kameralar'}</span></span> : <Tag>Bağlanmayıb</Tag> },
     { title: 'Saat mənbəyi', dataIndex: 'attendanceSource', render: (value: AttendanceSource) => sourceLabel[value] },
@@ -437,7 +437,7 @@ export const WorkersPage = () => {
           layout="vertical"
           onFinish={saveWorker}
           onValuesChange={(changed, allValues) => {
-            if ((changed.dahuaCardName !== undefined || changed.dahuaUserId !== undefined) && hasCameraIdentity(allValues) && allValues.attendanceSource !== 'Manual') {
+            if ((changed.dahuaCardName !== undefined || changed.dahuaUserId !== undefined) && hasCameraIdentity(allValues)) {
               form.setFieldValue('attendanceSource', 'Camera')
             }
           }}
