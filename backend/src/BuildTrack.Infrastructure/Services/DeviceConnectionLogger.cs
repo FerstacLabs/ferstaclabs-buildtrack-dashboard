@@ -23,6 +23,7 @@ public sealed class DeviceConnectionLogger(
         var tenantId = deviceId is null
             ? null
             : await db.Devices
+                .IgnoreQueryFilters()
                 .AsNoTracking()
                 .Where(x => x.Id == deviceId)
                 .Select(x => (Guid?)x.TenantId)

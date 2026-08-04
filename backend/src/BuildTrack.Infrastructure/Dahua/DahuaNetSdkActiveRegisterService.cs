@@ -669,7 +669,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             var registration = DahuaActiveRegisterPayloadParser.Parse(command, payload);
             var payloadDiagnostics = DahuaActiveRegisterPayloadParser.Inspect(command, payload, remoteIp, remotePort, serviceCallbackHandle);
-            var registerDeviceId = registration.RegisterDeviceId;
+            var registerDeviceId = NormalizeRegisterDeviceId(registration.RegisterDeviceId ?? payloadDiagnostics.RegisterDeviceId);
             var eventType = GetCommandName(command);
             var decodeResult = TryDecodeActiveRegisterPayload(command, payload);
             lock (_diagnosticsLock) _diagnostics.LastRegisterDeviceId = registerDeviceId;
@@ -685,7 +685,9 @@ public sealed class DahuaNetSdkActiveRegisterService(
 
             if (command == -1)
             {
-                var disconnectedDevice = await MatchDeviceAsync(db, registerDeviceId, listenerPort, CancellationToken.None);
+                var disconnectedDevice = string.IsNullOrWhiteSpace(registerDeviceId)
+                    ? null
+                    : await MatchDeviceAsync(db, registerDeviceId, listenerPort, CancellationToken.None);
                 if (disconnectedDevice is not null)
                 {
                     await StopDeviceSdkSessionAsync(disconnectedDevice, remoteIp, remotePort, connectionLogger, "DeviceDisconnected", CancellationToken.None);
@@ -693,6 +695,10 @@ public sealed class DahuaNetSdkActiveRegisterService(
                     {
                         state.LastServiceCallbackAt = DateTimeOffset.UtcNow;
                     }
+                }
+                else if (string.IsNullOrWhiteSpace(registerDeviceId))
+                {
+                    logger.LogWarning("Dahua Active Register disconnect callback had no RegisterDeviceId. Remote={RemoteIp}:{RemotePort}, ListenerPort={ListenerPort}, PayloadBytes={PayloadBytes}", remoteIp, remotePort, listenerPort, payload.Length);
                 }
 
                 await PersistActiveRegisterRawEventAsync(db, disconnectedDevice?.Id, disconnectedDevice?.RegisterDeviceId ?? registerDeviceId, remoteIp, remotePort, listenerPort, command, eventType, payload, "DeviceDisconnected", decodeResult.DecodedJson, payloadDiagnostics, CancellationToken.None);
@@ -2203,6 +2209,7 @@ public sealed class DahuaNetSdkActiveRegisterService(
             var tenantId = deviceId is null
                 ? null
                 : await db.Devices
+                    .IgnoreQueryFilters()
                     .AsNoTracking()
                     .Where(x => x.Id == deviceId)
                     .Select(x => (Guid?)x.TenantId)
@@ -2330,21 +2337,88 @@ public sealed class DahuaNetSdkActiveRegisterService(
     }
 
     private sealed record ActiveRegisterPayloadDecodeResult(string DecodeStatus, DahuaAccessRecord? Record, string? DecodedJson);
-    private async Task<Device?> MatchDeviceAsync(BuildTrackDbContext db, string? registerDeviceId, int listenerPort, CancellationToken cancellationToken)
+    internal async Task<Device?> MatchDeviceAsync(BuildTrackDbContext db, string? registerDeviceId, int listenerPort, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(registerDeviceId))
+        var normalizedRegisterDeviceId = NormalizeRegisterDeviceId(registerDeviceId);
+        logger.LogInformation(
+            "Matching Dahua Active Register device. IncomingRegisterDeviceId={IncomingRegisterDeviceId}, NormalizedRegisterDeviceId={NormalizedRegisterDeviceId}, ListenerPort={ListenerPort}",
+            registerDeviceId,
+            normalizedRegisterDeviceId,
+            listenerPort);
+
+        var deviceQuery = db.Devices
+            .IgnoreQueryFilters()
+            .Include(x => x.Tenant)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(normalizedRegisterDeviceId))
         {
-            var matched = await db.Devices.FirstOrDefaultAsync(x => x.RegisterDeviceId == registerDeviceId, cancellationToken);
-            if (matched is not null) return matched;
+            var matched = await deviceQuery.FirstOrDefaultAsync(x => x.RegisterDeviceId == normalizedRegisterDeviceId, cancellationToken);
+            if (matched is not null)
+            {
+                if (listenerPort > 0 && matched.RegisterPort != listenerPort)
+                {
+                    logger.LogWarning(
+                        "Dahua Active Register device matched by RegisterDeviceId but listener port differs. RegisterDeviceId={RegisterDeviceId}, DeviceId={DeviceId}, TenantId={TenantId}, SiteId={SiteId}, DeviceRegisterPort={DeviceRegisterPort}, ListenerPort={ListenerPort}",
+                        matched.RegisterDeviceId,
+                        matched.Id,
+                        matched.TenantId,
+                        matched.SiteId,
+                        matched.RegisterPort,
+                        listenerPort);
+                }
+
+                logger.LogInformation(
+                    "Matched Dahua Active Register device. RegisterDeviceId={RegisterDeviceId}, DeviceId={DeviceId}, TenantId={TenantId}, SiteId={SiteId}, RegisterPort={RegisterPort}, CompanyName={CompanyName}",
+                    matched.RegisterDeviceId,
+                    matched.Id,
+                    matched.TenantId,
+                    matched.SiteId,
+                    matched.RegisterPort,
+                    matched.Tenant?.CompanyName);
+                return matched;
+            }
+
+            logger.LogWarning(
+                "No BuildTrack device matched Dahua Active Register RegisterDeviceId. RegisterDeviceId={RegisterDeviceId}, ListenerPort={ListenerPort}",
+                normalizedRegisterDeviceId,
+                listenerPort);
+            return null;
         }
 
-        var candidates = await db.Devices.Where(x => x.Mode == DeviceMode.ActiveRegister && x.RegisterPort == listenerPort).OrderBy(x => x.CreatedAt).Take(2).ToListAsync(cancellationToken);
+        if (listenerPort <= 0)
+        {
+            logger.LogWarning("Dahua Active Register callback had no RegisterDeviceId and no valid listener port. Single-device fallback skipped.");
+            return null;
+        }
+
+        var candidates = await deviceQuery
+            .Where(x => x.Mode == DeviceMode.ActiveRegister && x.RegisterPort == listenerPort)
+            .OrderBy(x => x.CreatedAt)
+            .Take(2)
+            .ToListAsync(cancellationToken);
         logger.LogDebug("Active register fallback check: enabled={Enabled}, listenerPort={ListenerPort}, candidateCount={CandidateCount}", _singleDeviceFallbackEnabled, listenerPort, candidates.Count);
 
         var fallback = DahuaActiveRegisterFallbackMatcher.MatchSingleDeviceFallback(candidates, _singleDeviceFallbackEnabled);
-        if (fallback is not null) logger.LogWarning("Matched Dahua connection by single-device fallback. Do not use in multi-device production.");
+        if (fallback is not null)
+        {
+            logger.LogWarning(
+                "Matched Dahua connection by single-device fallback. Do not use in multi-device production. DeviceId={DeviceId}, TenantId={TenantId}, SiteId={SiteId}, RegisterDeviceId={RegisterDeviceId}, RegisterPort={RegisterPort}, CompanyName={CompanyName}",
+                fallback.Id,
+                fallback.TenantId,
+                fallback.SiteId,
+                fallback.RegisterDeviceId,
+                fallback.RegisterPort,
+                fallback.Tenant?.CompanyName);
+        }
         else if (candidates.Count > 1) logger.LogWarning("Single-device fallback skipped because multiple active register devices exist on this port.");
+        else logger.LogWarning("No Dahua Active Register fallback candidate found. ListenerPort={ListenerPort}", listenerPort);
         return fallback;
+    }
+
+    private static string? NormalizeRegisterDeviceId(string? registerDeviceId)
+    {
+        return string.IsNullOrWhiteSpace(registerDeviceId) ? null : registerDeviceId.Trim();
     }
 
     private void SetStatus(string status)
@@ -2682,6 +2756,22 @@ public static class DahuaActiveRegisterPayloadParser
     private static string? TryParseAsciiRegisterId(byte[] payload)
     {
         if (DahuaSdkAccessEventNormalizer.TryParseAsciiKeyValuePayload(payload, out var sdkEvent)) return sdkEvent.RegisterDeviceId;
+        if (payload.Length == 0) return null;
+
+        var asciiBytes = payload
+            .Select(value => value is >= 32 and <= 126 ? value : (byte)' ')
+            .ToArray();
+        var text = Encoding.ASCII.GetString(asciiBytes);
+        var tokens = text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var token in tokens)
+        {
+            var candidate = token.Trim('\0', ' ', ',', ';', ':', '"', '\'', '[', ']', '(', ')');
+            if (candidate.StartsWith("BT-", StringComparison.OrdinalIgnoreCase) && candidate.Length <= 160)
+            {
+                return candidate;
+            }
+        }
+
         return null;
     }
 

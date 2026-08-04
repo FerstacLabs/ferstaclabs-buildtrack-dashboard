@@ -1,6 +1,9 @@
 using BuildTrack.Domain.Dahua;
 using BuildTrack.Domain.Entities;
+using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Dahua;
+using BuildTrack.Infrastructure.Tenancy;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -109,6 +112,171 @@ public sealed class DahuaNetSdkActiveRegisterServiceTests
         Assert.False(probe.HasHeadersOrSamples);
         Assert.Contains("Native binaries are present, but Dahua SDK headers/samples are missing", probe.MissingHeadersWarning);
     }
+
+    [Fact]
+    public async Task MatchDeviceAsync_MatchesGoldDeviceByRegisterDeviceIdAndTenant()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        var ids = await SeedDemoAndGoldDevicesAsync(db);
+        var service = CreateService();
+
+        var matched = await service.MatchDeviceAsync(db, " BT-GOLDMMC-CAM001 ", 7000, CancellationToken.None);
+
+        Assert.NotNull(matched);
+        Assert.Equal(ids.GoldDeviceId, matched.Id);
+        Assert.Equal(ids.GoldTenantId, matched.TenantId);
+        Assert.Equal(ids.GoldSiteId, matched.SiteId);
+        Assert.Equal(7000, matched.RegisterPort);
+        Assert.Null(matched.LastSeenAt);
+        Assert.Null(matched.LastRecNo);
+        Assert.Null(matched.CgiLastRecNo);
+    }
+
+    [Fact]
+    public async Task MatchDeviceAsync_MatchesByRegisterDeviceIdWhenListenerPortIsZero()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        var ids = await SeedDemoAndGoldDevicesAsync(db);
+        var service = CreateService();
+
+        var matched = await service.MatchDeviceAsync(db, "BT-GOLDMMC-CAM001", 0, CancellationToken.None);
+
+        Assert.NotNull(matched);
+        Assert.Equal(ids.GoldDeviceId, matched.Id);
+        Assert.Equal(ids.GoldTenantId, matched.TenantId);
+    }
+
+    [Fact]
+    public async Task MatchDeviceAsync_UnknownRegisterDeviceIdDoesNotFallbackToAnotherTenant()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        await SeedDemoAndGoldDevicesAsync(db);
+        var service = CreateService();
+
+        var matched = await service.MatchDeviceAsync(db, "BT-UNKNOWN-CAM999", 7000, CancellationToken.None);
+
+        Assert.Null(matched);
+        Assert.Empty(await db.AttendanceEvents.IgnoreQueryFilters().ToListAsync());
+    }
+
+    [Fact]
+    public async Task MatchDeviceAsync_NullRegisterDeviceIdAndMissingPortDoesNotThrow()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        await SeedDemoAndGoldDevicesAsync(db);
+        var service = CreateService();
+
+        var matched = await service.MatchDeviceAsync(db, null, 0, CancellationToken.None);
+
+        Assert.Null(matched);
+    }
+
+    [Fact]
+    public async Task TenantQueryFilter_WithNullTenantContextDoesNotThrowOnNullableDeviceFields()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        await SeedDemoAndGoldDevicesAsync(db);
+
+        var devices = await db.Devices.OrderBy(x => x.RegisterDeviceId).ToListAsync();
+
+        Assert.Equal(["BT-API-TEST-001", "BT-GOLDMMC-CAM001"], devices.Select(x => x.RegisterDeviceId).ToArray());
+    }
+
+    [Fact]
+    public async Task MatchDeviceAsync_DemoDeviceStillMapsToDemoTenant()
+    {
+        await using var db = CreateDbContext(new TenantContext());
+        var ids = await SeedDemoAndGoldDevicesAsync(db);
+        var service = CreateService();
+
+        var matched = await service.MatchDeviceAsync(db, "BT-API-TEST-001", 7000, CancellationToken.None);
+
+        Assert.NotNull(matched);
+        Assert.Equal(ids.DemoTenantId, matched.TenantId);
+        Assert.Equal(ids.DemoDeviceId, matched.Id);
+    }
+
+    [Fact]
+    public void PayloadParser_DisconnectAsciiPayloadExtractsRegisterDeviceId()
+    {
+        var payload = System.Text.Encoding.ASCII.GetBytes("BT-GOLDMMC-CAM001\0");
+
+        var parsed = DahuaActiveRegisterPayloadParser.Parse(-1, payload);
+
+        Assert.Equal("BT-GOLDMMC-CAM001", parsed.RegisterDeviceId);
+    }
+
+    private static DahuaNetSdkActiveRegisterService CreateService()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        return new DahuaNetSdkActiveRegisterService(
+            new MissingSdkProbe(),
+            new HeaderProbe(hasHeaders: true),
+            services.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<DahuaNetSdkActiveRegisterService>.Instance);
+    }
+
+    private static BuildTrackDbContext CreateDbContext(ITenantContext tenantContext)
+    {
+        var options = new DbContextOptionsBuilder<BuildTrackDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        return new BuildTrackDbContext(options, tenantContext);
+    }
+
+    private static async Task<SeededDeviceIds> SeedDemoAndGoldDevicesAsync(BuildTrackDbContext db)
+    {
+        var demoTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var goldTenantId = Guid.Parse("ad023503-a986-4b64-b7d1-565817a431fc");
+        var demoSiteId = Guid.NewGuid();
+        var goldSiteId = Guid.Parse("07749990-3211-42f8-b978-296a6490c5fd");
+        var demoDeviceId = Guid.NewGuid();
+        var goldDeviceId = Guid.Parse("40cdf585-f528-42d7-ada0-d5e5823356a6");
+
+        db.Tenants.AddRange(
+            new Tenant { Id = demoTenantId, CompanyName = "FerstacLabs Demo", Code = "DEMO", Status = TenantStatus.Active },
+            new Tenant { Id = goldTenantId, CompanyName = "GOLD MMC", Code = "GOLDMMC", Status = TenantStatus.Active });
+
+        db.Sites.AddRange(
+            new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Obyekti" },
+            new Site { Id = goldSiteId, TenantId = goldTenantId, Name = "GOLD PALACE" });
+
+        db.Devices.AddRange(
+            new Device
+            {
+                Id = demoDeviceId,
+                TenantId = demoTenantId,
+                SiteId = demoSiteId,
+                Name = "API TEST TERMINAL",
+                RegisterDeviceId = "BT-API-TEST-001",
+                RegisterPort = 7000,
+                Username = "admin",
+                EncryptedPassword = "encrypted",
+                LastSeenAt = null,
+                LastRecNo = null,
+                CgiLastRecNo = null,
+            },
+            new Device
+            {
+                Id = goldDeviceId,
+                TenantId = goldTenantId,
+                SiteId = goldSiteId,
+                Name = "GOLD PALACE TERMINAL",
+                RegisterDeviceId = "BT-GOLDMMC-CAM001",
+                RegisterPort = 7000,
+                Username = "admin",
+                EncryptedPassword = "encrypted",
+                LastSeenAt = null,
+                LastRecNo = null,
+                CgiLastRecNo = null,
+            });
+
+        await db.SaveChangesAsync();
+        return new SeededDeviceIds(demoTenantId, goldTenantId, demoSiteId, goldSiteId, demoDeviceId, goldDeviceId);
+    }
+
+    private sealed record SeededDeviceIds(Guid DemoTenantId, Guid GoldTenantId, Guid DemoSiteId, Guid GoldSiteId, Guid DemoDeviceId, Guid GoldDeviceId);
 
     private sealed class MissingSdkProbe : IDahuaNativeLibraryProbe
     {

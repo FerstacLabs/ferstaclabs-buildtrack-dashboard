@@ -71,7 +71,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("sites");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Address).HasMaxLength(300);
             entity.Property(x => x.TimeZone).HasMaxLength(80).IsRequired();
@@ -83,7 +83,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("workers");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.ExternalWorkerCode).HasMaxLength(80).IsRequired();
             entity.Property(x => x.FullName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
@@ -97,7 +97,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("devices");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Vendor).HasMaxLength(60).IsRequired();
             entity.Property(x => x.Model).HasMaxLength(120).IsRequired();
@@ -118,7 +118,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("attendance_events");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.WorkerExternalId).HasMaxLength(80);
             entity.Property(x => x.WorkerName).HasMaxLength(180);
             entity.Property(x => x.Direction).HasConversion<string>().HasMaxLength(30).IsRequired();
@@ -142,7 +142,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("attendance_sessions");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.WorkerExternalId).HasMaxLength(80).IsRequired();
             entity.Property(x => x.WorkerName).HasMaxLength(180);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
@@ -172,7 +172,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("security_events");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.EventType).HasConversion<string>().HasMaxLength(50).IsRequired();
             entity.Property(x => x.Severity).HasConversion<string>().HasMaxLength(30).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
@@ -248,7 +248,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("dahua_active_register_raw_events");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.RegisterDeviceId).HasMaxLength(160);
             entity.Property(x => x.RemoteIp).HasMaxLength(80);
             entity.Property(x => x.CallbackCommandName).HasMaxLength(120);
@@ -267,7 +267,7 @@ public sealed class BuildTrackDbContext : DbContext
         {
             entity.ToTable("device_connection_logs");
             entity.HasKey(x => x.Id);
-            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId.Value);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.RegisterDeviceId).HasMaxLength(160);
             entity.Property(x => x.RemoteIp).HasMaxLength(80);
             entity.Property(x => x.EventType).HasMaxLength(80).IsRequired();
