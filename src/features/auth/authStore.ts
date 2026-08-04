@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { apiRequest, ApiClientError } from '../../shared/api/client'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { clearAuthToken, getAuthToken, setAuthToken } from './authToken'
 
 export type LicenseStatus = 'Pending' | 'Active' | 'Expired' | 'Revoked'
@@ -99,6 +100,7 @@ const normalizeLicenseError = (error: unknown) => {
 const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string) => {
   const nextToken = token ?? getAuthToken()
   if ('accessToken' in response) setAuthToken(response.accessToken)
+  useProjectSelectionStore.getState().setTenantScope(response.tenant.id)
   useProjectProgressStore.getState().prepareWorkspaceForTenant(response.tenant.id, response.tenant.code, response.tenant.companyName)
   return {
     token: 'accessToken' in response ? response.accessToken : nextToken,
@@ -179,6 +181,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Frontend token clear is the source of truth for this SPA-stage logout.
     } finally {
       clearAuthToken()
+      useProjectSelectionStore.getState().clearSelection()
+      useProjectSelectionStore.getState().setTenantScope(undefined)
+      useProjectProgressStore.getState().prepareWorkspaceForTenant('anonymous', 'EMPTY', undefined)
       set({ token: '', user: undefined, tenant: undefined, license: undefined, initialized: true, isAuthenticated: false, hasActiveLicense: false })
     }
   },

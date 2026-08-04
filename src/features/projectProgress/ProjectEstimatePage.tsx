@@ -101,6 +101,7 @@ export const ProjectEstimatePage = () => {
     project,
     stages,
     summary,
+    syncTenantSites,
     updateMaterial,
     updateStage,
     updateWorkItem,
@@ -225,8 +226,26 @@ export const ProjectEstimatePage = () => {
     void message.success(normalizedMaterialName ? 'Smeta sətri və bağlı material yadda saxlandı' : 'Smeta sətri yadda saxlandı')
   }
 
-  const createProjectObject = (values: ProjectObjectFormValues) => {
+  const createProjectObject = async (values: ProjectObjectFormValues) => {
     const name = values.name.trim()
+    const address = values.address?.trim() ?? ''
+
+    try {
+      const site = await buildTrackBackendApi.createSite({
+        name,
+        address,
+        timeZone: 'Asia/Baku',
+      })
+      syncTenantSites([site], 'merge')
+      useProjectSelectionStore.getState().setSelectedProjectId(site.id)
+      projectForm.resetFields()
+      setProjectModalOpen(false)
+      void message.success('Yeni layihə yaradıldı və bütün modullarda obyekt kimi göründü')
+      return
+    } catch (error) {
+      console.warn('Backend site creation failed; local project object fallback will be used', error)
+    }
+
     const objectId = addObject({
       name,
       address: values.address?.trim(),
@@ -242,13 +261,7 @@ export const ProjectEstimatePage = () => {
     setProjectModalOpen(false)
     void message.success('Yeni layihə yaradıldı və obyekt filterlərinə əlavə olundu')
 
-    void buildTrackBackendApi.createSite({
-      name,
-      address: values.address?.trim() ?? '',
-      timeZone: 'Asia/Baku',
-    }).catch(() => {
-      console.info('Backend site mirror skipped; local project object is still saved', { objectId })
-    })
+    useProjectSelectionStore.getState().setSelectedProjectId(objectId)
   }
 
   const addNewStage = (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate: string; plannedEndDate: string }) => {

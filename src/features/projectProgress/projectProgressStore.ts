@@ -19,6 +19,7 @@ import { createEmptyProjectProgressData, projectProgressSeed, villaEstimateSumma
 interface ProjectProgressState extends ProjectProgressData {
   prepareWorkspaceForTenant: (tenantId: string, tenantCode?: string, companyName?: string) => void
   applyBackendData: (data: Partial<ProjectProgressData>) => void
+  syncTenantSites: (sites: Array<{ id: string; name: string; address?: string; createdAt?: string }>, mode?: 'replace' | 'merge') => void
   refreshSeedData: () => void
   resetDemoData: () => void
   addObject: (object: Omit<ConstructionObject, 'id' | 'projectId' | 'status'> & Partial<Pick<ConstructionObject, 'projectId' | 'status'>>) => string
@@ -151,6 +152,26 @@ const removeDummyIlhamWorker = (workers: WorkerAssignment[]) =>
     && ['W-0001', 'W-01-0001'].includes(worker.workerExternalId)
   ))
 
+const mapSiteToObject = (
+  site: { id: string; name: string; address?: string; createdAt?: string },
+  projectId: string,
+  existing?: ConstructionObject,
+): ConstructionObject => ({
+  id: site.id,
+  name: site.name,
+  address: site.address ?? existing?.address,
+  zone: site.address ?? existing?.zone ?? site.name,
+  projectId,
+  status: existing?.status ?? 'NotStarted',
+  plannedStartDate: existing?.plannedStartDate ?? site.createdAt?.slice(0, 10),
+  plannedEndDate: existing?.plannedEndDate,
+  clientName: existing?.clientName,
+  notes: existing?.notes,
+})
+
+const objectBelongsTo = (objectIds: Set<string>) => <T extends { objectId?: string }>(item: T) =>
+  !item.objectId || objectIds.has(item.objectId)
+
 export const statusLabel: Record<ProjectWorkStatus, string> = {
   NotStarted: 'Başlamayıb',
   InProgress: 'İcradadır',
@@ -203,6 +224,34 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           dailyReports: data.dailyReports?.length ? data.dailyReports : state.dailyReports,
           issues: data.issues?.length ? data.issues : state.issues,
           risks: data.risks?.length ? data.risks : state.risks,
+        }
+      }),
+      syncTenantSites: (sites, mode = 'replace') => set((state) => {
+        const existingById = new Map(state.objects.map((object) => [object.id, object]))
+        const siteObjects = sites.map((site) => mapSiteToObject(site, state.activeProjectId, existingById.get(site.id)))
+        const objects = mode === 'merge'
+          ? [
+              ...state.objects.filter((object) => !sites.some((site) => site.id === object.id)),
+              ...siteObjects,
+            ]
+          : siteObjects
+        const objectIds = new Set(objects.map((object) => object.id))
+        useProjectSelectionStore.getState().ensureSelectedProjectId([...objectIds])
+
+        if (mode === 'merge') return { objects }
+
+        return {
+          objects,
+          stages: state.stages.filter(objectBelongsTo(objectIds)),
+          workItems: state.workItems.filter(objectBelongsTo(objectIds)),
+          crews: state.crews.filter(objectBelongsTo(objectIds)),
+          workerAssignments: state.workerAssignments.filter(objectBelongsTo(objectIds)),
+          materials: state.materials.filter(objectBelongsTo(objectIds)),
+          attendanceSessions: state.attendanceSessions.filter(objectBelongsTo(objectIds)),
+          workHourAllocations: state.workHourAllocations.filter(objectBelongsTo(objectIds)),
+          dailyReports: state.dailyReports.filter(objectBelongsTo(objectIds)),
+          issues: state.issues.filter(objectBelongsTo(objectIds)),
+          risks: state.risks.filter(objectBelongsTo(objectIds)),
         }
       }),
       refreshSeedData: () => set(projectProgressSeed),
@@ -353,6 +402,27 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
       version: 8,
       migrate: (persisted) => {
         const saved = persisted as Partial<ProjectProgressData>
+        if (saved.workspaceTenantId && saved.workspaceTenantId !== 'DEMO') {
+          const empty = createEmptyProjectProgressData(saved.workspaceTenantId, saved.project?.clientName ?? saved.project?.name)
+          return {
+            ...empty,
+            ...saved,
+            projects: saved.projects?.length ? saved.projects : [saved.project ?? empty.project],
+            activeProjectId: saved.activeProjectId ?? saved.project?.id ?? empty.activeProjectId,
+            objects: saved.objects ?? [],
+            stages: saved.stages ?? [],
+            workItems: saved.workItems ?? [],
+            crews: saved.crews ?? [],
+            workerAssignments: saved.workerAssignments ?? [],
+            materials: saved.materials ?? [],
+            attendanceSessions: saved.attendanceSessions ?? [],
+            workHourAllocations: saved.workHourAllocations ?? [],
+            dailyReports: saved.dailyReports ?? [],
+            issues: saved.issues ?? [],
+            risks: saved.risks ?? [],
+          }
+        }
+
         const hasIncompleteSeedWorkers = !saved.workerAssignments?.length || saved.workerAssignments.length < 20
         const hasIncompleteObjects = !saved.objects?.length || saved.objects.length < projectProgressSeed.objects.length
         const shouldRefreshObjectPortfolio = hasIncompleteObjects || hasIncompleteSeedWorkers

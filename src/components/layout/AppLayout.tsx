@@ -3,7 +3,9 @@ import { Button, Drawer, Spin } from 'antd'
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { AiAssistant } from '../../features/aiAssistant/AiAssistant'
+import { useAuthStore } from '../../features/auth/authStore'
 import { useProjectProgressStore } from '../../features/projectProgress/projectProgressStore'
+import { buildTrackBackendApi } from '../../services/api/buildTrackBackendApi'
 import { useBuildTrackStore } from '../../services/data/dataService'
 import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { ApiConnectionStatus } from './ApiConnectionStatus'
@@ -14,6 +16,9 @@ export const AppLayout = () => {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const location = useLocation()
   const objects = useProjectProgressStore((state) => state.objects)
+  const syncTenantSites = useProjectProgressStore((state) => state.syncTenantSites)
+  const tenant = useAuthStore((state) => state.tenant)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const selectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const lastChangedAt = useProjectSelectionStore((state) => state.lastChangedAt)
   const projectContentKey = `${selectedProjectId}:${lastChangedAt}`
@@ -25,6 +30,25 @@ export const AppLayout = () => {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (!isAuthenticated || !tenant || tenant.code.toUpperCase() === 'DEMO') return
+    let cancelled = false
+
+    const syncSites = async () => {
+      try {
+        const sites = await buildTrackBackendApi.getSites()
+        if (!cancelled) syncTenantSites(sites, 'replace')
+      } catch (error) {
+        if (import.meta.env.DEV) console.warn('Tenant site sync failed', error)
+      }
+    }
+
+    void syncSites()
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, tenant?.id, tenant?.code, syncTenantSites])
 
   if (!initialized && loading) {
     return (

@@ -8,9 +8,6 @@ import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type AttendanceSnapshotRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
 
-const API_TEST_SITE_ID = 'c235fd3e-2f5b-4cac-bb1d-92a94dd54b23'
-const API_TEST_SITE_NAME = 'API Test Obyekti'
-
 const statusColor: Record<string, string> = {
   Open: 'green',
   Closed: 'blue',
@@ -42,7 +39,7 @@ const calculateWorkedMinutes = (row: AttendanceSessionRow, nowMs: number) => {
   const startMs = Date.parse(row.checkInTime)
   if (!Number.isFinite(startMs)) return Math.max(0, row.workedMinutes ?? 0)
 
-  const endSource = row.confirmedCheckOutTime ?? row.checkOutTime
+  const endSource = row.isCheckoutConfirmed ? (row.confirmedCheckOutTime ?? row.checkOutTime) : undefined
   const endMs = endSource ? Date.parse(endSource) : nowMs
   if (!Number.isFinite(endMs) || endMs < startMs) return Math.max(0, row.workedMinutes ?? 0)
 
@@ -84,9 +81,7 @@ const bakuIsoDate = (date = new Date()) => {
 }
 
 const resolveInitialSiteId = (siteRows: BackendSite[], currentSiteId?: string) => {
-  if (currentSiteId) return currentSiteId
-  const apiTestSite = siteRows.find((site) => site.id === API_TEST_SITE_ID) ?? siteRows.find((site) => site.name === API_TEST_SITE_NAME)
-  if (apiTestSite) return apiTestSite.id === API_TEST_SITE_ID ? apiTestSite.id : API_TEST_SITE_ID
+  if (currentSiteId && siteRows.some((site) => site.id === currentSiteId)) return currentSiteId
   return siteRows[0]?.id
 }
 
@@ -131,7 +126,7 @@ export const AttendanceLivePage = () => {
       setSummary(dailySummary)
       try {
         const securityEvents = await buildTrackBackendApi.getSecurityEvents(selectedSiteId, date)
-        setSecurityEventsCount(securityEvents.length)
+        setSecurityEventsCount(securityEvents.filter((event) => event.status === 'Open').length)
       } catch {
         setSecurityEventsCount(0)
       }
@@ -174,9 +169,7 @@ export const AttendanceLivePage = () => {
 
   const siteNameById = useMemo(() => new Map(sites.map((site) => [site.id, site.name])), [sites])
   const siteOptions = useMemo(() => {
-    const options = sites.map((site) => ({ label: site.name, value: site.id }))
-    if (!options.some((option) => option.value === API_TEST_SITE_ID)) options.unshift({ label: API_TEST_SITE_NAME, value: API_TEST_SITE_ID })
-    return options
+    return sites.map((site) => ({ label: site.name, value: site.id }))
   }, [sites])
 
   const liveWorkerRows: AttendanceSessionRow[] = (liveStatus?.workers ?? []).map((worker) => ({
@@ -281,7 +274,7 @@ export const AttendanceLivePage = () => {
           placeholder="Obyekt seçin"
         />
         <ToolbarButton icon={<ReloadOutlined />} onClick={() => loadSessions()}>Yenilə</ToolbarButton>
-        {siteId && <Tag color="blue">Obyekt: {siteNameById.get(siteId) ?? (siteId === API_TEST_SITE_ID ? API_TEST_SITE_NAME : siteId)}</Tag>}
+        {siteId && <Tag color="blue">Obyekt: {siteNameById.get(siteId) ?? siteId}</Tag>}
       </section>
 
       {showDebug && (
@@ -321,7 +314,7 @@ export const AttendanceLivePage = () => {
         open={galleryOpen}
         onCancel={closeSnapshotGallery}
         footer={null}
-        width={960}
+        width="80vw"
         centered
       >
         <div className="snapshot-preview-meta">

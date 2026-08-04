@@ -4,6 +4,8 @@ import type { TableColumnsType } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
+import { useAuthStore } from '../auth/authStore'
+import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import {
   BackendApiError,
   buildTrackBackendApi,
@@ -15,6 +17,7 @@ import {
   type ListenerStatus,
   type ActiveRegisterStatus,
 } from '../../services/api/buildTrackBackendApi'
+import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 type DeviceFormValues = {
   siteId: string
@@ -68,6 +71,9 @@ const getActionErrorMessage = (err: unknown) => {
 
 export const DevicesPage = () => {
   const [form] = Form.useForm<DeviceFormValues>()
+  const tenant = useAuthStore((state) => state.tenant)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const syncTenantSites = useProjectProgressStore((state) => state.syncTenantSites)
   const [sites, setSites] = useState<BackendSite[]>([])
   const [devices, setDevices] = useState<BackendDevice[]>([])
   const [connectionLogByDeviceId, setConnectionLogByDeviceId] = useState<Record<string, DeviceConnectionLog | undefined>>({})
@@ -75,6 +81,7 @@ export const DevicesPage = () => {
   const [activeRegisterStatus, setActiveRegisterStatus] = useState<ActiveRegisterStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const shouldSyncTenantSites = isAuthenticated && tenant?.code?.toUpperCase() !== 'DEMO'
 
   const loadData = async () => {
     setLoading(true)
@@ -87,6 +94,7 @@ export const DevicesPage = () => {
         buildTrackBackendApi.getActiveRegisterStatus(),
       ])
       setSites(siteRows)
+      if (shouldSyncTenantSites) syncTenantSites(siteRows, 'replace')
       setDevices(deviceRows)
       setListenerStatus(status)
       setActiveRegisterStatus(activeStatus)
@@ -109,12 +117,20 @@ export const DevicesPage = () => {
     void loadData()
   }, [])
 
-  const createDemoSite = async () => {
+  const createTenantSite = async () => {
     setLoading(true)
     try {
-      const site = await buildTrackBackendApi.createSite({ name: 'Villa tikintisi', address: 'Bakı, tikinti sahəsi', timeZone: 'Asia/Baku' })
-      await buildTrackBackendApi.createWorker({ siteId: site.id, externalWorkerCode: '1', fullName: 'İlham Əliyev', status: 'Active' })
-      message.success('Test obyekti və işçi yaradıldı')
+      const suffix = new Intl.DateTimeFormat('az-AZ', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date())
+      const site = await buildTrackBackendApi.createSite({ name: `Yeni obyekt ${suffix}`, address: '', timeZone: 'Asia/Baku' })
+      form.setFieldValue('siteId', site.id)
+      useProjectSelectionStore.getState().setSelectedProjectId(site.id)
+      if (shouldSyncTenantSites) syncTenantSites([site], 'merge')
+      message.success('Yeni obyekt yaradıldı və bütün modullar üçün aktiv edildi')
       await loadData()
     } catch (err) {
       message.error(getActionErrorMessage(err))
@@ -224,7 +240,7 @@ export const DevicesPage = () => {
           <div className="card-heading">
             <h2>Cihaz siyahısı</h2>
             <Space>
-              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createDemoSite}>Test obyekt yarat</ToolbarButton>
+              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createTenantSite}>Yeni obyekt yarat</ToolbarButton>
               <ToolbarButton icon={<ReloadOutlined />} onClick={loadData}>Yenilə</ToolbarButton>
             </Space>
           </div>
@@ -235,7 +251,7 @@ export const DevicesPage = () => {
             rowKey="id"
             pagination={{ pageSize: 8 }}
             scroll={{ x: 'max-content' }}
-            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl test obyekti yaradın və kamera terminalı əlavə edin.' }}
+            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl obyekt yaradın və kamera terminalı əlavə edin.' }}
           />
         </section>
 

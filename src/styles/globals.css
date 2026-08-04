@@ -1573,8 +1573,8 @@ body {
 }
 
 .snapshot-preview-image {
-  max-width: 80vw;
-  max-height: 75vh;
+  max-width: min(82vw, 1040px);
+  max-height: 78vh;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -1585,7 +1585,7 @@ body {
 
 .snapshot-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
   margin-top: 16px;
 }
@@ -1601,8 +1601,8 @@ body {
 .snapshot-gallery-item img {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
+  height: min(62vh, 520px);
+  object-fit: contain;
   background: #0f172a;
 }
 
@@ -1614,6 +1614,21 @@ body {
   padding: 8px 10px;
   color: #334155;
   font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .snapshot-preview-image {
+    max-width: 90vw;
+    max-height: 70vh;
+  }
+
+  .snapshot-gallery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .snapshot-gallery-item img {
+    height: min(58vh, 420px);
+  }
 }
 
 .auth-page,

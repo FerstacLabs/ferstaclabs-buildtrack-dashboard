@@ -8,9 +8,6 @@ import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { buildTrackBackendApi, type BackendSite, type SecurityEventRow, type SecurityEventStatus } from '../../services/api/buildTrackBackendApi'
 
-const API_TEST_SITE_ID = 'c235fd3e-2f5b-4cac-bb1d-92a94dd54b23'
-const API_TEST_SITE_NAME = 'API Test Obyekti'
-
 const statusColor: Record<SecurityEventStatus, string> = {
   Open: 'orange',
   Reviewed: 'green',
@@ -92,9 +89,7 @@ const SnapshotThumbnail = ({ row, onPreview }: { row: SecurityEventRow; onPrevie
   )
 }
 const resolveInitialSiteId = (siteRows: BackendSite[], currentSiteId?: string) => {
-  if (currentSiteId) return currentSiteId
-  const apiTestSite = siteRows.find((site) => site.id === API_TEST_SITE_ID) ?? siteRows.find((site) => site.name === API_TEST_SITE_NAME)
-  if (apiTestSite) return apiTestSite.id === API_TEST_SITE_ID ? apiTestSite.id : API_TEST_SITE_ID
+  if (currentSiteId && siteRows.some((site) => site.id === currentSiteId)) return currentSiteId
   return siteRows[0]?.id
 }
 
@@ -178,9 +173,7 @@ export const SecurityEventsPage = () => {
   }, [siteId, date])
 
   const siteOptions = useMemo(() => {
-    const options = sites.map((site) => ({ label: site.name, value: site.id }))
-    if (!options.some((option) => option.value === API_TEST_SITE_ID)) options.unshift({ label: API_TEST_SITE_NAME, value: API_TEST_SITE_ID })
-    return options
+    return sites.map((site) => ({ label: site.name, value: site.id }))
   }, [sites])
 
   const openRows = rows.filter((row) => row.status === 'Open')
@@ -272,7 +265,7 @@ export const SecurityEventsPage = () => {
         onCancel={closePreview}
         footer={null}
         centered
-        width={900}
+        width="80vw"
         destroyOnHidden
       >
         {selectedSecurityEvent && (
