@@ -1,5 +1,29 @@
 import type { AttendanceSessionRow } from '../../services/api/buildTrackBackendApi'
 
+const stringField = (row: AttendanceSessionRow, names: string[]) => {
+  const fields = row as unknown as Record<string, unknown>
+  for (const name of names) {
+    const value = fields[name]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+const booleanField = (row: AttendanceSessionRow, names: string[]) => {
+  const fields = row as unknown as Record<string, unknown>
+  for (const name of names) {
+    const value = fields[name]
+    if (typeof value === 'boolean') return value
+  }
+  return false
+}
+
+const parseDateMs = (value?: string) => {
+  if (!value) return Number.NaN
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
 export const formatLiveDuration = (minutes: number) => {
   const safeMinutes = Math.max(0, Math.floor(minutes))
   const hours = Math.floor(safeMinutes / 60)
@@ -15,27 +39,33 @@ export const formatLiveTotalDuration = (minutes: number) => {
 }
 
 export const getLivePersonKey = (row: AttendanceSessionRow) =>
-  row.workerExternalId?.trim()
-  || row.workerName?.trim()
+  stringField(row, ['workerId', 'workerExternalId'])
+  || `${stringField(row, ['workerName', 'cardName']) ?? 'unknown'}:${stringField(row, ['deviceId']) ?? ''}`
   || row.id
 
-export const isLiveSessionCheckoutConfirmed = (row: AttendanceSessionRow) =>
-  Boolean(row.isCheckoutConfirmed && (row.confirmedCheckOutTime || row.checkOutTime))
+export const getLiveSessionStartMs = (row: AttendanceSessionRow) =>
+  parseDateMs(stringField(row, ['firstSeen', 'firstSeenAt', 'checkInTime', 'startedAt', 'checkIn']))
+
+export const getLiveSessionCheckoutMs = (row: AttendanceSessionRow) =>
+  parseDateMs(stringField(row, ['confirmedCheckOutTime', 'checkOutTime', 'checkoutAt']))
+
+export const isLiveSessionCheckoutConfirmed = (row: AttendanceSessionRow) => {
+  const checkoutMs = getLiveSessionCheckoutMs(row)
+  return Number.isFinite(checkoutMs) || booleanField(row, ['confirmedCheckout', 'isCheckoutConfirmed'])
+}
 
 export const calculateLiveWorkedMinutes = (row: AttendanceSessionRow, nowMs: number) => {
-  const startMs = Date.parse(row.checkInTime)
+  const startMs = getLiveSessionStartMs(row)
   if (!Number.isFinite(startMs)) return Math.max(0, row.workedMinutes ?? 0)
 
-  const endSource = isLiveSessionCheckoutConfirmed(row)
-    ? row.confirmedCheckOutTime ?? row.checkOutTime
-    : undefined
-  const endMs = endSource ? Date.parse(endSource) : nowMs
+  const checkoutMs = getLiveSessionCheckoutMs(row)
+  const endMs = Number.isFinite(checkoutMs) ? checkoutMs : nowMs
   if (!Number.isFinite(endMs) || endMs < startMs) return Math.max(0, row.workedMinutes ?? 0)
 
   return Math.max(0, Math.floor((endMs - startMs) / 60000))
 }
 
-export const deriveLiveAttendanceSummary = (rows: AttendanceSessionRow[]) => {
+export const deriveLiveAttendanceSummary = (rows: AttendanceSessionRow[], nowMs: number) => {
   const activeKeys = new Set<string>()
   const seenKeys = new Set<string>()
   let confirmedCheckouts = 0
@@ -44,7 +74,7 @@ export const deriveLiveAttendanceSummary = (rows: AttendanceSessionRow[]) => {
   rows.forEach((row) => {
     const key = getLivePersonKey(row)
     seenKeys.add(key)
-    totalWorkedMinutes += Math.max(0, row.workedMinutes ?? 0)
+    totalWorkedMinutes += calculateLiveWorkedMinutes(row, nowMs)
     if (isLiveSessionCheckoutConfirmed(row)) {
       confirmedCheckouts += 1
     } else {

@@ -81,7 +81,7 @@ export const AttendanceLivePage = () => {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryWorker, setGalleryWorker] = useState<AttendanceSessionRow | null>(null)
   const [gallerySnapshots, setGallerySnapshots] = useState<AttendanceSnapshotRow[]>([])
-  const [durationNow, setDurationNow] = useState(() => Date.now())
+  const [nowTick, setNowTick] = useState(() => Date.now())
 
   const loadSites = async () => {
     try {
@@ -135,7 +135,7 @@ export const AttendanceLivePage = () => {
   }, [siteId])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setDurationNow(Date.now()), 15000)
+    const timer = window.setInterval(() => setNowTick(Date.now()), 30000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -173,12 +173,22 @@ export const AttendanceLivePage = () => {
     status: worker.status,
     source: 'attendance_live_status',
   }))
-  const sessions = (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
+  const visibleSessions = (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
     ...session,
-    workedMinutes: calculateLiveWorkedMinutes(session, durationNow),
+    workedMinutes: calculateLiveWorkedMinutes(session, nowTick),
   }))
-  const liveSummary = deriveLiveAttendanceSummary(sessions)
+  const liveSummary = deriveLiveAttendanceSummary(visibleSessions, nowTick)
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
+
+  useEffect(() => {
+    if (!showDebug) return
+    console.debug('[LiveAttendance] rows/cards', {
+      visibleSessionsCount: visibleSessions.length,
+      firstRow: visibleSessions[0],
+      liveSummary,
+      nowTick,
+    })
+  }, [visibleSessions, liveSummary, nowTick])
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -219,7 +229,7 @@ export const AttendanceLivePage = () => {
     { title: 'Status', dataIndex: 'displayStatus', render: (value, row) => <Tag color={statusColor[row.status] ?? 'default'}>{value ?? statusLabel[row.status] ?? row.status}</Tag> },
     { title: 'Metod', dataIndex: 'method', render: (value) => value ? <Tag color={value === 'Face' ? 'green' : 'blue'}>{value}</Tag> : '-' },
     { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} onPreview={openSnapshotGallery} /> },
-    { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (value) => formatLiveDuration(value) },
+    { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (_, row) => formatLiveDuration(calculateLiveWorkedMinutes(row, nowTick)) },
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
 
@@ -279,7 +289,7 @@ export const AttendanceLivePage = () => {
         </div>
         <Table<AttendanceSessionRow>
           columns={columns}
-          dataSource={sessions}
+          dataSource={visibleSessions}
           loading={loading}
           rowKey="id"
           pagination={{ pageSize: 12 }}
