@@ -1,5 +1,12 @@
 import type { AttendanceSessionRow } from '../../services/api/buildTrackBackendApi'
 
+export interface LiveAttendanceCards {
+  activeWorkers: number
+  todaySeen: number
+  confirmedCheckouts: number
+  totalWorkedMinutes: number
+}
+
 const stringField = (row: AttendanceSessionRow, names: string[]) => {
   const fields = row as unknown as Record<string, unknown>
   for (const name of names) {
@@ -87,5 +94,20 @@ export const deriveLiveAttendanceSummary = (rows: AttendanceSessionRow[], nowMs:
     todaySeen: seenKeys.size,
     confirmedCheckouts,
     totalWorkedMinutes,
+  }
+}
+
+export const deriveLiveAttendanceCards = (
+  rows: AttendanceSessionRow[],
+  nowMs: number,
+  fallbacks: Partial<LiveAttendanceCards> = {},
+): LiveAttendanceCards => {
+  if (rows.length > 0) return deriveLiveAttendanceSummary(rows, nowMs)
+
+  return {
+    activeWorkers: Math.max(0, fallbacks.activeWorkers ?? 0),
+    todaySeen: Math.max(0, fallbacks.todaySeen ?? fallbacks.activeWorkers ?? 0),
+    confirmedCheckouts: Math.max(0, fallbacks.confirmedCheckouts ?? 0),
+    totalWorkedMinutes: Math.max(0, fallbacks.totalWorkedMinutes ?? 0),
   }
 }

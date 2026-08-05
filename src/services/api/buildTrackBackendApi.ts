@@ -372,26 +372,50 @@ const unwrapArray = <T>(payload: unknown): T[] => {
   return []
 }
 
+const objectValue = (payload: unknown): Record<string, unknown> =>
+  payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+
+const numericAlias = (payload: Record<string, unknown>, names: string[], fallback = 0) => {
+  for (const name of names) {
+    const value = payload[name]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value)
+  }
+  return fallback
+}
+
+const arrayAlias = <T>(payload: Record<string, unknown>, names: string[]) => {
+  for (const name of names) {
+    const value = payload[name]
+    if (Array.isArray(value)) return value as T[]
+  }
+  return []
+}
+
+const normalizeLiveAttendanceApiResponse = (payload: unknown) => objectValue(unwrapValue<unknown>(payload))
+
 const normalizeAttendanceLiveStatus = (payload: unknown): AttendanceLiveStatus => {
-  const value = unwrapValue<Partial<AttendanceLiveStatus>>(payload) ?? {}
-  const workers = Array.isArray(value.workers) ? value.workers : []
+  const value = normalizeLiveAttendanceApiResponse(payload)
+  const workers = arrayAlias<AttendanceLiveWorker>(value, ['workers', 'sessions', 'rows', 'items'])
   return {
     workDate: typeof value.workDate === 'string' ? value.workDate : undefined,
-    activeWorkersCount: Number(value.activeWorkersCount ?? workers.length ?? 0),
+    activeWorkersCount: numericAlias(value, ['activeWorkersCount', 'activeWorkers'], workers.length),
     workers,
-    staleOpenSessionsCount: Number(value.staleOpenSessionsCount ?? 0),
+    staleOpenSessionsCount: numericAlias(value, ['staleOpenSessionsCount'], 0),
   }
 }
 
 const normalizeAttendanceDaily = (payload: unknown): AttendanceDailySummary => {
-  const value = unwrapValue<Partial<AttendanceDailySummary>>(payload) ?? {}
-  const sessions = Array.isArray(value.sessions) ? value.sessions : []
+  const value = normalizeLiveAttendanceApiResponse(payload)
+  const sessions = arrayAlias<AttendanceSessionRow>(value, ['sessions', 'workers', 'rows', 'items'])
+  const activeFromRows = sessions.filter((session) => session.status === 'Open' || !session.checkOutTime).length
+  const closedFromRows = sessions.filter((session) => session.status === 'Closed' || Boolean(session.checkOutTime)).length
   return {
     workDate: typeof value.workDate === 'string' ? value.workDate : '',
-    totalWorkersCheckedIn: Number(value.totalWorkersCheckedIn ?? sessions.length ?? 0),
-    activeWorkersCount: Number(value.activeWorkersCount ?? sessions.filter((session) => session.status === 'Open').length ?? 0),
-    closedSessionsCount: Number(value.closedSessionsCount ?? sessions.filter((session) => session.status === 'Closed').length ?? 0),
-    totalWorkedHours: Number(value.totalWorkedHours ?? 0),
+    totalWorkersCheckedIn: numericAlias(value, ['totalWorkersCheckedIn', 'todaySeen', 'checkedInWorkers'], sessions.length),
+    activeWorkersCount: numericAlias(value, ['activeWorkersCount', 'activeWorkers'], activeFromRows),
+    closedSessionsCount: numericAlias(value, ['closedSessionsCount', 'confirmedCheckouts'], closedFromRows),
+    totalWorkedHours: numericAlias(value, ['totalWorkedHours', 'totalHours'], 0),
     sessions,
   }
 }
