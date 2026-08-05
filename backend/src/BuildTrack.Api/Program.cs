@@ -826,7 +826,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
                 session.CloseReason,
                 AttendanceSessionPlanner.BuildDisplayStatus(session.Status, session.CloseReason, lastSeenTime, now),
                 IsCheckoutConfirmed(session),
-                Math.Max(0, (int)Math.Floor((lastSeenTime - session.CheckInTime).TotalMinutes)),
+                Math.Max(0, (int)Math.Floor(((IsCheckoutConfirmed(session) ? session.CheckOutTime ?? lastSeenTime : now) - session.CheckInTime).TotalMinutes)),
                 session.Status);
         })
         .ToArray();
@@ -883,7 +883,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
                 null,
                 AttendanceSessionPlanner.BuildDisplayStatus(AttendanceSessionStatus.Open, null, lastSeen, now),
                 false,
-                Math.Max(0, (int)Math.Floor((lastSeen - firstSeen).TotalMinutes)),
+                Math.Max(0, (int)Math.Floor((now - firstSeen).TotalMinutes)),
                 AttendanceSessionStatus.Open);
         })
         .ToArray();
@@ -947,7 +947,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
                 var last = ordered.Last();
                 var firstSeen = AttendanceEventOperationalClock.Resolve(first);
                 var lastSeen = AttendanceEventOperationalClock.Resolve(last);
-                var workedMinutes = Math.Max(0, (int)Math.Floor((lastSeen - firstSeen).TotalMinutes));
+                var workedMinutes = Math.Max(0, (int)Math.Floor((DateTimeOffset.UtcNow - firstSeen).TotalMinutes));
                 return new AttendanceSessionResponse(
                     first.Id,
                     first.WorkerExternalId ?? string.Empty,
@@ -1031,7 +1031,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
     {
         var confirmedCheckoutTime = IsCheckoutConfirmed(row.Session) ? row.CheckOutTime : null;
         var lastSeenTime = row.LastSeenTime;
-        var effectiveEnd = confirmedCheckoutTime ?? lastSeenTime;
+        var effectiveEnd = confirmedCheckoutTime ?? now;
         var workedMinutes = Math.Max(0, (int)Math.Floor((effectiveEnd - row.CheckInTime).TotalMinutes));
         var snapshotEvent = eventsById.GetValueOrDefault(row.Session.CheckInEventId)
             ?? (row.Session.CheckOutEventId is not null && eventsById.TryGetValue(row.Session.CheckOutEventId.Value, out var checkoutEvent) ? checkoutEvent : null)

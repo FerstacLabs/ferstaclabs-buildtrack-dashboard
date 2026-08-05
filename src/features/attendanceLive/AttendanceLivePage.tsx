@@ -7,6 +7,7 @@ import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type AttendanceSnapshotRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
+import { calculateLiveWorkedMinutes, deriveLiveAttendanceSummary, formatLiveDuration, formatLiveTotalDuration } from './attendanceLiveCalculations'
 
 const statusColor: Record<string, string> = {
   Open: 'green',
@@ -25,25 +26,6 @@ const sourceLabel = (source: string) => {
   if (source === 'dahua_cgi_polling') return 'CGI polling'
   if (source === 'attendance_live_status') return 'Live status'
   return source
-}
-
-const formatDuration = (minutes: number) => {
-  const safeMinutes = Math.max(0, Math.floor(minutes))
-  const hours = Math.floor(safeMinutes / 60)
-  const rest = safeMinutes % 60
-  if (hours === 0) return `${rest} dəq`
-  return `${hours} saat ${rest} dəq`
-}
-
-const calculateWorkedMinutes = (row: AttendanceSessionRow, nowMs: number) => {
-  const startMs = Date.parse(row.checkInTime)
-  if (!Number.isFinite(startMs)) return Math.max(0, row.workedMinutes ?? 0)
-
-  const endSource = row.isCheckoutConfirmed ? (row.confirmedCheckOutTime ?? row.checkOutTime) : undefined
-  const endMs = endSource ? Date.parse(endSource) : nowMs
-  if (!Number.isFinite(endMs) || endMs < startMs) return Math.max(0, row.workedMinutes ?? 0)
-
-  return Math.max(0, Math.floor((endMs - startMs) / 60000))
 }
 
 const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPreview: (row: AttendanceSessionRow) => void }) => {
@@ -148,12 +130,12 @@ export const AttendanceLivePage = () => {
   useEffect(() => {
     void loadSessions(siteId)
     if (!siteId) return
-    const timer = window.setInterval(() => void loadSessions(siteId), 5000)
+    const timer = window.setInterval(() => void loadSessions(siteId), 30000)
     return () => window.clearInterval(timer)
   }, [siteId])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setDurationNow(Date.now()), 30000)
+    const timer = window.setInterval(() => setDurationNow(Date.now()), 15000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -193,12 +175,9 @@ export const AttendanceLivePage = () => {
   }))
   const sessions = (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
     ...session,
-    workedMinutes: calculateWorkedMinutes(session, durationNow),
+    workedMinutes: calculateLiveWorkedMinutes(session, durationNow),
   }))
-  const activeWorkersCount = sessions.filter((session) => !session.isCheckoutConfirmed && session.status === 'Open').length
-  const totalCheckedIn = new Set(sessions.map((session) => session.workerExternalId || session.workerName || session.id)).size
-  const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
-  const totalWorkedHours = Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
+  const liveSummary = deriveLiveAttendanceSummary(sessions)
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
@@ -240,7 +219,7 @@ export const AttendanceLivePage = () => {
     { title: 'Status', dataIndex: 'displayStatus', render: (value, row) => <Tag color={statusColor[row.status] ?? 'default'}>{value ?? statusLabel[row.status] ?? row.status}</Tag> },
     { title: 'Metod', dataIndex: 'method', render: (value) => value ? <Tag color={value === 'Face' ? 'green' : 'blue'}>{value}</Tag> : '-' },
     { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} onPreview={openSnapshotGallery} /> },
-    { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (value) => formatDuration(value) },
+    { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (value) => formatLiveDuration(value) },
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
 
@@ -287,10 +266,10 @@ export const AttendanceLivePage = () => {
       )}
 
       <section className="kpi-grid">
-        <KpiCard icon={<TeamOutlined />} title="Aktiv işçi" value={activeWorkersCount.toString()} trend="hazırda içəridə" tone="green" />
-        <KpiCard icon={<LoginOutlined />} title="Bugün görünən" value={totalCheckedIn.toString()} trend={summary?.workDate || requestedDate || bakuIsoDate()} tone="blue" />
-        <KpiCard icon={<LogoutOutlined />} title="Təsdiqli çıxış" value={confirmedCheckoutCount.toString()} trend="exit cihazı/manual" tone="orange" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Toplam saat" value={totalWorkedHours.toFixed(1)} trend="bugünkü işlənmiş saat" tone="purple" />
+        <KpiCard icon={<TeamOutlined />} title="Aktiv işçi" value={liveSummary.activeWorkers.toString()} trend="checkout olmayan sessiya" tone="green" />
+        <KpiCard icon={<LoginOutlined />} title="Bugün görünən" value={liveSummary.todaySeen.toString()} trend={summary?.workDate || requestedDate || bakuIsoDate()} tone="blue" />
+        <KpiCard icon={<LogoutOutlined />} title="Təsdiqli çıxış" value={liveSummary.confirmedCheckouts.toString()} trend="exit cihazı/manual" tone="orange" />
+        <KpiCard icon={<ClockCircleOutlined />} title="Toplam saat" value={formatLiveTotalDuration(liveSummary.totalWorkedMinutes)} trend="bugünkü işlənmiş vaxt" tone="purple" />
       </section>
 
       <section className="table-card">
