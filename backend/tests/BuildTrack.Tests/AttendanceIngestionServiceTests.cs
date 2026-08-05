@@ -49,6 +49,80 @@ public sealed class AttendanceIngestionServiceTests
         Assert.Null(securityEvent.ReviewedAt);
     }
 
+    [Fact]
+    public async Task VerifiedActiveRegisterAttendanceAutoResolvesParserArtifactWithoutReliableUserId()
+    {
+        await using var db = CreateDbContext();
+        var ids = await SeedDeviceWorkerAndParserEventAsync(
+            db,
+            SecurityEventType.ParserUncertainSmartEvent,
+            SecurityEventStatus.PendingCorrelation,
+            """{"Classification":"ParserUncertainSmartEvent","CardName":"pp","DecodeStatus":"NoPersonFields"}""");
+        var service = CreateService(db);
+
+        await service.IngestDahuaRecordAsync(
+            ids.DeviceId,
+            VerifiedAttendanceRecord(),
+            source: DahuaEventSourceExtensions.ActiveRegisterSource,
+            requireSuccessfulAttendance: true);
+
+        var securityEvent = await db.SecurityEvents.SingleAsync(x => x.Id == ids.SecurityEventId);
+        Assert.Equal(SecurityEventStatus.AutoResolved, securityEvent.Status);
+        Assert.Contains("qısa müddət", securityEvent.ReviewNote);
+    }
+
+    [Fact]
+    public async Task VerifiedActiveRegisterAttendanceDoesNotAutoResolveAnotherTenantParserArtifact()
+    {
+        await using var db = CreateDbContext();
+        var ids = await SeedDeviceWorkerAndParserEventAsync(db);
+        var otherTenantId = Guid.NewGuid();
+        var otherSiteId = Guid.NewGuid();
+        var otherDeviceId = Guid.NewGuid();
+        var otherEventId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = otherTenantId, CompanyName = "Other", Code = "OTHER", Status = TenantStatus.Active });
+        db.Sites.Add(new Site { Id = otherSiteId, TenantId = otherTenantId, Name = "Other site" });
+        db.Devices.Add(new Device
+        {
+            Id = otherDeviceId,
+            TenantId = otherTenantId,
+            SiteId = otherSiteId,
+            Name = "Other camera",
+            RegisterDeviceId = "BT-OTHER-CAM001",
+            RegisterPort = 7000,
+            Username = "admin",
+            EncryptedPassword = "encrypted",
+        });
+        db.SecurityEvents.Add(new SecurityEvent
+        {
+            Id = otherEventId,
+            TenantId = otherTenantId,
+            SiteId = otherSiteId,
+            DeviceId = otherDeviceId,
+            EventTime = DateTimeOffset.UtcNow.AddSeconds(-30),
+            EventDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EventType = SecurityEventType.ParserUncertainSmartEvent,
+            Severity = SecurityEventSeverity.Warning,
+            Status = SecurityEventStatus.PendingCorrelation,
+            Method = "Face",
+            Direction = "Entry",
+            Source = DahuaEventSourceExtensions.ActiveRegisterSource,
+            RawPayloadJson = """{"Classification":"ParserUncertainSmartEvent"}""",
+            CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-30),
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        await service.IngestDahuaRecordAsync(
+            ids.DeviceId,
+            VerifiedAttendanceRecord(),
+            source: DahuaEventSourceExtensions.ActiveRegisterSource,
+            requireSuccessfulAttendance: true);
+
+        var otherEvent = await db.SecurityEvents.IgnoreQueryFilters().SingleAsync(x => x.Id == otherEventId);
+        Assert.Equal(SecurityEventStatus.PendingCorrelation, otherEvent.Status);
+    }
+
     private static AttendanceIngestionService CreateService(BuildTrackDbContext db)
     {
         var configuration = new ConfigurationBuilder()
@@ -78,7 +152,11 @@ public sealed class AttendanceIngestionServiceTests
         return new BuildTrackDbContext(options, new TenantContext());
     }
 
-    private static async Task<SeedIds> SeedDeviceWorkerAndParserEventAsync(BuildTrackDbContext db, SecurityEventType eventType = SecurityEventType.ParserUncertainSmartEvent)
+    private static async Task<SeedIds> SeedDeviceWorkerAndParserEventAsync(
+        BuildTrackDbContext db,
+        SecurityEventType eventType = SecurityEventType.ParserUncertainSmartEvent,
+        SecurityEventStatus status = SecurityEventStatus.Open,
+        string rawPayloadJson = """{"Classification":"ParserUncertainSmartEvent","UserID":"1","CardName":"8)6i$z","ExpectedWorkerName":"ilham"}""")
     {
         var tenantId = Guid.NewGuid();
         var siteId = Guid.NewGuid();
@@ -128,12 +206,12 @@ public sealed class AttendanceIngestionServiceTests
             EventDate = DateOnly.FromDateTime(DateTime.UtcNow),
             EventType = eventType,
             Severity = SecurityEventSeverity.Warning,
-            Status = SecurityEventStatus.Open,
+            Status = status,
             RawRecNo = 2139965688,
             Method = "Face",
             Direction = "Entry",
             Source = DahuaEventSourceExtensions.ActiveRegisterSource,
-            RawPayloadJson = """{"Classification":"ParserUncertainSmartEvent","UserID":"1","CardName":"8)6i$z","ExpectedWorkerName":"ilham"}""",
+            RawPayloadJson = rawPayloadJson,
             CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-30),
         });
         await db.SaveChangesAsync();

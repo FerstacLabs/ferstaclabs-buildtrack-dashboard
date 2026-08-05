@@ -244,7 +244,7 @@ export interface AttendanceSnapshotRow {
   source: string
 }
 
-export type SecurityEventStatus = 'Open' | 'Reviewed' | 'Ignored' | 'AutoResolved'
+export type SecurityEventStatus = 'Open' | 'PendingCorrelation' | 'Reviewed' | 'Ignored' | 'AutoResolved'
 
 export interface SecurityEventRow {
   id: string

@@ -270,7 +270,8 @@ public sealed class AttendanceIngestionService(
         var candidates = await db.SecurityEvents
             .Where(x => x.TenantId == attendanceEvent.TenantId
                         && x.DeviceId == attendanceEvent.DeviceId
-                        && x.Status == SecurityEventStatus.Open
+                        && x.SiteId == attendanceEvent.SiteId
+                        && (x.Status == SecurityEventStatus.Open || x.Status == SecurityEventStatus.PendingCorrelation)
                         && (x.EventType == SecurityEventType.ParserUncertainSmartEvent
                             || x.EventType == SecurityEventType.SuspiciousRecognition)
                         && x.CreatedAt >= windowStart
@@ -281,11 +282,10 @@ public sealed class AttendanceIngestionService(
         if (candidates.Count == 0) return;
 
         var now = DateTimeOffset.UtcNow;
-        const string autoResolveNote = "Avtomatik bağlandı: eyni cihazdan təsdiqlənmiş davamiyyət qeydi alındı.";
+        const string autoResolveNote = "Avtomatik bağlandı: eyni kameradan qısa müddət sonra təsdiqli tanıma alındı.";
         var resolved = 0;
         var cameraUserId = ExtractCameraUserId(attendanceEvent.RawPayloadJson);
-        foreach (var securityEvent in candidates.Where(x => RawPayloadHasWorkerExternalId(x.RawPayloadJson, attendanceEvent.WorkerExternalId)
-                                                            || (!string.IsNullOrWhiteSpace(cameraUserId) && RawPayloadHasWorkerExternalId(x.RawPayloadJson, cameraUserId))))
+        foreach (var securityEvent in candidates.Where(x => IsCorrelatedParserArtifact(x, attendanceEvent, cameraUserId)))
         {
             securityEvent.Status = SecurityEventStatus.AutoResolved;
             securityEvent.ReviewedAt = now;
@@ -298,6 +298,16 @@ public sealed class AttendanceIngestionService(
 
         await db.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Auto-resolved {Count} parser-uncertain security events after verified attendance. Device {DeviceId}, WorkerExternalId {WorkerExternalId}", resolved, attendanceEvent.DeviceId, attendanceEvent.WorkerExternalId);
+    }
+
+    private static bool IsCorrelatedParserArtifact(SecurityEvent securityEvent, AttendanceEvent attendanceEvent, string? cameraUserId)
+    {
+        if (securityEvent.EventType is not (SecurityEventType.ParserUncertainSmartEvent or SecurityEventType.SuspiciousRecognition)) return false;
+        if (securityEvent.TenantId != attendanceEvent.TenantId || securityEvent.DeviceId != attendanceEvent.DeviceId || securityEvent.SiteId != attendanceEvent.SiteId) return false;
+        if (!string.IsNullOrWhiteSpace(attendanceEvent.WorkerExternalId)
+            && RawPayloadHasWorkerExternalId(securityEvent.RawPayloadJson, attendanceEvent.WorkerExternalId)) return true;
+        if (!string.IsNullOrWhiteSpace(cameraUserId) && RawPayloadHasWorkerExternalId(securityEvent.RawPayloadJson, cameraUserId)) return true;
+        return securityEvent.EventType == SecurityEventType.ParserUncertainSmartEvent;
     }
 
     private static bool RawPayloadHasWorkerExternalId(string rawPayloadJson, string workerExternalId)

@@ -10,6 +10,7 @@ import { buildTrackBackendApi, type BackendSite, type BackendWorker, type Securi
 
 const statusColor: Record<SecurityEventStatus, string> = {
   Open: 'orange',
+  PendingCorrelation: 'geekblue',
   Reviewed: 'green',
   Ignored: 'default',
   AutoResolved: 'blue',
@@ -17,6 +18,7 @@ const statusColor: Record<SecurityEventStatus, string> = {
 
 const statusLabel: Record<SecurityEventStatus, string> = {
   Open: 'Açıq',
+  PendingCorrelation: 'Korrelyasiya gözləyir',
   Reviewed: 'Baxılıb',
   Ignored: 'Yox sayılıb',
   AutoResolved: 'Avtomatik bağlanıb',

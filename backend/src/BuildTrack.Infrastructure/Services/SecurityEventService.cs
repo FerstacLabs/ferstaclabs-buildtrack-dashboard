@@ -77,7 +77,7 @@ public sealed class SecurityEventService(
             EventDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(eventTime, eventTimeZone).DateTime),
             EventType = eventType,
             Severity = SecurityEventSeverity.Warning,
-            Status = SecurityEventStatus.Open,
+            Status = IsParserArtifact(eventType) ? SecurityEventStatus.PendingCorrelation : SecurityEventStatus.Open,
             RawRecNo = record.RecNo,
             Method = record.NormalizedMethod.ToString(),
             Direction = record.NormalizedDirection.ToString(),
@@ -125,6 +125,9 @@ public sealed class SecurityEventService(
 
         return new SecurityEventIngestionResult(SecurityEventIngestionResultStatus.Created, securityEvent);
     }
+
+    private static bool IsParserArtifact(SecurityEventType eventType) =>
+        eventType is SecurityEventType.ParserUncertainSmartEvent or SecurityEventType.SuspiciousRecognition;
 
     private static bool IsDuplicateException(DbUpdateException ex) =>
         ex.InnerException?.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true

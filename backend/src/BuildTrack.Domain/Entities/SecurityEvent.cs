@@ -18,6 +18,7 @@ public enum SecurityEventSeverity
 public enum SecurityEventStatus
 {
     Open,
+    PendingCorrelation,
     Reviewed,
     Ignored,
     AutoResolved

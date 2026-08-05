@@ -195,8 +195,8 @@ export const AttendanceLivePage = () => {
     ...session,
     workedMinutes: calculateWorkedMinutes(session, durationNow),
   }))
-  const activeWorkersCount = summary?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0
-  const totalCheckedIn = summary?.totalWorkersCheckedIn || sessions.length
+  const activeWorkersCount = sessions.filter((session) => !session.isCheckoutConfirmed && session.status === 'Open').length
+  const totalCheckedIn = new Set(sessions.map((session) => session.workerExternalId || session.workerName || session.id)).size
   const confirmedCheckoutCount = sessions.filter((session) => session.isCheckoutConfirmed).length
   const totalWorkedHours = Math.round((sessions.reduce((sum, session) => sum + session.workedMinutes, 0) / 60) * 10) / 10
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)

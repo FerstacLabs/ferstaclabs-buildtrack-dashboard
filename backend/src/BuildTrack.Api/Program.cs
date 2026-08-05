@@ -1068,12 +1068,13 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         sessionRows));
 });
 
-app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, string? date, BuildTrackDbContext db, IConfiguration configuration, CancellationToken ct) =>
 {
     var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
     if (site is null) return Results.NotFound();
 
     var timeZone = ResolveApiTimeZone(site.TimeZone);
+    await PromoteExpiredParserCorrelationEventsAsync(db, siteId, configuration, ct);
     var eventDate = DateOnly.TryParse(date, out var parsedDate)
         ? parsedDate
         : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
@@ -2082,6 +2083,29 @@ static double CalculatePresenceHours(AttendanceSession session)
     return Math.Max(0, (end - session.CheckInTime).TotalHours);
 }
 
+static async Task PromoteExpiredParserCorrelationEventsAsync(BuildTrackDbContext db, Guid siteId, IConfiguration configuration, CancellationToken ct)
+{
+    var graceSeconds = ParsePositiveInt(configuration["DAHUA_PARSER_UNCERTAIN_CORRELATION_SECONDS"], 60);
+    var cutoff = DateTimeOffset.UtcNow.AddSeconds(-graceSeconds);
+    var expired = await db.SecurityEvents
+        .Where(x => x.SiteId == siteId
+                    && x.Status == SecurityEventStatus.PendingCorrelation
+                    && (x.EventType == SecurityEventType.ParserUncertainSmartEvent
+                        || x.EventType == SecurityEventType.SuspiciousRecognition)
+                    && x.CreatedAt <= cutoff)
+        .ToListAsync(ct);
+    if (expired.Count == 0) return;
+
+    foreach (var securityEvent in expired)
+    {
+        securityEvent.Status = SecurityEventStatus.Open;
+        securityEvent.Message ??= "Subheli tanima: tesdiq ucun yoxlanilmalidir";
+        securityEvent.ReviewNote = "Parser-artifact korrelyasiya muddetinde tesdiqli tanima gelmedi.";
+    }
+
+    await db.SaveChangesAsync(ct);
+}
+
 static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
 static string NormalizeAttendanceSource(string? value)
@@ -2160,6 +2184,9 @@ static bool IsEnabled(string? value, bool defaultValue = false)
 
 static int ParseInt(string? value, int defaultValue) =>
     int.TryParse(value, out var parsed) ? parsed : defaultValue;
+
+static int ParsePositiveInt(string? value, int defaultValue) =>
+    int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
 
 static int[] ParseDiagnosticsPorts(string? json)
 {
