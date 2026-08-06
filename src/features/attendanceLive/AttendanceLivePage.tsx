@@ -18,6 +18,8 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
+const ATTENDANCE_LIVE_BUILD_MARKER = 'kpi-render-fix-08f4aa4'
+
 const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
 
 const showDebug = import.meta.env.DEV
@@ -76,6 +78,7 @@ function LiveAttendanceKpiCard({
     {subtitle ? <div className="kpi-trend">↑ {subtitle}</div> : null}
     {debugLive && debugLabel ? (
       <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+        <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
         <div>debug: {debugLabel}</div>
         <div>rendered value = {String(value)}</div>
       </div>
@@ -261,6 +264,7 @@ export const AttendanceLivePage = () => {
 
   useEffect(() => {
     if (!debugLive || attendanceKpiValues.activeWorkers <= 0) return
+    console.warn('[LiveAttendance BUILD]', ATTENDANCE_LIVE_BUILD_MARKER)
     console.warn('[LiveAttendance KPI render check]', {
       attendanceKpiValues,
     })
@@ -392,8 +396,10 @@ export const AttendanceLivePage = () => {
             <h2>Live debug</h2>
             <Tag color="orange">?debugLive=1</Tag>
           </div>
+          <Alert type="info" showIcon message={`Build marker: ${ATTENDANCE_LIVE_BUILD_MARKER}`} />
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {JSON.stringify({
+              buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
               visibleSessionsLength: tableRows.length,
               dailyActiveWorkersCount: dailyAttendance?.activeWorkersCount ?? null,
               dailyTotalWorkersCheckedIn: dailyAttendance?.totalWorkersCheckedIn ?? null,
