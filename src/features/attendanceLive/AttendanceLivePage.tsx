@@ -1,8 +1,7 @@
 ﻿import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
 import { Alert, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
-import { KpiCard } from '../../components/ui/KpiCard'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
@@ -19,9 +18,11 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
+const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
+
 const showDebug = import.meta.env.DEV
   || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
-  || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1')
+  || debugLive
 
 const sourceLabel = (source: string) => {
   if (source === 'dahua_active_register') return 'Active Register'
@@ -49,6 +50,38 @@ const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPr
     </button>
   )
 }
+
+const LiveAttendanceKpiCard = ({
+  debugLabel,
+  debugValue,
+  icon,
+  title,
+  tone,
+  trend,
+  value,
+}: {
+  debugLabel: string
+  debugValue: string | number
+  icon: ReactNode
+  title: string
+  tone: 'blue' | 'green' | 'orange' | 'purple'
+  trend: string
+  value: string | number
+}) => (
+  <div className={`kpi-card kpi-${tone}`}>
+    <div className="kpi-top">
+      <span className="kpi-icon">{icon}</span>
+      <span className="kpi-title">{title}</span>
+    </div>
+    <div className="kpi-value">{value}</div>
+    <div className="kpi-trend">↑ {trend}</div>
+    {debugLive && (
+      <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+        debug: {debugLabel}={debugValue}
+      </div>
+    )}
+  </div>
+)
 
 const bakuIsoDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -237,6 +270,16 @@ export const AttendanceLivePage = () => {
     }
   }, [tableRows, finalAttendanceCards, displayActiveWorkers, displayTodaySeen, displayConfirmedCheckouts, displayTotalMinutes, liveStatus, dailyAttendance, nowTick])
 
+  useEffect(() => {
+    if (!debugLive || displayActiveWorkers <= 0) return
+    console.warn('[LiveAttendance KPI render check]', {
+      displayActiveWorkers,
+      displayTodaySeen,
+      displayConfirmedCheckouts,
+      displayTotalMinutes,
+    })
+  }, [displayActiveWorkers, displayTodaySeen, displayConfirmedCheckouts, displayTotalMinutes])
+
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
     setGalleryWorker(row)
@@ -323,10 +366,42 @@ export const AttendanceLivePage = () => {
       )}
 
       <section className="kpi-grid">
-        <KpiCard icon={<TeamOutlined />} title="Aktiv işçi" value={displayActiveWorkers.toString()} trend="checkout olmayan sessiya" tone="green" />
-        <KpiCard icon={<LoginOutlined />} title="Bugün görünən" value={displayTodaySeen.toString()} trend={dailyAttendance?.workDate || requestedDate || bakuIsoDate()} tone="blue" />
-        <KpiCard icon={<LogoutOutlined />} title="Təsdiqli çıxış" value={displayConfirmedCheckouts.toString()} trend="exit cihazı/manual" tone="orange" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Toplam saat" value={formatLiveTotalDuration(displayTotalMinutes)} trend="bugünkü işlənmiş vaxt" tone="purple" />
+        <LiveAttendanceKpiCard
+          debugLabel="displayActiveWorkers"
+          debugValue={displayActiveWorkers}
+          icon={<TeamOutlined />}
+          title="Aktiv işçi"
+          value={displayActiveWorkers}
+          trend="checkout olmayan sessiya"
+          tone="green"
+        />
+        <LiveAttendanceKpiCard
+          debugLabel="displayTodaySeen"
+          debugValue={displayTodaySeen}
+          icon={<LoginOutlined />}
+          title="Bugün görünən"
+          value={displayTodaySeen}
+          trend={dailyAttendance?.workDate || requestedDate || bakuIsoDate()}
+          tone="blue"
+        />
+        <LiveAttendanceKpiCard
+          debugLabel="displayConfirmedCheckouts"
+          debugValue={displayConfirmedCheckouts}
+          icon={<LogoutOutlined />}
+          title="Təsdiqli çıxış"
+          value={displayConfirmedCheckouts}
+          trend="exit cihazı/manual"
+          tone="orange"
+        />
+        <LiveAttendanceKpiCard
+          debugLabel="displayTotalMinutes"
+          debugValue={displayTotalMinutes}
+          icon={<ClockCircleOutlined />}
+          title="Toplam saat"
+          value={formatLiveTotalDuration(displayTotalMinutes)}
+          trend="bugünkü işlənmiş vaxt"
+          tone="purple"
+        />
       </section>
 
       {showDebug && (
@@ -348,6 +423,9 @@ export const AttendanceLivePage = () => {
               displayActiveWorkers,
               displayTodaySeen,
               displayTotalMinutes,
+              renderedActiveValue: displayActiveWorkers,
+              renderedTodaySeenValue: displayTodaySeen,
+              renderedTotalMinutesValue: displayTotalMinutes,
               firstVisibleSessionWorkerName: tableRows[0]?.workerName ?? null,
               firstVisibleSessionFirstSeen: (tableRows[0] as unknown as { firstSeen?: string })?.firstSeen ?? null,
               firstVisibleSessionCheckInTime: tableRows[0]?.checkInTime ?? null,
