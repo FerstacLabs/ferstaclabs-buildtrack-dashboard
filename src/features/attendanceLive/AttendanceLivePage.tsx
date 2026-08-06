@@ -18,8 +18,6 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
-const ATTENDANCE_LIVE_BUILD_MARKER = 'no-memo-kpi-v2'
-
 const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
 
 const showDebug = import.meta.env.DEV
@@ -205,7 +203,7 @@ export const AttendanceLivePage = () => {
 
   useEffect(() => {
     if (!debugLive) return
-    console.warn('[LiveAttendance BUILD]', ATTENDANCE_LIVE_BUILD_MARKER)
+    console.warn('[LiveAttendance BUILD]', 'iife-kpi-final-v1')
   }, [])
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
@@ -251,35 +249,6 @@ export const AttendanceLivePage = () => {
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
 
-  const directActiveWorkers =
-    Math.max(
-      Number(summary?.activeWorkersCount ?? 0),
-      Number(liveStatus?.activeWorkersCount ?? 0),
-      tableRows.length > 0 ? 1 : 0,
-    )
-
-  const directTodaySeen =
-    Math.max(
-      Number(summary?.totalWorkersCheckedIn ?? 0),
-      Number(summary?.activeWorkersCount ?? 0),
-      Number(liveStatus?.activeWorkersCount ?? 0),
-      tableRows.length,
-    )
-
-  const directConfirmedCheckouts =
-    Number(summary?.closedSessionsCount ?? 0)
-
-  const rowTotalMinutes = tableRows.reduce(
-    (sum, row) => sum + calculateLiveWorkedMinutes(row, nowTick),
-    0,
-  )
-
-  const apiTotalMinutes = Math.round(Number(summary?.totalWorkedHours ?? 0) * 60)
-
-  const directTotalMinutes = Math.max(apiTotalMinutes, rowTotalMinutes)
-
-  const directTotalDurationText = formatLiveTotalDuration(directTotalMinutes)
-
   return (
     <div className="page-stack">
       <PageTitle title="Canlı Davamiyyət" subtitle="Bir kamera rejimində tanınmalar giriş-çıxış deyil, ilk görünmə və son görülmə kimi izlənir" />
@@ -313,104 +282,141 @@ export const AttendanceLivePage = () => {
         {siteId && <Tag color="blue">Obyekt: {siteNameById.get(siteId) ?? siteId}</Tag>}
       </section>
 
-      <section className="kpi-grid" data-build-marker={ATTENDANCE_LIVE_BUILD_MARKER}>
-        <div className="kpi-card kpi-green">
-          <div className="kpi-top">
-            <span className="kpi-icon"><TeamOutlined /></span>
-            <span className="kpi-title">Aktiv işçi</span>
-          </div>
-          <div className="kpi-value" data-testid="live-active-workers">{directActiveWorkers}</div>
-          <div className="kpi-trend">↑ checkout olmayan sessiya</div>
-          {showDebug ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>NO MEMO DIRECT JSX</div>
-              <div>directActiveWorkers = {directActiveWorkers}</div>
-            </div>
-          ) : null}
-        </div>
+      {(() => {
+        const rows = tableRows
 
-        <div className="kpi-card kpi-blue">
-          <div className="kpi-top">
-            <span className="kpi-icon"><LoginOutlined /></span>
-            <span className="kpi-title">Bugün görünən</span>
-          </div>
-          <div className="kpi-value" data-testid="live-today-seen">{directTodaySeen}</div>
-          <div className="kpi-trend">↑ {summary?.workDate || requestedDate || bakuIsoDate()}</div>
-          {showDebug ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>NO MEMO DIRECT JSX</div>
-              <div>directTodaySeen = {directTodaySeen}</div>
-            </div>
-          ) : null}
-        </div>
+        const rowTotalMinutes = rows.reduce(
+          (sum, row) => sum + calculateLiveWorkedMinutes(row, nowTick),
+          0,
+        )
 
-        <div className="kpi-card kpi-orange">
-          <div className="kpi-top">
-            <span className="kpi-icon"><LogoutOutlined /></span>
-            <span className="kpi-title">Təsdiqli çıxış</span>
-          </div>
-          <div className="kpi-value" data-testid="live-confirmed-checkouts">{directConfirmedCheckouts}</div>
-          <div className="kpi-trend">↑ exit cihazı/manual</div>
-          {showDebug ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>NO MEMO DIRECT JSX</div>
-              <div>directConfirmedCheckouts = {directConfirmedCheckouts}</div>
-            </div>
-          ) : null}
-        </div>
+        const apiActiveWorkers = Number(summary?.activeWorkersCount ?? 0)
+        const liveActiveWorkers = Number(liveStatus?.activeWorkersCount ?? 0)
+        const apiTodaySeen = Number(
+          summary?.totalWorkersCheckedIn
+          ?? summary?.activeWorkersCount
+          ?? liveStatus?.activeWorkersCount
+          ?? 0,
+        )
+        const apiConfirmedCheckouts = Number(summary?.closedSessionsCount ?? 0)
+        const apiTotalMinutes = Math.round(Number(summary?.totalWorkedHours ?? 0) * 60)
 
-        <div className="kpi-card kpi-purple">
-          <div className="kpi-top">
-            <span className="kpi-icon"><ClockCircleOutlined /></span>
-            <span className="kpi-title">Toplam saat</span>
-          </div>
-          <div className="kpi-value" data-testid="live-total-duration">{directTotalDurationText}</div>
-          <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
-          {showDebug ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>NO MEMO DIRECT JSX</div>
-              <div>directTotalMinutes = {directTotalMinutes}</div>
-              <div>directTotalDurationText = {directTotalDurationText}</div>
-            </div>
-          ) : null}
-        </div>
-      </section>
+        const active = Math.max(apiActiveWorkers, liveActiveWorkers, rows.length > 0 ? 1 : 0)
+        const seen = Math.max(apiTodaySeen, rows.length)
+        const checkouts = apiConfirmedCheckouts
+        const totalMinutes = Math.max(apiTotalMinutes, rowTotalMinutes)
+        const totalText = formatLiveTotalDuration(totalMinutes)
 
-      {showDebug ? (
-        <section className="table-card">
-          <div className="card-heading">
-            <h3>Live debug</h3>
-            <Tag color="orange">?debugLive=1</Tag>
-          </div>
-          <Alert type="info" showIcon message={`Build marker: ${ATTENDANCE_LIVE_BUILD_MARKER}`} />
-          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-            {JSON.stringify({
-              buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
-              kpiSource: 'parent-direct-jsx-no-memo',
-              requestedSiteId,
-              requestedDate,
-              tableRowsLength: tableRows.length,
-              summaryActiveWorkersCount: summary?.activeWorkersCount,
-              summaryTotalWorkersCheckedIn: summary?.totalWorkersCheckedIn,
-              summaryTotalWorkedHours: summary?.totalWorkedHours,
-              liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount,
-              rowTotalMinutes,
-              apiTotalMinutes,
-              directActiveWorkers,
-              directTodaySeen,
-              directConfirmedCheckouts,
-              directTotalMinutes,
-              directTotalDurationText,
-              firstVisibleSessionWorkerName: tableRows[0]?.workerName,
-              firstVisibleSessionCheckInTime: tableRows[0]?.checkInTime,
-            }, null, 2)}
-          </pre>
-        </section>
-      ) : null}
+        const marker = 'iife-kpi-final-v1'
+
+        return (
+          <>
+            <section className="kpi-grid" data-build-marker={marker}>
+              <div className="kpi-card kpi-green">
+                <div className="kpi-top">
+                  <span className="kpi-icon"><TeamOutlined /></span>
+                  <span className="kpi-title">Aktiv işçi</span>
+                </div>
+                <div className="kpi-value" data-testid="live-active-workers">{active}</div>
+                <div className="kpi-trend">↑ checkout olmayan sessiya</div>
+                {showDebug ? (
+                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+                    <div>build: {marker}</div>
+                    <div>IIFE KPI FINAL</div>
+                    <div>active = {active}</div>
+                    <div>rows.length = {rows.length}</div>
+                    <div>summary.activeWorkersCount = {summary?.activeWorkersCount ?? '-'}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="kpi-card kpi-blue">
+                <div className="kpi-top">
+                  <span className="kpi-icon"><LoginOutlined /></span>
+                  <span className="kpi-title">Bugün görünən</span>
+                </div>
+                <div className="kpi-value" data-testid="live-today-seen">{seen}</div>
+                <div className="kpi-trend">↑ {summary?.workDate || requestedDate || bakuIsoDate()}</div>
+                {showDebug ? (
+                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+                    <div>build: {marker}</div>
+                    <div>IIFE KPI FINAL</div>
+                    <div>seen = {seen}</div>
+                    <div>summary.totalWorkersCheckedIn = {summary?.totalWorkersCheckedIn ?? '-'}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="kpi-card kpi-orange">
+                <div className="kpi-top">
+                  <span className="kpi-icon"><LogoutOutlined /></span>
+                  <span className="kpi-title">Təsdiqli çıxış</span>
+                </div>
+                <div className="kpi-value" data-testid="live-confirmed-checkouts">{checkouts}</div>
+                <div className="kpi-trend">↑ exit cihazı/manual</div>
+                {showDebug ? (
+                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+                    <div>build: {marker}</div>
+                    <div>IIFE KPI FINAL</div>
+                    <div>checkouts = {checkouts}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="kpi-card kpi-purple">
+                <div className="kpi-top">
+                  <span className="kpi-icon"><ClockCircleOutlined /></span>
+                  <span className="kpi-title">Toplam saat</span>
+                </div>
+                <div className="kpi-value" data-testid="live-total-duration">{totalText}</div>
+                <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
+                {showDebug ? (
+                  <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+                    <div>build: {marker}</div>
+                    <div>IIFE KPI FINAL</div>
+                    <div>totalMinutes = {totalMinutes}</div>
+                    <div>totalText = {totalText}</div>
+                    <div>apiTotalMinutes = {apiTotalMinutes}</div>
+                    <div>rowTotalMinutes = {rowTotalMinutes}</div>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+
+            {showDebug ? (
+              <section className="table-card">
+                <div className="card-heading">
+                  <h3>Live debug</h3>
+                  <Tag color="orange">?debugLive=1</Tag>
+                </div>
+                <Alert type="info" showIcon message={`Build marker: ${marker}`} />
+                <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+                  {JSON.stringify({
+                    buildMarker: marker,
+                    kpiSource: 'single-iife-same-render-scope',
+                    requestedSiteId,
+                    requestedDate,
+                    tableRowsLength: rows.length,
+                    summaryActiveWorkersCount: summary?.activeWorkersCount,
+                    summaryTotalWorkersCheckedIn: summary?.totalWorkersCheckedIn,
+                    summaryTotalWorkedHours: summary?.totalWorkedHours,
+                    liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount,
+                    rowTotalMinutes,
+                    apiTotalMinutes,
+                    active,
+                    seen,
+                    checkouts,
+                    totalMinutes,
+                    totalText,
+                    firstVisibleSessionWorkerName: rows[0]?.workerName,
+                    firstVisibleSessionCheckInTime: rows[0]?.checkInTime,
+                  }, null, 2)}
+                </pre>
+              </section>
+            ) : null}
+          </>
+        )
+      })()}
 
       <section className="table-card">
         <div className="card-heading">

@@ -195,6 +195,15 @@ body {
   padding: 28px 24px 34px 252px;
 }
 
+main,
+.layout-content,
+.page-content,
+.dashboard-content {
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .page-stack,
 .panel-card,
 .table-card {
