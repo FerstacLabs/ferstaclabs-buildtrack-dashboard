@@ -32,8 +32,10 @@ export const AppLayout = () => {
   }, [loadData])
 
   useEffect(() => {
-    document.body.style.overflow = ''
-    document.documentElement.style.overflow = ''
+    document.body.style.removeProperty('overflow')
+    document.body.style.removeProperty('overflow-y')
+    document.documentElement.style.removeProperty('overflow')
+    document.documentElement.style.removeProperty('overflow-y')
   }, [location.pathname])
 
   useEffect(() => {

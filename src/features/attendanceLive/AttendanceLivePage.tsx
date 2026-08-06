@@ -23,6 +23,9 @@ const showDebug =
   import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true' ||
   debugLive
 
+const LIVE_ATTENDANCE_POLL_MS = 5000
+const LIVE_ATTENDANCE_CLOCK_MS = 5000
+
 const statusColor: Record<string, string> = {
   Open: 'green',
   Closed: 'blue',
@@ -87,9 +90,10 @@ export const AttendanceLivePage = () => {
     }
   }
 
-  const loadSessions = async (selectedSiteId = siteId) => {
+  const loadSessions = async (selectedSiteId = siteId, options: { showLoading?: boolean } = {}) => {
     if (!selectedSiteId) return
-    setLoading(true)
+    const showLoading = options.showLoading ?? true
+    if (showLoading) setLoading(true)
     setError('')
     setRequestedSiteId(selectedSiteId)
 
@@ -115,7 +119,7 @@ export const AttendanceLivePage = () => {
       setSummary(undefined)
       setSecurityEventsCount(0)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
@@ -126,14 +130,32 @@ export const AttendanceLivePage = () => {
   useEffect(() => {
     void loadSessions(siteId)
     if (!siteId) return
-    const timer = window.setInterval(() => void loadSessions(siteId), 30000)
+    const timer = window.setInterval(() => void loadSessions(siteId, { showLoading: false }), LIVE_ATTENDANCE_POLL_MS)
     return () => window.clearInterval(timer)
   }, [siteId])
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNowTick(Date.now()), 30000)
+    const timer = window.setInterval(() => setNowTick(Date.now()), LIVE_ATTENDANCE_CLOCK_MS)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (!siteId) return
+
+    const refreshVisiblePage = () => {
+      if (document.visibilityState !== 'visible') return
+      setNowTick(Date.now())
+      void loadSessions(siteId, { showLoading: false })
+    }
+
+    window.addEventListener('focus', refreshVisiblePage)
+    document.addEventListener('visibilitychange', refreshVisiblePage)
+
+    return () => {
+      window.removeEventListener('focus', refreshVisiblePage)
+      document.removeEventListener('visibilitychange', refreshVisiblePage)
+    }
+  }, [siteId])
 
   useEffect(() => {
     const refreshAfterSimulatorEvent = (event: Event) => {
@@ -196,7 +218,7 @@ export const AttendanceLivePage = () => {
   const confirmedCheckoutsKpi = Number(summary?.closedSessionsCount ?? 0)
   const totalMinutesKpi = Math.max(apiTotalMinutes, rowTotalMinutes)
   const totalDurationKpi = formatLiveTotalDuration(totalMinutesKpi)
-  const liveBuildMarker = 'live-kpi-dom-sync-v5'
+  const liveBuildMarker = 'live-kpi-fast-sync-v6'
 
   useLayoutEffect(() => {
     const setText = (id: string, value: string | number) => {
@@ -376,7 +398,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>DOM SYNC V5</div>
+              <div>FAST SYNC V6</div>
               <div id="live-kpi-active-workers-debug">activeWorkersKpi = {activeWorkersKpi}</div>
             </div>
           ) : null}
@@ -398,7 +420,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>DOM SYNC V5</div>
+              <div>FAST SYNC V6</div>
               <div id="live-kpi-today-seen-debug">todaySeenKpi = {todaySeenKpi}</div>
             </div>
           ) : null}
@@ -420,7 +442,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>DOM SYNC V5</div>
+              <div>FAST SYNC V6</div>
               <div id="live-kpi-confirmed-checkouts-debug">confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
             </div>
           ) : null}
@@ -442,7 +464,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>DOM SYNC V5</div>
+              <div>FAST SYNC V6</div>
               <div id="live-kpi-total-duration-debug">totalMinutesKpi = {totalMinutesKpi}</div>
               <div id="live-kpi-total-duration-text-debug">totalDurationKpi = {totalDurationKpi}</div>
             </div>
