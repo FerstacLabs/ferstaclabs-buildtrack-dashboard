@@ -18,7 +18,7 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
-const ATTENDANCE_LIVE_BUILD_MARKER = 'raw-inline-kpi-313c2eb-fix'
+const ATTENDANCE_LIVE_BUILD_MARKER = 'single-kpi-panel-fix'
 
 const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
 
@@ -70,6 +70,155 @@ const bakuIsoDate = (date = new Date()) => {
 const resolveInitialSiteId = (siteRows: BackendSite[], currentSiteId?: string) => {
   if (currentSiteId && siteRows.some((site) => site.id === currentSiteId)) return currentSiteId
   return siteRows[0]?.id
+}
+
+type AttendanceLiveKpiPanelProps = {
+  tableRows: AttendanceSessionRow[]
+  nowTick: number
+  dailyAttendance?: AttendanceDailySummary
+  liveStatus?: AttendanceLiveStatus
+  requestedDate: string
+  securityEventsCount: number
+  showDebug: boolean
+}
+
+function AttendanceLiveKpiPanel({
+  tableRows,
+  nowTick,
+  dailyAttendance,
+  liveStatus,
+  requestedDate,
+  securityEventsCount,
+  showDebug,
+}: AttendanceLiveKpiPanelProps) {
+  const kpi = useMemo(() => {
+    const apiActiveWorkers = Number(dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
+    const apiTodaySeen = Number(
+      dailyAttendance?.totalWorkersCheckedIn
+      ?? dailyAttendance?.activeWorkersCount
+      ?? liveStatus?.activeWorkersCount
+      ?? 0,
+    )
+    const apiConfirmedCheckouts = Number(dailyAttendance?.closedSessionsCount ?? 0)
+    const apiTotalMinutes = Math.round(Number(dailyAttendance?.totalWorkedHours ?? 0) * 60)
+    const rowValues = deriveLiveAttendanceCards(tableRows, nowTick)
+
+    return {
+      activeWorkers: tableRows.length > 0
+        ? (rowValues.activeWorkers || apiActiveWorkers)
+        : apiActiveWorkers,
+      todaySeen: tableRows.length > 0
+        ? (rowValues.todaySeen || apiTodaySeen)
+        : apiTodaySeen,
+      confirmedCheckouts: tableRows.length > 0
+        ? rowValues.confirmedCheckouts
+        : apiConfirmedCheckouts,
+      totalMinutes: tableRows.length > 0
+        ? (rowValues.totalWorkedMinutes || apiTotalMinutes)
+        : apiTotalMinutes,
+    }
+  }, [tableRows, nowTick, dailyAttendance, liveStatus])
+
+  return (
+    <>
+      <section className="kpi-grid">
+        <div className="kpi-card kpi-green">
+          <div className="kpi-top">
+            <span className="kpi-icon"><TeamOutlined /></span>
+            <span className="kpi-title">Aktiv işçi</span>
+          </div>
+          <div className="kpi-value">{kpi.activeWorkers}</div>
+          <div className="kpi-trend">↑ checkout olmayan sessiya</div>
+          {showDebug ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>SINGLE KPI PANEL</div>
+              <div>activeWorkers = {kpi.activeWorkers}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-blue">
+          <div className="kpi-top">
+            <span className="kpi-icon"><LoginOutlined /></span>
+            <span className="kpi-title">Bugün görünən</span>
+          </div>
+          <div className="kpi-value">{kpi.todaySeen}</div>
+          <div className="kpi-trend">↑ {dailyAttendance?.workDate || requestedDate || bakuIsoDate()}</div>
+          {showDebug ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>SINGLE KPI PANEL</div>
+              <div>todaySeen = {kpi.todaySeen}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-orange">
+          <div className="kpi-top">
+            <span className="kpi-icon"><LogoutOutlined /></span>
+            <span className="kpi-title">Təsdiqli çıxış</span>
+          </div>
+          <div className="kpi-value">{kpi.confirmedCheckouts}</div>
+          <div className="kpi-trend">↑ exit cihazı/manual</div>
+          {showDebug ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>SINGLE KPI PANEL</div>
+              <div>confirmedCheckouts = {kpi.confirmedCheckouts}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-purple">
+          <div className="kpi-top">
+            <span className="kpi-icon"><ClockCircleOutlined /></span>
+            <span className="kpi-title">Toplam saat</span>
+          </div>
+          <div className="kpi-value">{formatLiveTotalDuration(kpi.totalMinutes)}</div>
+          <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
+          {showDebug ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>SINGLE KPI PANEL</div>
+              <div>totalMinutes = {kpi.totalMinutes}</div>
+              <div>formatted = {formatLiveTotalDuration(kpi.totalMinutes)}</div>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {showDebug ? (
+        <section className="table-card">
+          <div className="card-heading">
+            <h3>Live debug</h3>
+            <Tag color="orange">?debugLive=1</Tag>
+          </div>
+          <Alert
+            type="info"
+            showIcon
+            message={`Build marker: ${ATTENDANCE_LIVE_BUILD_MARKER}`}
+          />
+          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+            {JSON.stringify({
+              buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
+              kpiSource: 'single-child-component',
+              visibleSessionsLength: tableRows.length,
+              dailyActiveWorkersCount: dailyAttendance?.activeWorkersCount,
+              dailyTotalWorkersCheckedIn: dailyAttendance?.totalWorkersCheckedIn,
+              dailyTotalWorkedHours: dailyAttendance?.totalWorkedHours,
+              liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount,
+              kpi,
+              securityEventsCount,
+              firstVisibleSessionWorkerName: tableRows[0]?.workerName,
+              firstVisibleSessionFirstSeen: (tableRows[0] as unknown as { firstSeen?: string })?.firstSeen,
+              firstVisibleSessionCheckInTime: tableRows[0]?.checkInTime,
+            }, null, 2)}
+          </pre>
+        </section>
+      ) : null}
+    </>
+  )
 }
 
 export const AttendanceLivePage = () => {
@@ -185,56 +334,24 @@ export const AttendanceLivePage = () => {
   })), [summary?.sessions, liveWorkerRows, nowTick])
 
   const tableRows = visibleSessions
-  const dailyAttendance = summary
-  const attendanceKpiValues = useMemo(() => {
-    const apiActiveWorkers = Number(dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-    const apiTodaySeen = Number(dailyAttendance?.totalWorkersCheckedIn ?? dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-    const apiConfirmedCheckouts = Number(dailyAttendance?.closedSessionsCount ?? 0)
-    const apiTotalMinutes = Math.round(Number(dailyAttendance?.totalWorkedHours ?? 0) * 60)
-    const rowValues = deriveLiveAttendanceCards(tableRows, nowTick)
-
-    return {
-      activeWorkers: (tableRows.length > 0 ? rowValues.activeWorkers : apiActiveWorkers) || apiActiveWorkers,
-      todaySeen: (tableRows.length > 0 ? rowValues.todaySeen : apiTodaySeen) || apiTodaySeen,
-      confirmedCheckouts: tableRows.length > 0 ? rowValues.confirmedCheckouts : apiConfirmedCheckouts,
-      totalMinutes: (tableRows.length > 0 ? rowValues.totalWorkedMinutes : apiTotalMinutes) || apiTotalMinutes,
-    }
-  }, [tableRows, nowTick, dailyAttendance, liveStatus])
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   useEffect(() => {
     if (!showDebug) return
     console.warn('[LiveAttendance DEBUG]', {
       liveStatusResponse: liveStatus,
-      dailyResponse: dailyAttendance,
+      dailyResponse: summary,
       tableRows,
       visibleSessionsCount: tableRows.length,
       firstTableRow: tableRows[0],
-      attendanceKpiValues,
       nowTick,
     })
-  }, [tableRows, attendanceKpiValues, nowTick, liveStatus, dailyAttendance])
+  }, [tableRows, nowTick, liveStatus, summary])
 
   useEffect(() => {
-    if (tableRows.length > 0 && attendanceKpiValues.todaySeen === 0) {
-      console.error('[LiveAttendance BUG] tableRows exist but cards are zero', {
-        tableRows,
-        firstTableRow: tableRows[0],
-        attendanceKpiValues,
-        liveStatusResponse: liveStatus,
-        dailyResponse: dailyAttendance,
-        nowTick,
-      })
-    }
-  }, [tableRows, attendanceKpiValues, liveStatus, dailyAttendance, nowTick])
-
-  useEffect(() => {
-    if (!debugLive || attendanceKpiValues.activeWorkers <= 0) return
+    if (!debugLive) return
     console.warn('[LiveAttendance BUILD]', ATTENDANCE_LIVE_BUILD_MARKER)
-    console.warn('[LiveAttendance KPI render check]', {
-      attendanceKpiValues,
-    })
-  }, [attendanceKpiValues])
+  }, [])
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -321,100 +438,15 @@ export const AttendanceLivePage = () => {
         />
       )}
 
-      <section className="kpi-grid">
-        <div className="kpi-card kpi-green">
-          <div className="kpi-top">
-            <span className="kpi-icon"><TeamOutlined /></span>
-            <span className="kpi-title">Aktiv işçi</span>
-          </div>
-          <div className="kpi-value">{attendanceKpiValues.activeWorkers}</div>
-          <div className="kpi-trend">↑ checkout olmayan sessiya</div>
-          {debugLive ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>RAW INLINE KPI</div>
-              <div>activeWorkers = {attendanceKpiValues.activeWorkers}</div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="kpi-card kpi-blue">
-          <div className="kpi-top">
-            <span className="kpi-icon"><LoginOutlined /></span>
-            <span className="kpi-title">Bugün görünən</span>
-          </div>
-          <div className="kpi-value">{attendanceKpiValues.todaySeen}</div>
-          <div className="kpi-trend">↑ {dailyAttendance?.workDate || requestedDate || bakuIsoDate()}</div>
-          {debugLive ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>RAW INLINE KPI</div>
-              <div>todaySeen = {attendanceKpiValues.todaySeen}</div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="kpi-card kpi-orange">
-          <div className="kpi-top">
-            <span className="kpi-icon"><LogoutOutlined /></span>
-            <span className="kpi-title">Təsdiqli çıxış</span>
-          </div>
-          <div className="kpi-value">{attendanceKpiValues.confirmedCheckouts}</div>
-          <div className="kpi-trend">↑ exit cihazı/manual</div>
-          {debugLive ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>RAW INLINE KPI</div>
-              <div>confirmedCheckouts = {attendanceKpiValues.confirmedCheckouts}</div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="kpi-card kpi-purple">
-          <div className="kpi-top">
-            <span className="kpi-icon"><ClockCircleOutlined /></span>
-            <span className="kpi-title">Toplam saat</span>
-          </div>
-          <div className="kpi-value">{formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}</div>
-          <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
-          {debugLive ? (
-            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>RAW INLINE KPI</div>
-              <div>totalMinutes = {attendanceKpiValues.totalMinutes}</div>
-              <div>formatted = {formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}</div>
-            </div>
-          ) : null}
-        </div>
-      </section>
-
-      {showDebug && (
-        <section className="table-card">
-          <div className="card-heading">
-            <h2>Live debug</h2>
-            <Tag color="orange">?debugLive=1</Tag>
-          </div>
-          <Alert type="info" showIcon message={`Build marker: ${ATTENDANCE_LIVE_BUILD_MARKER}`} />
-          <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
-            {JSON.stringify({
-              buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
-              rawInlineKpiSource: 'attendanceKpiValues-direct-jsx',
-              visibleSessionsLength: tableRows.length,
-              dailyActiveWorkersCount: dailyAttendance?.activeWorkersCount ?? null,
-              dailyTotalWorkersCheckedIn: dailyAttendance?.totalWorkersCheckedIn ?? null,
-              dailyTotalWorkedHours: dailyAttendance?.totalWorkedHours ?? null,
-              liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount ?? null,
-              attendanceKpiValues,
-              renderedActiveValue: attendanceKpiValues.activeWorkers,
-              renderedTodaySeenValue: attendanceKpiValues.todaySeen,
-              renderedTotalMinutesValue: attendanceKpiValues.totalMinutes,
-              firstVisibleSessionWorkerName: tableRows[0]?.workerName ?? null,
-              firstVisibleSessionFirstSeen: (tableRows[0] as unknown as { firstSeen?: string })?.firstSeen ?? null,
-              firstVisibleSessionCheckInTime: tableRows[0]?.checkInTime ?? null,
-            }, null, 2)}
-          </pre>
-        </section>
-      )}
+      <AttendanceLiveKpiPanel
+        tableRows={tableRows}
+        nowTick={nowTick}
+        dailyAttendance={summary}
+        liveStatus={liveStatus}
+        requestedDate={requestedDate}
+        securityEventsCount={securityEventsCount}
+        showDebug={showDebug}
+      />
 
       <section className="table-card">
         <div className="card-heading">
