@@ -197,6 +197,7 @@ body {
 
 main,
 .layout-content,
+.main-content,
 .page-content,
 .dashboard-content {
   min-height: 100vh;
