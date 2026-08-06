@@ -1,12 +1,27 @@
-﻿import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
 import { Alert, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
-import { buildTrackBackendApi, type AttendanceDailySummary, type AttendanceLiveStatus, type AttendanceSessionRow, type AttendanceSnapshotRow, type BackendSite } from '../../services/api/buildTrackBackendApi'
+import {
+  buildTrackBackendApi,
+  type AttendanceDailySummary,
+  type AttendanceLiveStatus,
+  type AttendanceSessionRow,
+  type AttendanceSnapshotRow,
+  type BackendSite,
+} from '../../services/api/buildTrackBackendApi'
 import { calculateLiveWorkedMinutes, formatLiveDuration, formatLiveTotalDuration } from './attendanceLiveCalculations'
+
+const debugLive = typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('debugLive') === '1'
+
+const showDebug =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true' ||
+  debugLive
 
 const statusColor: Record<string, string> = {
   Open: 'green',
@@ -18,37 +33,11 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
-const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
-
-const showDebug = import.meta.env.DEV
-  || import.meta.env.VITE_SHOW_ATTENDANCE_DEBUG === 'true'
-  || debugLive
-
 const sourceLabel = (source: string) => {
   if (source === 'dahua_active_register') return 'Active Register'
   if (source === 'dahua_cgi_polling') return 'CGI polling'
   if (source === 'attendance_live_status') return 'Live status'
   return source
-}
-
-const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPreview: (row: AttendanceSessionRow) => void }) => {
-  const [failed, setFailed] = useState(false)
-  if (!row.snapshotUrl || failed) return <span className="snapshot-placeholder">Şəkil yoxdur</span>
-
-  return (
-    <button type="button" className="snapshot-thumb-button" onClick={() => onPreview(row)} aria-label="Davamiyyət şəkillərini aç">
-      <AuthenticatedSnapshotImage
-        src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
-        alt="Davamiyyət snapshot"
-        width={84}
-        height={54}
-        className="snapshot-thumb-image"
-        placeholder={<span className="snapshot-placeholder">Şəkil yüklənir...</span>}
-        onUnavailable={() => setFailed(true)}
-      />
-      <span className="snapshot-zoom-label">Qalereya</span>
-    </button>
-  )
 }
 
 const bakuIsoDate = (date = new Date()) => {
@@ -84,6 +73,7 @@ export const AttendanceLivePage = () => {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryWorker, setGalleryWorker] = useState<AttendanceSessionRow | null>(null)
   const [gallerySnapshots, setGallerySnapshots] = useState<AttendanceSnapshotRow[]>([])
+  const [failedSnapshotRows, setFailedSnapshotRows] = useState<Set<string>>(() => new Set())
   const [nowTick, setNowTick] = useState(() => Date.now())
 
   const loadSites = async () => {
@@ -102,13 +92,17 @@ export const AttendanceLivePage = () => {
     setLoading(true)
     setError('')
     setRequestedSiteId(selectedSiteId)
+
     try {
       const status = await buildTrackBackendApi.getAttendanceLiveStatus(selectedSiteId)
       setLiveStatus(status)
+
       const date = status.workDate ?? bakuIsoDate()
       setRequestedDate(date)
+
       const dailySummary = await buildTrackBackendApi.getAttendanceDaily(selectedSiteId, date)
       setSummary(dailySummary)
+
       try {
         const securityEvents = await buildTrackBackendApi.getSecurityEvents(selectedSiteId, date)
         setSecurityEventsCount(securityEvents.filter((event) => event.status === 'Open').length)
@@ -116,8 +110,7 @@ export const AttendanceLivePage = () => {
         setSecurityEventsCount(0)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Canlı davamiyyət sessiyaları yüklənmədi'
-      setError(message)
+      setError(err instanceof Error ? err.message : 'Canlı davamiyyət sessiyaları yüklənmədi')
       setLiveStatus(undefined)
       setSummary(undefined)
       setSecurityEventsCount(0)
@@ -145,48 +138,45 @@ export const AttendanceLivePage = () => {
   useEffect(() => {
     const refreshAfterSimulatorEvent = (event: Event) => {
       const customEvent = event as CustomEvent<{ siteId?: string }>
-      if (!customEvent.detail?.siteId || customEvent.detail.siteId === siteId) void loadSessions(customEvent.detail?.siteId ?? siteId)
+      if (!customEvent.detail?.siteId || customEvent.detail.siteId === siteId) {
+        void loadSessions(customEvent.detail?.siteId ?? siteId)
+      }
     }
 
     window.addEventListener('buildtrack:attendance-event-created', refreshAfterSimulatorEvent)
     return () => window.removeEventListener('buildtrack:attendance-event-created', refreshAfterSimulatorEvent)
   }, [siteId])
 
-  const siteNameById = useMemo(() => new Map(sites.map((site) => [site.id, site.name])), [sites])
-  const siteOptions = useMemo(() => {
-    return sites.map((site) => ({ label: site.name, value: site.id }))
-  }, [sites])
+  const siteNameById = new Map(sites.map((site) => [site.id, site.name]))
+  const siteOptions = sites.map((site) => ({ label: site.name, value: site.id }))
 
-  const liveWorkerRows: AttendanceSessionRow[] = useMemo(() => {
-    return (liveStatus?.workers ?? []).map((worker) => ({
-      id: `live-${worker.workerExternalId}-${worker.checkInTime}`,
-      workerExternalId: worker.workerExternalId,
-      workerName: worker.workerName,
-      checkInTime: worker.checkInTime,
-      checkOutTime: worker.confirmedCheckOutTime,
-      checkInTimeLocal: worker.checkInTimeLocal,
-      checkOutTimeLocal: worker.confirmedCheckOutTimeLocal,
-      lastSeenTime: worker.lastSeenTime,
-      lastSeenTimeLocal: worker.lastSeenTimeLocal,
-      confirmedCheckOutTime: worker.confirmedCheckOutTime,
-      confirmedCheckOutTimeLocal: worker.confirmedCheckOutTimeLocal,
-      closeReason: worker.closeReason,
-      displayStatus: worker.displayStatus,
-      isCheckoutConfirmed: worker.isCheckoutConfirmed,
-      workedMinutes: worker.workedMinutesSoFar,
-      status: worker.status,
-      source: 'attendance_live_status',
-    }))
-  }, [liveStatus?.workers])
+  const liveWorkerRows: AttendanceSessionRow[] = (liveStatus?.workers ?? []).map((worker) => ({
+    id: `live-${worker.workerExternalId}-${worker.checkInTime}`,
+    workerExternalId: worker.workerExternalId,
+    workerName: worker.workerName,
+    checkInTime: worker.checkInTime,
+    checkOutTime: worker.confirmedCheckOutTime,
+    checkInTimeLocal: worker.checkInTimeLocal,
+    checkOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+    lastSeenTime: worker.lastSeenTime,
+    lastSeenTimeLocal: worker.lastSeenTimeLocal,
+    confirmedCheckOutTime: worker.confirmedCheckOutTime,
+    confirmedCheckOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+    closeReason: worker.closeReason,
+    displayStatus: worker.displayStatus,
+    isCheckoutConfirmed: worker.isCheckoutConfirmed,
+    workedMinutes: worker.workedMinutesSoFar,
+    status: worker.status,
+    source: 'attendance_live_status',
+  }))
 
-  const visibleSessions = useMemo(() => {
-    return (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
-      ...session,
-      workedMinutes: calculateLiveWorkedMinutes(session, nowTick),
-    }))
-  }, [summary?.sessions, liveWorkerRows, nowTick])
+  const visibleSessions = (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
+    ...session,
+    workedMinutes: calculateLiveWorkedMinutes(session, nowTick),
+  }))
 
   const tableRows = visibleSessions
+
   const rowTotalMinutes = tableRows.reduce(
     (sum, row) => sum + calculateLiveWorkedMinutes(row, nowTick),
     0,
@@ -206,7 +196,8 @@ export const AttendanceLivePage = () => {
   const confirmedCheckoutsKpi = Number(summary?.closedSessionsCount ?? 0)
   const totalMinutesKpi = Math.max(apiTotalMinutes, rowTotalMinutes)
   const totalDurationKpi = formatLiveTotalDuration(totalMinutesKpi)
-  const liveBuildMarker = 'clean-live-kpi-v3'
+  const liveBuildMarker = 'clean-rewrite-live-v4'
+
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   useEffect(() => {
@@ -223,8 +214,8 @@ export const AttendanceLivePage = () => {
 
   useEffect(() => {
     if (!debugLive) return
-    console.warn('[LiveAttendance BUILD]', 'clean-live-kpi-v3')
-  }, [])
+    console.warn('[LiveAttendance BUILD]', liveBuildMarker)
+  }, [liveBuildMarker])
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -232,6 +223,7 @@ export const AttendanceLivePage = () => {
     setGalleryOpen(true)
     setGalleryLoading(true)
     setGallerySnapshots([])
+
     try {
       const snapshots = await buildTrackBackendApi.getAttendanceSnapshots(siteId, row.workerExternalId, requestedDate)
       setGallerySnapshots(snapshots)
@@ -249,6 +241,33 @@ export const AttendanceLivePage = () => {
     setGallerySnapshots([])
   }
 
+  const renderSnapshotThumbnail = (row: AttendanceSessionRow) => {
+    if (!row.snapshotUrl || failedSnapshotRows.has(row.id)) {
+      return <span className="snapshot-placeholder">Şəkil yoxdur</span>
+    }
+
+    return (
+      <button type="button" className="snapshot-thumb-button" onClick={() => openSnapshotGallery(row)} aria-label="Davamiyyət şəkillərini aç">
+        <AuthenticatedSnapshotImage
+          src={buildTrackBackendApi.attendanceSnapshotUrl(row.snapshotUrl)}
+          alt="Davamiyyət snapshot"
+          width={84}
+          height={54}
+          className="snapshot-thumb-image"
+          placeholder={<span className="snapshot-placeholder">Şəkil yüklənir...</span>}
+          onUnavailable={() => {
+            setFailedSnapshotRows((current) => {
+              const next = new Set(current)
+              next.add(row.id)
+              return next
+            })
+          }}
+        />
+        <span className="snapshot-zoom-label">Qalereya</span>
+      </button>
+    )
+  }
+
   const columns: TableColumnsType<AttendanceSessionRow> = [
     {
       title: 'İşçi',
@@ -264,7 +283,7 @@ export const AttendanceLivePage = () => {
     { title: 'Təsdiqli çıxış', dataIndex: 'confirmedCheckOutTimeLocal', render: (value) => value ?? 'Yoxdur' },
     { title: 'Status', dataIndex: 'displayStatus', render: (value, row) => <Tag color={statusColor[row.status] ?? 'default'}>{value ?? statusLabel[row.status] ?? row.status}</Tag> },
     { title: 'Metod', dataIndex: 'method', render: (value) => value ? <Tag color={value === 'Face' ? 'green' : 'blue'}>{value}</Tag> : '-' },
-    { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => <SnapshotThumbnail row={row} onPreview={openSnapshotGallery} /> },
+    { title: 'Şəkil', dataIndex: 'snapshotUrl', render: (_, row) => renderSnapshotThumbnail(row) },
     { title: 'İş müddəti', dataIndex: 'workedMinutes', sorter: (a, b) => a.workedMinutes - b.workedMinutes, render: (_, row) => formatLiveDuration(calculateLiveWorkedMinutes(row, nowTick)) },
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
@@ -313,7 +332,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN KPI V3</div>
+              <div>CLEAN REWRITE V4</div>
               <div>activeWorkersKpi = {activeWorkersKpi}</div>
             </div>
           ) : null}
@@ -329,7 +348,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN KPI V3</div>
+              <div>CLEAN REWRITE V4</div>
               <div>todaySeenKpi = {todaySeenKpi}</div>
             </div>
           ) : null}
@@ -345,7 +364,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN KPI V3</div>
+              <div>CLEAN REWRITE V4</div>
               <div>confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
             </div>
           ) : null}
@@ -361,7 +380,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN KPI V3</div>
+              <div>CLEAN REWRITE V4</div>
               <div>totalMinutesKpi = {totalMinutesKpi}</div>
               <div>totalDurationKpi = {totalDurationKpi}</div>
             </div>
@@ -379,7 +398,7 @@ export const AttendanceLivePage = () => {
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {JSON.stringify({
               buildMarker: liveBuildMarker,
-              kpiSource: 'clean-parent-direct-v3',
+              kpiSource: 'clean-full-file-rewrite-v4',
               requestedSiteId,
               requestedDate,
               tableRowsLength: tableRows.length,

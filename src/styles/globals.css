@@ -46,7 +46,8 @@ a {
 }
 
 html,
-body {
+body,
+#root {
   min-height: 100%;
   overflow-x: hidden;
 }
@@ -55,13 +56,13 @@ body {
   overflow-y: auto;
 }
 
-#root {
-  min-height: 100%;
+.app-shell,
+.app-layout {
+  min-height: 100vh;
 }
 
 .app-shell {
   display: flex;
-  min-height: 100vh;
 }
 
 .app-sidebar {
