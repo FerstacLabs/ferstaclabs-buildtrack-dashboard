@@ -1,7 +1,7 @@
 ﻿import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
 import { Alert, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
@@ -18,7 +18,7 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
-const ATTENDANCE_LIVE_BUILD_MARKER = 'kpi-render-fix-08f4aa4'
+const ATTENDANCE_LIVE_BUILD_MARKER = 'raw-inline-kpi-313c2eb-fix'
 
 const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
 
@@ -50,40 +50,6 @@ const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPr
       />
       <span className="snapshot-zoom-label">Qalereya</span>
     </button>
-  )
-}
-
-function LiveAttendanceKpiCard({
-  debugLabel,
-  icon,
-  subtitle,
-  title,
-  tone,
-  value,
-}: {
-  debugLabel?: string
-  icon?: ReactNode
-  subtitle?: ReactNode
-  title: string
-  tone: 'blue' | 'green' | 'orange' | 'purple'
-  value: ReactNode
-}) {
-  return (
-  <div className={`kpi-card kpi-${tone}`}>
-    <div className="kpi-top">
-      {icon ? <span className="kpi-icon">{icon}</span> : null}
-      <span className="kpi-title">{title}</span>
-    </div>
-    <div className="kpi-value">{value}</div>
-    {subtitle ? <div className="kpi-trend">↑ {subtitle}</div> : null}
-    {debugLive && debugLabel ? (
-      <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-        <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-        <div>debug: {debugLabel}</div>
-        <div>rendered value = {String(value)}</div>
-      </div>
-    ) : null}
-  </div>
   )
 }
 
@@ -356,38 +322,70 @@ export const AttendanceLivePage = () => {
       )}
 
       <section className="kpi-grid">
-        <LiveAttendanceKpiCard
-          debugLabel={`activeWorkers=${attendanceKpiValues.activeWorkers}`}
-          icon={<TeamOutlined />}
-          title="Aktiv işçi"
-          value={attendanceKpiValues.activeWorkers}
-          subtitle="checkout olmayan sessiya"
-          tone="green"
-        />
-        <LiveAttendanceKpiCard
-          debugLabel={`todaySeen=${attendanceKpiValues.todaySeen}`}
-          icon={<LoginOutlined />}
-          title="Bugün görünən"
-          value={attendanceKpiValues.todaySeen}
-          subtitle={dailyAttendance?.workDate || requestedDate || bakuIsoDate()}
-          tone="blue"
-        />
-        <LiveAttendanceKpiCard
-          debugLabel={`confirmedCheckouts=${attendanceKpiValues.confirmedCheckouts}`}
-          icon={<LogoutOutlined />}
-          title="Təsdiqli çıxış"
-          value={attendanceKpiValues.confirmedCheckouts}
-          subtitle="exit cihazı/manual"
-          tone="orange"
-        />
-        <LiveAttendanceKpiCard
-          debugLabel={`totalMinutes=${attendanceKpiValues.totalMinutes}`}
-          icon={<ClockCircleOutlined />}
-          title="Toplam saat"
-          value={formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}
-          subtitle="bugünkü işlənmiş vaxt"
-          tone="purple"
-        />
+        <div className="kpi-card kpi-green">
+          <div className="kpi-top">
+            <span className="kpi-icon"><TeamOutlined /></span>
+            <span className="kpi-title">Aktiv işçi</span>
+          </div>
+          <div className="kpi-value">{attendanceKpiValues.activeWorkers}</div>
+          <div className="kpi-trend">↑ checkout olmayan sessiya</div>
+          {debugLive ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>RAW INLINE KPI</div>
+              <div>activeWorkers = {attendanceKpiValues.activeWorkers}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-blue">
+          <div className="kpi-top">
+            <span className="kpi-icon"><LoginOutlined /></span>
+            <span className="kpi-title">Bugün görünən</span>
+          </div>
+          <div className="kpi-value">{attendanceKpiValues.todaySeen}</div>
+          <div className="kpi-trend">↑ {dailyAttendance?.workDate || requestedDate || bakuIsoDate()}</div>
+          {debugLive ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>RAW INLINE KPI</div>
+              <div>todaySeen = {attendanceKpiValues.todaySeen}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-orange">
+          <div className="kpi-top">
+            <span className="kpi-icon"><LogoutOutlined /></span>
+            <span className="kpi-title">Təsdiqli çıxış</span>
+          </div>
+          <div className="kpi-value">{attendanceKpiValues.confirmedCheckouts}</div>
+          <div className="kpi-trend">↑ exit cihazı/manual</div>
+          {debugLive ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>RAW INLINE KPI</div>
+              <div>confirmedCheckouts = {attendanceKpiValues.confirmedCheckouts}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="kpi-card kpi-purple">
+          <div className="kpi-top">
+            <span className="kpi-icon"><ClockCircleOutlined /></span>
+            <span className="kpi-title">Toplam saat</span>
+          </div>
+          <div className="kpi-value">{formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}</div>
+          <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
+          {debugLive ? (
+            <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
+              <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
+              <div>RAW INLINE KPI</div>
+              <div>totalMinutes = {attendanceKpiValues.totalMinutes}</div>
+              <div>formatted = {formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}</div>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {showDebug && (
@@ -400,6 +398,7 @@ export const AttendanceLivePage = () => {
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {JSON.stringify({
               buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
+              rawInlineKpiSource: 'attendanceKpiValues-direct-jsx',
               visibleSessionsLength: tableRows.length,
               dailyActiveWorkersCount: dailyAttendance?.activeWorkersCount ?? null,
               dailyTotalWorkersCheckedIn: dailyAttendance?.totalWorkersCheckedIn ?? null,
