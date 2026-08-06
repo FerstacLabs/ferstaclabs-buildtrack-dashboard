@@ -32,6 +32,11 @@ export const AppLayout = () => {
   }, [loadData])
 
   useEffect(() => {
+    document.body.style.overflow = ''
+    document.documentElement.style.overflow = ''
+  }, [location.pathname])
+
+  useEffect(() => {
     if (!isAuthenticated || !tenant || tenant.code.toUpperCase() === 'DEMO') return
     let cancelled = false
 

@@ -1,7 +1,7 @@
 import { ClockCircleOutlined, LoginOutlined, LogoutOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/icons'
 import { Alert, Modal, Select, Space, Table, Tag, Tooltip, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { AuthenticatedSnapshotImage } from '../../components/ui/AuthenticatedSnapshotImage'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
@@ -196,7 +196,45 @@ export const AttendanceLivePage = () => {
   const confirmedCheckoutsKpi = Number(summary?.closedSessionsCount ?? 0)
   const totalMinutesKpi = Math.max(apiTotalMinutes, rowTotalMinutes)
   const totalDurationKpi = formatLiveTotalDuration(totalMinutesKpi)
-  const liveBuildMarker = 'clean-rewrite-live-v4'
+  const liveBuildMarker = 'live-kpi-dom-sync-v5'
+
+  useLayoutEffect(() => {
+    const setText = (id: string, value: string | number) => {
+      const element = document.getElementById(id)
+      if (element && element.textContent !== String(value)) {
+        element.textContent = String(value)
+      }
+    }
+
+    setText('live-kpi-active-workers-value', activeWorkersKpi)
+    setText('live-kpi-active-workers-debug', `activeWorkersKpi = ${activeWorkersKpi}`)
+
+    setText('live-kpi-today-seen-value', todaySeenKpi)
+    setText('live-kpi-today-seen-debug', `todaySeenKpi = ${todaySeenKpi}`)
+
+    setText('live-kpi-confirmed-checkouts-value', confirmedCheckoutsKpi)
+    setText('live-kpi-confirmed-checkouts-debug', `confirmedCheckoutsKpi = ${confirmedCheckoutsKpi}`)
+
+    setText('live-kpi-total-duration-value', totalDurationKpi)
+    setText('live-kpi-total-duration-debug', `totalMinutesKpi = ${totalMinutesKpi}`)
+    setText('live-kpi-total-duration-text-debug', `totalDurationKpi = ${totalDurationKpi}`)
+
+    if (showDebug) {
+      console.warn('[LiveAttendance KPI DOM SYNC]', {
+        activeWorkersKpi,
+        todaySeenKpi,
+        confirmedCheckoutsKpi,
+        totalMinutesKpi,
+        totalDurationKpi,
+      })
+    }
+  }, [
+    activeWorkersKpi,
+    todaySeenKpi,
+    confirmedCheckoutsKpi,
+    totalMinutesKpi,
+    totalDurationKpi,
+  ])
 
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
@@ -321,19 +359,25 @@ export const AttendanceLivePage = () => {
         {siteId && <Tag color="blue">Obyekt: {siteNameById.get(siteId) ?? siteId}</Tag>}
       </section>
 
-      <section className="kpi-grid" data-build-marker={liveBuildMarker}>
+      <section className="kpi-grid live-attendance-kpi-grid" data-build-marker={liveBuildMarker}>
         <div className="kpi-card kpi-green">
           <div className="kpi-top">
             <span className="kpi-icon"><TeamOutlined /></span>
             <span className="kpi-title">Aktiv işçi</span>
           </div>
-          <div className="kpi-value" data-testid="live-active-workers">{activeWorkersKpi}</div>
+          <div
+            id="live-kpi-active-workers-value"
+            className="kpi-value"
+            data-testid="live-active-workers"
+          >
+            {activeWorkersKpi}
+          </div>
           <div className="kpi-trend">↑ checkout olmayan sessiya</div>
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN REWRITE V4</div>
-              <div>activeWorkersKpi = {activeWorkersKpi}</div>
+              <div>DOM SYNC V5</div>
+              <div id="live-kpi-active-workers-debug">activeWorkersKpi = {activeWorkersKpi}</div>
             </div>
           ) : null}
         </div>
@@ -343,13 +387,19 @@ export const AttendanceLivePage = () => {
             <span className="kpi-icon"><LoginOutlined /></span>
             <span className="kpi-title">Bugün görünən</span>
           </div>
-          <div className="kpi-value" data-testid="live-today-seen">{todaySeenKpi}</div>
+          <div
+            id="live-kpi-today-seen-value"
+            className="kpi-value"
+            data-testid="live-today-seen"
+          >
+            {todaySeenKpi}
+          </div>
           <div className="kpi-trend">↑ {summary?.workDate || requestedDate || bakuIsoDate()}</div>
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN REWRITE V4</div>
-              <div>todaySeenKpi = {todaySeenKpi}</div>
+              <div>DOM SYNC V5</div>
+              <div id="live-kpi-today-seen-debug">todaySeenKpi = {todaySeenKpi}</div>
             </div>
           ) : null}
         </div>
@@ -359,13 +409,19 @@ export const AttendanceLivePage = () => {
             <span className="kpi-icon"><LogoutOutlined /></span>
             <span className="kpi-title">Təsdiqli çıxış</span>
           </div>
-          <div className="kpi-value" data-testid="live-confirmed-checkouts">{confirmedCheckoutsKpi}</div>
+          <div
+            id="live-kpi-confirmed-checkouts-value"
+            className="kpi-value"
+            data-testid="live-confirmed-checkouts"
+          >
+            {confirmedCheckoutsKpi}
+          </div>
           <div className="kpi-trend">↑ exit cihazı/manual</div>
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN REWRITE V4</div>
-              <div>confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
+              <div>DOM SYNC V5</div>
+              <div id="live-kpi-confirmed-checkouts-debug">confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
             </div>
           ) : null}
         </div>
@@ -375,14 +431,20 @@ export const AttendanceLivePage = () => {
             <span className="kpi-icon"><ClockCircleOutlined /></span>
             <span className="kpi-title">Toplam saat</span>
           </div>
-          <div className="kpi-value" data-testid="live-total-duration">{totalDurationKpi}</div>
+          <div
+            id="live-kpi-total-duration-value"
+            className="kpi-value"
+            data-testid="live-total-duration"
+          >
+            {totalDurationKpi}
+          </div>
           <div className="kpi-trend">↑ bugünkü işlənmiş vaxt</div>
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>CLEAN REWRITE V4</div>
-              <div>totalMinutesKpi = {totalMinutesKpi}</div>
-              <div>totalDurationKpi = {totalDurationKpi}</div>
+              <div>DOM SYNC V5</div>
+              <div id="live-kpi-total-duration-debug">totalMinutesKpi = {totalMinutesKpi}</div>
+              <div id="live-kpi-total-duration-text-debug">totalDurationKpi = {totalDurationKpi}</div>
             </div>
           ) : null}
         </div>
