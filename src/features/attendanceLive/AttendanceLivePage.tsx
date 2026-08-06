@@ -51,37 +51,38 @@ const SnapshotThumbnail = ({ row, onPreview }: { row: AttendanceSessionRow; onPr
   )
 }
 
-const LiveAttendanceKpiCard = ({
+function LiveAttendanceKpiCard({
   debugLabel,
-  debugValue,
   icon,
+  subtitle,
   title,
   tone,
-  trend,
   value,
 }: {
-  debugLabel: string
-  debugValue: string | number
-  icon: ReactNode
+  debugLabel?: string
+  icon?: ReactNode
+  subtitle?: ReactNode
   title: string
   tone: 'blue' | 'green' | 'orange' | 'purple'
-  trend: string
-  value: string | number
-}) => (
+  value: ReactNode
+}) {
+  return (
   <div className={`kpi-card kpi-${tone}`}>
     <div className="kpi-top">
-      <span className="kpi-icon">{icon}</span>
+      {icon ? <span className="kpi-icon">{icon}</span> : null}
       <span className="kpi-title">{title}</span>
     </div>
     <div className="kpi-value">{value}</div>
-    <div className="kpi-trend">↑ {trend}</div>
-    {debugLive && (
+    {subtitle ? <div className="kpi-trend">↑ {subtitle}</div> : null}
+    {debugLive && debugLabel ? (
       <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
-        debug: {debugLabel}={debugValue}
+        <div>debug: {debugLabel}</div>
+        <div>rendered value = {String(value)}</div>
       </div>
-    )}
+    ) : null}
   </div>
-)
+  )
+}
 
 const bakuIsoDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -216,20 +217,20 @@ export const AttendanceLivePage = () => {
 
   const tableRows = visibleSessions
   const dailyAttendance = summary
-  const finalAttendanceCards = useMemo(() => deriveLiveAttendanceCards(tableRows, nowTick, {
-    activeWorkers: dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0,
-    todaySeen: dailyAttendance?.totalWorkersCheckedIn ?? dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0,
-    confirmedCheckouts: dailyAttendance?.closedSessionsCount ?? 0,
-    totalWorkedMinutes: Math.round((dailyAttendance?.totalWorkedHours ?? 0) * 60),
-  }), [tableRows, nowTick, dailyAttendance, liveStatus])
-  const displayActiveWorkers = finalAttendanceCards.activeWorkers
-    || Number(dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-  const displayTodaySeen = finalAttendanceCards.todaySeen
-    || Number(dailyAttendance?.totalWorkersCheckedIn ?? dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-  const displayConfirmedCheckouts = finalAttendanceCards.confirmedCheckouts
-    || Number(dailyAttendance?.closedSessionsCount ?? 0)
-  const displayTotalMinutes = finalAttendanceCards.totalWorkedMinutes
-    || Math.round(Number(dailyAttendance?.totalWorkedHours ?? 0) * 60)
+  const attendanceKpiValues = useMemo(() => {
+    const apiActiveWorkers = Number(dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
+    const apiTodaySeen = Number(dailyAttendance?.totalWorkersCheckedIn ?? dailyAttendance?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
+    const apiConfirmedCheckouts = Number(dailyAttendance?.closedSessionsCount ?? 0)
+    const apiTotalMinutes = Math.round(Number(dailyAttendance?.totalWorkedHours ?? 0) * 60)
+    const rowValues = deriveLiveAttendanceCards(tableRows, nowTick)
+
+    return {
+      activeWorkers: (tableRows.length > 0 ? rowValues.activeWorkers : apiActiveWorkers) || apiActiveWorkers,
+      todaySeen: (tableRows.length > 0 ? rowValues.todaySeen : apiTodaySeen) || apiTodaySeen,
+      confirmedCheckouts: tableRows.length > 0 ? rowValues.confirmedCheckouts : apiConfirmedCheckouts,
+      totalMinutes: (tableRows.length > 0 ? rowValues.totalWorkedMinutes : apiTotalMinutes) || apiTotalMinutes,
+    }
+  }, [tableRows, nowTick, dailyAttendance, liveStatus])
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   useEffect(() => {
@@ -240,45 +241,30 @@ export const AttendanceLivePage = () => {
       tableRows,
       visibleSessionsCount: tableRows.length,
       firstTableRow: tableRows[0],
-      finalAttendanceCards,
-      displayCards: {
-        activeWorkers: displayActiveWorkers,
-        todaySeen: displayTodaySeen,
-        confirmedCheckouts: displayConfirmedCheckouts,
-        totalWorkedMinutes: displayTotalMinutes,
-      },
+      attendanceKpiValues,
       nowTick,
     })
-  }, [tableRows, finalAttendanceCards, displayActiveWorkers, displayTodaySeen, displayConfirmedCheckouts, displayTotalMinutes, nowTick, liveStatus, dailyAttendance])
+  }, [tableRows, attendanceKpiValues, nowTick, liveStatus, dailyAttendance])
 
   useEffect(() => {
-    if (tableRows.length > 0 && displayTodaySeen === 0) {
+    if (tableRows.length > 0 && attendanceKpiValues.todaySeen === 0) {
       console.error('[LiveAttendance BUG] tableRows exist but cards are zero', {
         tableRows,
         firstTableRow: tableRows[0],
-        finalAttendanceCards,
-        displayCards: {
-          activeWorkers: displayActiveWorkers,
-          todaySeen: displayTodaySeen,
-          confirmedCheckouts: displayConfirmedCheckouts,
-          totalWorkedMinutes: displayTotalMinutes,
-        },
+        attendanceKpiValues,
         liveStatusResponse: liveStatus,
         dailyResponse: dailyAttendance,
         nowTick,
       })
     }
-  }, [tableRows, finalAttendanceCards, displayActiveWorkers, displayTodaySeen, displayConfirmedCheckouts, displayTotalMinutes, liveStatus, dailyAttendance, nowTick])
+  }, [tableRows, attendanceKpiValues, liveStatus, dailyAttendance, nowTick])
 
   useEffect(() => {
-    if (!debugLive || displayActiveWorkers <= 0) return
+    if (!debugLive || attendanceKpiValues.activeWorkers <= 0) return
     console.warn('[LiveAttendance KPI render check]', {
-      displayActiveWorkers,
-      displayTodaySeen,
-      displayConfirmedCheckouts,
-      displayTotalMinutes,
+      attendanceKpiValues,
     })
-  }, [displayActiveWorkers, displayTodaySeen, displayConfirmedCheckouts, displayTotalMinutes])
+  }, [attendanceKpiValues])
 
   const openSnapshotGallery = async (row: AttendanceSessionRow) => {
     if (!siteId || !requestedDate) return
@@ -367,39 +353,35 @@ export const AttendanceLivePage = () => {
 
       <section className="kpi-grid">
         <LiveAttendanceKpiCard
-          debugLabel="displayActiveWorkers"
-          debugValue={displayActiveWorkers}
+          debugLabel={`activeWorkers=${attendanceKpiValues.activeWorkers}`}
           icon={<TeamOutlined />}
           title="Aktiv işçi"
-          value={displayActiveWorkers}
-          trend="checkout olmayan sessiya"
+          value={attendanceKpiValues.activeWorkers}
+          subtitle="checkout olmayan sessiya"
           tone="green"
         />
         <LiveAttendanceKpiCard
-          debugLabel="displayTodaySeen"
-          debugValue={displayTodaySeen}
+          debugLabel={`todaySeen=${attendanceKpiValues.todaySeen}`}
           icon={<LoginOutlined />}
           title="Bugün görünən"
-          value={displayTodaySeen}
-          trend={dailyAttendance?.workDate || requestedDate || bakuIsoDate()}
+          value={attendanceKpiValues.todaySeen}
+          subtitle={dailyAttendance?.workDate || requestedDate || bakuIsoDate()}
           tone="blue"
         />
         <LiveAttendanceKpiCard
-          debugLabel="displayConfirmedCheckouts"
-          debugValue={displayConfirmedCheckouts}
+          debugLabel={`confirmedCheckouts=${attendanceKpiValues.confirmedCheckouts}`}
           icon={<LogoutOutlined />}
           title="Təsdiqli çıxış"
-          value={displayConfirmedCheckouts}
-          trend="exit cihazı/manual"
+          value={attendanceKpiValues.confirmedCheckouts}
+          subtitle="exit cihazı/manual"
           tone="orange"
         />
         <LiveAttendanceKpiCard
-          debugLabel="displayTotalMinutes"
-          debugValue={displayTotalMinutes}
+          debugLabel={`totalMinutes=${attendanceKpiValues.totalMinutes}`}
           icon={<ClockCircleOutlined />}
           title="Toplam saat"
-          value={formatLiveTotalDuration(displayTotalMinutes)}
-          trend="bugünkü işlənmiş vaxt"
+          value={formatLiveTotalDuration(attendanceKpiValues.totalMinutes)}
+          subtitle="bugünkü işlənmiş vaxt"
           tone="purple"
         />
       </section>
@@ -417,15 +399,10 @@ export const AttendanceLivePage = () => {
               dailyTotalWorkersCheckedIn: dailyAttendance?.totalWorkersCheckedIn ?? null,
               dailyTotalWorkedHours: dailyAttendance?.totalWorkedHours ?? null,
               liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount ?? null,
-              finalActiveWorkers: finalAttendanceCards.activeWorkers,
-              finalTodaySeen: finalAttendanceCards.todaySeen,
-              finalTotalWorkedMinutes: finalAttendanceCards.totalWorkedMinutes,
-              displayActiveWorkers,
-              displayTodaySeen,
-              displayTotalMinutes,
-              renderedActiveValue: displayActiveWorkers,
-              renderedTodaySeenValue: displayTodaySeen,
-              renderedTotalMinutesValue: displayTotalMinutes,
+              attendanceKpiValues,
+              renderedActiveValue: attendanceKpiValues.activeWorkers,
+              renderedTodaySeenValue: attendanceKpiValues.todaySeen,
+              renderedTotalMinutesValue: attendanceKpiValues.totalMinutes,
               firstVisibleSessionWorkerName: tableRows[0]?.workerName ?? null,
               firstVisibleSessionFirstSeen: (tableRows[0] as unknown as { firstSeen?: string })?.firstSeen ?? null,
               firstVisibleSessionCheckInTime: tableRows[0]?.checkInTime ?? null,
