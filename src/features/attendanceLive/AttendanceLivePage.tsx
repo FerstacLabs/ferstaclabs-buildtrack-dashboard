@@ -25,6 +25,53 @@ const showDebug =
 
 const LIVE_ATTENDANCE_POLL_MS = 5000
 const LIVE_ATTENDANCE_CLOCK_MS = 5000
+const LIVE_ATTENDANCE_BUILD_MARKER = 'live-kpi-immediate-sync-v7'
+
+type LiveKpiDomValues = {
+  activeWorkersKpi: number
+  todaySeenKpi: number
+  confirmedCheckoutsKpi: number
+  totalMinutesKpi: number
+  totalDurationKpi: string
+}
+
+const syncLiveKpiText = (id: string, value: string | number) => {
+  if (typeof document === 'undefined') return
+  const selectors = [`#${id}`, `[data-live-kpi-sync="${id}"]`]
+  document.querySelectorAll<HTMLElement>(selectors.join(',')).forEach((element) => {
+    if (element.textContent !== String(value)) {
+      element.textContent = String(value)
+    }
+  })
+}
+
+const syncLiveKpiDom = (values: LiveKpiDomValues, debug = false) => {
+  syncLiveKpiText('live-kpi-active-workers-value', values.activeWorkersKpi)
+  syncLiveKpiText('live-kpi-active-workers-debug', `activeWorkersKpi = ${values.activeWorkersKpi}`)
+
+  syncLiveKpiText('live-kpi-today-seen-value', values.todaySeenKpi)
+  syncLiveKpiText('live-kpi-today-seen-debug', `todaySeenKpi = ${values.todaySeenKpi}`)
+
+  syncLiveKpiText('live-kpi-confirmed-checkouts-value', values.confirmedCheckoutsKpi)
+  syncLiveKpiText('live-kpi-confirmed-checkouts-debug', `confirmedCheckoutsKpi = ${values.confirmedCheckoutsKpi}`)
+
+  syncLiveKpiText('live-kpi-total-duration-value', values.totalDurationKpi)
+  syncLiveKpiText('live-kpi-total-duration-debug', `totalMinutesKpi = ${values.totalMinutesKpi}`)
+  syncLiveKpiText('live-kpi-total-duration-text-debug', `totalDurationKpi = ${values.totalDurationKpi}`)
+
+  if (debug) console.warn('[LiveAttendance KPI DOM SYNC]', values)
+}
+
+const scheduleLiveKpiDomSync = (values: LiveKpiDomValues, debug = false) => {
+  syncLiveKpiDom(values, debug)
+  if (typeof window === 'undefined') return
+
+  window.requestAnimationFrame(() => syncLiveKpiDom(values, debug))
+  window.setTimeout(() => syncLiveKpiDom(values, debug), 0)
+  window.setTimeout(() => syncLiveKpiDom(values, debug), 100)
+  window.setTimeout(() => syncLiveKpiDom(values, debug), 500)
+  window.setTimeout(() => syncLiveKpiDom(values, debug), 1500)
+}
 
 const statusColor: Record<string, string> = {
   Open: 'green',
@@ -106,6 +153,51 @@ export const AttendanceLivePage = () => {
 
       const dailySummary = await buildTrackBackendApi.getAttendanceDaily(selectedSiteId, date)
       setSummary(dailySummary)
+
+      const immediateRows = dailySummary.sessions.length
+        ? dailySummary.sessions
+        : status.workers.map((worker) => ({
+          id: `live-${worker.workerExternalId}-${worker.checkInTime}`,
+          workerExternalId: worker.workerExternalId,
+          workerName: worker.workerName,
+          checkInTime: worker.checkInTime,
+          checkOutTime: worker.confirmedCheckOutTime,
+          checkInTimeLocal: worker.checkInTimeLocal,
+          checkOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+          lastSeenTime: worker.lastSeenTime,
+          lastSeenTimeLocal: worker.lastSeenTimeLocal,
+          confirmedCheckOutTime: worker.confirmedCheckOutTime,
+          confirmedCheckOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+          closeReason: worker.closeReason,
+          displayStatus: worker.displayStatus,
+          isCheckoutConfirmed: worker.isCheckoutConfirmed,
+          workedMinutes: worker.workedMinutesSoFar,
+          status: worker.status,
+          source: 'attendance_live_status',
+        }))
+      const immediateRowMinutes = immediateRows.reduce(
+        (sum, row) => sum + calculateLiveWorkedMinutes(row, Date.now()),
+        0,
+      )
+      const immediateApiMinutes = Math.round(Number(dailySummary.totalWorkedHours ?? 0) * 60)
+      const immediateTotalMinutes = Math.max(immediateApiMinutes, immediateRowMinutes)
+
+      scheduleLiveKpiDomSync({
+        activeWorkersKpi: Math.max(
+          Number(dailySummary.activeWorkersCount ?? 0),
+          Number(status.activeWorkersCount ?? 0),
+          immediateRows.length > 0 ? 1 : 0,
+        ),
+        todaySeenKpi: Math.max(
+          Number(dailySummary.totalWorkersCheckedIn ?? 0),
+          Number(dailySummary.activeWorkersCount ?? 0),
+          Number(status.activeWorkersCount ?? 0),
+          immediateRows.length,
+        ),
+        confirmedCheckoutsKpi: Number(dailySummary.closedSessionsCount ?? 0),
+        totalMinutesKpi: immediateTotalMinutes,
+        totalDurationKpi: formatLiveTotalDuration(immediateTotalMinutes),
+      }, showDebug)
 
       try {
         const securityEvents = await buildTrackBackendApi.getSecurityEvents(selectedSiteId, date)
@@ -218,38 +310,16 @@ export const AttendanceLivePage = () => {
   const confirmedCheckoutsKpi = Number(summary?.closedSessionsCount ?? 0)
   const totalMinutesKpi = Math.max(apiTotalMinutes, rowTotalMinutes)
   const totalDurationKpi = formatLiveTotalDuration(totalMinutesKpi)
-  const liveBuildMarker = 'live-kpi-fast-sync-v6'
+  const liveBuildMarker = LIVE_ATTENDANCE_BUILD_MARKER
 
   useLayoutEffect(() => {
-    const setText = (id: string, value: string | number) => {
-      const element = document.getElementById(id)
-      if (element && element.textContent !== String(value)) {
-        element.textContent = String(value)
-      }
-    }
-
-    setText('live-kpi-active-workers-value', activeWorkersKpi)
-    setText('live-kpi-active-workers-debug', `activeWorkersKpi = ${activeWorkersKpi}`)
-
-    setText('live-kpi-today-seen-value', todaySeenKpi)
-    setText('live-kpi-today-seen-debug', `todaySeenKpi = ${todaySeenKpi}`)
-
-    setText('live-kpi-confirmed-checkouts-value', confirmedCheckoutsKpi)
-    setText('live-kpi-confirmed-checkouts-debug', `confirmedCheckoutsKpi = ${confirmedCheckoutsKpi}`)
-
-    setText('live-kpi-total-duration-value', totalDurationKpi)
-    setText('live-kpi-total-duration-debug', `totalMinutesKpi = ${totalMinutesKpi}`)
-    setText('live-kpi-total-duration-text-debug', `totalDurationKpi = ${totalDurationKpi}`)
-
-    if (showDebug) {
-      console.warn('[LiveAttendance KPI DOM SYNC]', {
-        activeWorkersKpi,
-        todaySeenKpi,
-        confirmedCheckoutsKpi,
-        totalMinutesKpi,
-        totalDurationKpi,
-      })
-    }
+    scheduleLiveKpiDomSync({
+      activeWorkersKpi,
+      todaySeenKpi,
+      confirmedCheckoutsKpi,
+      totalMinutesKpi,
+      totalDurationKpi,
+    }, showDebug)
   }, [
     activeWorkersKpi,
     todaySeenKpi,
@@ -389,6 +459,7 @@ export const AttendanceLivePage = () => {
           </div>
           <div
             id="live-kpi-active-workers-value"
+            data-live-kpi-sync="live-kpi-active-workers-value"
             className="kpi-value"
             data-testid="live-active-workers"
           >
@@ -398,8 +469,8 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>FAST SYNC V6</div>
-              <div id="live-kpi-active-workers-debug">activeWorkersKpi = {activeWorkersKpi}</div>
+              <div>IMMEDIATE SYNC V7</div>
+              <div id="live-kpi-active-workers-debug" data-live-kpi-sync="live-kpi-active-workers-debug">activeWorkersKpi = {activeWorkersKpi}</div>
             </div>
           ) : null}
         </div>
@@ -411,6 +482,7 @@ export const AttendanceLivePage = () => {
           </div>
           <div
             id="live-kpi-today-seen-value"
+            data-live-kpi-sync="live-kpi-today-seen-value"
             className="kpi-value"
             data-testid="live-today-seen"
           >
@@ -420,8 +492,8 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>FAST SYNC V6</div>
-              <div id="live-kpi-today-seen-debug">todaySeenKpi = {todaySeenKpi}</div>
+              <div>IMMEDIATE SYNC V7</div>
+              <div id="live-kpi-today-seen-debug" data-live-kpi-sync="live-kpi-today-seen-debug">todaySeenKpi = {todaySeenKpi}</div>
             </div>
           ) : null}
         </div>
@@ -433,6 +505,7 @@ export const AttendanceLivePage = () => {
           </div>
           <div
             id="live-kpi-confirmed-checkouts-value"
+            data-live-kpi-sync="live-kpi-confirmed-checkouts-value"
             className="kpi-value"
             data-testid="live-confirmed-checkouts"
           >
@@ -442,8 +515,8 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>FAST SYNC V6</div>
-              <div id="live-kpi-confirmed-checkouts-debug">confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
+              <div>IMMEDIATE SYNC V7</div>
+              <div id="live-kpi-confirmed-checkouts-debug" data-live-kpi-sync="live-kpi-confirmed-checkouts-debug">confirmedCheckoutsKpi = {confirmedCheckoutsKpi}</div>
             </div>
           ) : null}
         </div>
@@ -455,6 +528,7 @@ export const AttendanceLivePage = () => {
           </div>
           <div
             id="live-kpi-total-duration-value"
+            data-live-kpi-sync="live-kpi-total-duration-value"
             className="kpi-value"
             data-testid="live-total-duration"
           >
@@ -464,9 +538,9 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {liveBuildMarker}</div>
-              <div>FAST SYNC V6</div>
-              <div id="live-kpi-total-duration-debug">totalMinutesKpi = {totalMinutesKpi}</div>
-              <div id="live-kpi-total-duration-text-debug">totalDurationKpi = {totalDurationKpi}</div>
+              <div>IMMEDIATE SYNC V7</div>
+              <div id="live-kpi-total-duration-debug" data-live-kpi-sync="live-kpi-total-duration-debug">totalMinutesKpi = {totalMinutesKpi}</div>
+              <div id="live-kpi-total-duration-text-debug" data-live-kpi-sync="live-kpi-total-duration-text-debug">totalDurationKpi = {totalDurationKpi}</div>
             </div>
           ) : null}
         </div>
