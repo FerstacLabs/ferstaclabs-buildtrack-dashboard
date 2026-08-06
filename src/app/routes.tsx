@@ -27,6 +27,7 @@ import { SettingsPage } from '../features/settings/SettingsPage'
 import { SiteHoursPage } from '../features/siteHours/SiteHoursPage'
 import { SupervisorAuditPage } from '../features/supervisorAudit/SupervisorAuditPage'
 import { WorkersPage } from '../features/workers/WorkersPage'
+import { WarehousePage } from '../features/warehouse/WarehousePage'
 
 export const router = createBrowserRouter([
   {
@@ -52,6 +53,7 @@ export const router = createBrowserRouter([
       { path: 'timeline', element: <ProjectTimelinePage /> },
       { path: 'daily-reports', element: <DailyReportsPage /> },
       { path: 'materials', element: <MaterialsPage /> },
+      { path: 'warehouse', element: <WarehousePage /> },
       { path: 'daily-attendance', element: <DailyAttendancePage /> },
       { path: 'attendance-live', element: <AttendanceLivePage /> },
       { path: 'site-hours', element: <SiteHoursPage /> },

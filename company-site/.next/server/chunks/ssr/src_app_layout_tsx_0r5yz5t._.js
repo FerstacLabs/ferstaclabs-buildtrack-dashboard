@@ -1,0 +1,3 @@
+module.exports=[27572,a=>{"use strict";var b=a.i(7997),c=a.i(69120);let d={metadataBase:new URL(c.siteConfig.siteUrl),title:{default:c.siteConfig.name,template:`%s | ${c.siteConfig.name}`},applicationName:c.siteConfig.name,authors:[{name:c.siteConfig.founderName}],creator:c.siteConfig.name,publisher:c.siteConfig.name,icons:{icon:"/favicon.svg"}};a.s(["default",0,function({children:a}){return(0,b.jsx)("html",{lang:"az",children:(0,b.jsx)("body",{children:a})})},"metadata",0,d,"viewport",0,{width:"device-width",initialScale:1,themeColor:"#071f24"}])},50645,function(a){a.n(a.i(27572))}];
+
+//# sourceMappingURL=src_app_layout_tsx_0r5yz5t._.js.map

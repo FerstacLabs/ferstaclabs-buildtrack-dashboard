@@ -237,6 +237,41 @@ main,
   visibility: visible;
 }
 
+.warehouse-side-panel {
+  align-self: start;
+}
+
+.warehouse-category-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 22px;
+}
+
+.warehouse-category-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--bt-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.warehouse-category-row span {
+  color: var(--bt-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.warehouse-category-row strong {
+  color: var(--bt-navy);
+}
+
+.warehouse-flow {
+  margin-top: 12px;
+}
+
 .mobile-menu-toggle {
   display: none;
   margin-bottom: 12px;

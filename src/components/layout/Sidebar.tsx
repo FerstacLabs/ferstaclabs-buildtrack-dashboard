@@ -10,6 +10,7 @@ import {
   EyeInvisibleOutlined,
   FieldTimeOutlined,
   FileSearchOutlined,
+  InboxOutlined,
   KeyOutlined,
   RightOutlined,
   SettingOutlined,
@@ -49,7 +50,6 @@ const mainItems: SidebarItem[] = [
   { labelKey: 'nav.crews', path: '/crews', icon: <TeamOutlined /> },
   { labelKey: 'nav.workers', path: '/workers', icon: <UserOutlined /> },
   { labelKey: 'nav.dailyReports', path: '/daily-reports', icon: <CalendarOutlined /> },
-  { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
 ]
 
 const footerItems: SidebarItem[] = [
@@ -59,6 +59,15 @@ const footerItems: SidebarItem[] = [
 ]
 
 const groups: SidebarGroup[] = [
+  {
+    id: 'materials',
+    labelKey: 'nav.materialsGroup',
+    icon: <ToolOutlined />,
+    children: [
+      { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
+      { labelKey: 'nav.warehouse', path: '/warehouse', icon: <InboxOutlined /> },
+    ],
+  },
   {
     id: 'attendance',
     labelKey: 'nav.attendanceGroup',
@@ -111,6 +120,7 @@ export const Sidebar = ({ embedded = false, onNavigate }: SidebarProps) => {
     [location.pathname],
   )
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    materials: true,
     attendance: true,
     camera: true,
   })
@@ -119,6 +129,7 @@ export const Sidebar = ({ embedded = false, onNavigate }: SidebarProps) => {
     setOpenGroups((current) => ({ ...current, [groupId]: !(current[groupId] ?? activeGroupIds.has(groupId)) }))
   }
 
+  const materialsOpen = openGroups.materials || activeGroupIds.has('materials')
   const attendanceOpen = openGroups.attendance || activeGroupIds.has('attendance')
   const cameraOpen = openGroups.camera || activeGroupIds.has('camera')
 
@@ -138,14 +149,27 @@ export const Sidebar = ({ embedded = false, onNavigate }: SidebarProps) => {
         <div className="sidebar-group">
           <button
             type="button"
-            className={`sidebar-link sidebar-group-toggle${activeGroupIds.has('attendance') ? ' active' : ''}`}
-            onClick={() => toggleGroup('attendance')}
+            className={`sidebar-link sidebar-group-toggle${activeGroupIds.has('materials') ? ' active' : ''}`}
+            onClick={() => toggleGroup('materials')}
           >
             <span className="sidebar-icon">{groups[0].icon}</span>
             <span>{t(groups[0].labelKey)}</span>
+            <span className="sidebar-caret">{materialsOpen ? <DownOutlined /> : <RightOutlined />}</span>
+          </button>
+          {materialsOpen && groups[0].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
+        </div>
+
+        <div className="sidebar-group">
+          <button
+            type="button"
+            className={`sidebar-link sidebar-group-toggle${activeGroupIds.has('attendance') ? ' active' : ''}`}
+            onClick={() => toggleGroup('attendance')}
+          >
+            <span className="sidebar-icon">{groups[1].icon}</span>
+            <span>{t(groups[1].labelKey)}</span>
             <span className="sidebar-caret">{attendanceOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
-          {attendanceOpen && groups[0].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
+          {attendanceOpen && groups[1].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
         </div>
 
         {footerItems.slice(0, 2).map((item) => <SidebarLink key={item.path} item={item} onNavigate={onNavigate} />)}
@@ -156,11 +180,11 @@ export const Sidebar = ({ embedded = false, onNavigate }: SidebarProps) => {
             className={`sidebar-link sidebar-group-toggle${activeGroupIds.has('camera') ? ' active' : ''}`}
             onClick={() => toggleGroup('camera')}
           >
-            <span className="sidebar-icon">{groups[1].icon}</span>
-            <span>{t(groups[1].labelKey)}</span>
+            <span className="sidebar-icon">{groups[2].icon}</span>
+            <span>{t(groups[2].labelKey)}</span>
             <span className="sidebar-caret">{cameraOpen ? <DownOutlined /> : <RightOutlined />}</span>
           </button>
-          {cameraOpen && groups[1].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
+          {cameraOpen && groups[2].children.map((item) => <SidebarLink key={item.path} item={item} child onNavigate={onNavigate} />)}
         </div>
 
         {showAdminLicenses && <SidebarLink item={{ labelKey: 'nav.adminLicenses', path: '/admin/licenses', icon: <KeyOutlined /> }} onNavigate={onNavigate} />}
