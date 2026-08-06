@@ -18,7 +18,7 @@ const statusLabel: Record<string, string> = {
   Closed: 'Təsdiqli çıxış',
 }
 
-const ATTENDANCE_LIVE_BUILD_MARKER = 'direct-parent-kpi-v1'
+const ATTENDANCE_LIVE_BUILD_MARKER = 'no-memo-kpi-v2'
 
 const debugLive = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugLive') === '1'
 
@@ -159,48 +159,36 @@ export const AttendanceLivePage = () => {
     return sites.map((site) => ({ label: site.name, value: site.id }))
   }, [sites])
 
-  const liveWorkerRows: AttendanceSessionRow[] = useMemo(() => (liveStatus?.workers ?? []).map((worker) => ({
-    id: `live-${worker.workerExternalId}-${worker.checkInTime}`,
-    workerExternalId: worker.workerExternalId,
-    workerName: worker.workerName,
-    checkInTime: worker.checkInTime,
-    checkOutTime: worker.confirmedCheckOutTime,
-    checkInTimeLocal: worker.checkInTimeLocal,
-    checkOutTimeLocal: worker.confirmedCheckOutTimeLocal,
-    lastSeenTime: worker.lastSeenTime,
-    lastSeenTimeLocal: worker.lastSeenTimeLocal,
-    confirmedCheckOutTime: worker.confirmedCheckOutTime,
-    confirmedCheckOutTimeLocal: worker.confirmedCheckOutTimeLocal,
-    closeReason: worker.closeReason,
-    displayStatus: worker.displayStatus,
-    isCheckoutConfirmed: worker.isCheckoutConfirmed,
-    workedMinutes: worker.workedMinutesSoFar,
-    status: worker.status,
-    source: 'attendance_live_status',
-  })), [liveStatus?.workers])
+  const liveWorkerRows: AttendanceSessionRow[] = useMemo(() => {
+    return (liveStatus?.workers ?? []).map((worker) => ({
+      id: `live-${worker.workerExternalId}-${worker.checkInTime}`,
+      workerExternalId: worker.workerExternalId,
+      workerName: worker.workerName,
+      checkInTime: worker.checkInTime,
+      checkOutTime: worker.confirmedCheckOutTime,
+      checkInTimeLocal: worker.checkInTimeLocal,
+      checkOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+      lastSeenTime: worker.lastSeenTime,
+      lastSeenTimeLocal: worker.lastSeenTimeLocal,
+      confirmedCheckOutTime: worker.confirmedCheckOutTime,
+      confirmedCheckOutTimeLocal: worker.confirmedCheckOutTimeLocal,
+      closeReason: worker.closeReason,
+      displayStatus: worker.displayStatus,
+      isCheckoutConfirmed: worker.isCheckoutConfirmed,
+      workedMinutes: worker.workedMinutesSoFar,
+      status: worker.status,
+      source: 'attendance_live_status',
+    }))
+  }, [liveStatus?.workers])
 
-  const visibleSessions = useMemo(() => (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
-    ...session,
-    workedMinutes: calculateLiveWorkedMinutes(session, nowTick),
-  })), [summary?.sessions, liveWorkerRows, nowTick])
+  const visibleSessions = useMemo(() => {
+    return (summary?.sessions.length ? summary.sessions : liveWorkerRows).map((session) => ({
+      ...session,
+      workedMinutes: calculateLiveWorkedMinutes(session, nowTick),
+    }))
+  }, [summary?.sessions, liveWorkerRows, nowTick])
 
   const tableRows = visibleSessions
-  const directActiveWorkers =
-    Number(summary?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-
-  const directTodaySeen =
-    Number(summary?.totalWorkersCheckedIn ?? summary?.activeWorkersCount ?? liveStatus?.activeWorkersCount ?? 0)
-
-  const directConfirmedCheckouts =
-    Number(summary?.closedSessionsCount ?? 0)
-
-  const directTotalMinutes =
-    Math.max(
-      Math.round(Number(summary?.totalWorkedHours ?? 0) * 60),
-      tableRows.reduce((sum, row) => sum + calculateLiveWorkedMinutes(row, nowTick), 0),
-    )
-
-  const directTotalDurationText = formatLiveTotalDuration(directTotalMinutes)
   const visibleGallerySnapshots = gallerySnapshots.filter((snapshot) => snapshot.snapshotUrl)
 
   useEffect(() => {
@@ -263,6 +251,35 @@ export const AttendanceLivePage = () => {
     { title: 'Mənbə', dataIndex: 'source', render: (value) => <Tag color={String(value).includes('active_register') ? 'purple' : String(value).includes('cgi') ? 'cyan' : 'blue'}>{sourceLabel(String(value))}</Tag> },
   ]
 
+  const directActiveWorkers =
+    Math.max(
+      Number(summary?.activeWorkersCount ?? 0),
+      Number(liveStatus?.activeWorkersCount ?? 0),
+      tableRows.length > 0 ? 1 : 0,
+    )
+
+  const directTodaySeen =
+    Math.max(
+      Number(summary?.totalWorkersCheckedIn ?? 0),
+      Number(summary?.activeWorkersCount ?? 0),
+      Number(liveStatus?.activeWorkersCount ?? 0),
+      tableRows.length,
+    )
+
+  const directConfirmedCheckouts =
+    Number(summary?.closedSessionsCount ?? 0)
+
+  const rowTotalMinutes = tableRows.reduce(
+    (sum, row) => sum + calculateLiveWorkedMinutes(row, nowTick),
+    0,
+  )
+
+  const apiTotalMinutes = Math.round(Number(summary?.totalWorkedHours ?? 0) * 60)
+
+  const directTotalMinutes = Math.max(apiTotalMinutes, rowTotalMinutes)
+
+  const directTotalDurationText = formatLiveTotalDuration(directTotalMinutes)
+
   return (
     <div className="page-stack">
       <PageTitle title="Canlı Davamiyyət" subtitle="Bir kamera rejimində tanınmalar giriş-çıxış deyil, ilk görünmə və son görülmə kimi izlənir" />
@@ -307,7 +324,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>DIRECT PARENT JSX</div>
+              <div>NO MEMO DIRECT JSX</div>
               <div>directActiveWorkers = {directActiveWorkers}</div>
             </div>
           ) : null}
@@ -323,7 +340,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>DIRECT PARENT JSX</div>
+              <div>NO MEMO DIRECT JSX</div>
               <div>directTodaySeen = {directTodaySeen}</div>
             </div>
           ) : null}
@@ -339,7 +356,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>DIRECT PARENT JSX</div>
+              <div>NO MEMO DIRECT JSX</div>
               <div>directConfirmedCheckouts = {directConfirmedCheckouts}</div>
             </div>
           ) : null}
@@ -355,7 +372,7 @@ export const AttendanceLivePage = () => {
           {showDebug ? (
             <div style={{ color: '#6b7280', fontSize: 11, marginTop: 6 }}>
               <div>build: {ATTENDANCE_LIVE_BUILD_MARKER}</div>
-              <div>DIRECT PARENT JSX</div>
+              <div>NO MEMO DIRECT JSX</div>
               <div>directTotalMinutes = {directTotalMinutes}</div>
               <div>directTotalDurationText = {directTotalDurationText}</div>
             </div>
@@ -373,7 +390,7 @@ export const AttendanceLivePage = () => {
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
             {JSON.stringify({
               buildMarker: ATTENDANCE_LIVE_BUILD_MARKER,
-              kpiSource: 'direct-parent-jsx-no-child-component',
+              kpiSource: 'parent-direct-jsx-no-memo',
               requestedSiteId,
               requestedDate,
               tableRowsLength: tableRows.length,
@@ -381,6 +398,8 @@ export const AttendanceLivePage = () => {
               summaryTotalWorkersCheckedIn: summary?.totalWorkersCheckedIn,
               summaryTotalWorkedHours: summary?.totalWorkedHours,
               liveStatusActiveWorkersCount: liveStatus?.activeWorkersCount,
+              rowTotalMinutes,
+              apiTotalMinutes,
               directActiveWorkers,
               directTodaySeen,
               directConfirmedCheckouts,
