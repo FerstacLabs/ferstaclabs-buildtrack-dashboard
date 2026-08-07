@@ -53,6 +53,7 @@ const mainItems: SidebarItem[] = [
 ]
 
 const footerItems: SidebarItem[] = [
+  { labelKey: 'nav.supervisors', path: '/supervisors', icon: <TeamOutlined /> },
   { labelKey: 'nav.supervisorAudit', path: '/supervisor-audit', icon: <AuditOutlined /> },
   { labelKey: 'nav.export', path: '/export', icon: <ExportOutlined /> },
   { labelKey: 'nav.settings', path: '/settings', icon: <SettingOutlined /> },

@@ -11,6 +11,7 @@ export const az = {
   'nav.materialsGroup': 'Materiallar',
   'nav.materials': 'Materiallar',
   'nav.warehouse': 'Anbar',
+  'nav.supervisors': 'Prorablar',
   'nav.supervisorAudit': 'Prorab Audit',
   'nav.export': 'Export / 1C',
   'nav.settings': 'Ayarlar',

@@ -26,6 +26,7 @@ import { SecurityEventsPage } from '../features/securityEvents/SecurityEventsPag
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { SiteHoursPage } from '../features/siteHours/SiteHoursPage'
 import { SupervisorAuditPage } from '../features/supervisorAudit/SupervisorAuditPage'
+import { SupervisorsPage } from '../features/supervisors/SupervisorsPage'
 import { WorkersPage } from '../features/workers/WorkersPage'
 import { WarehousePage } from '../features/warehouse/WarehousePage'
 
@@ -62,6 +63,7 @@ export const router = createBrowserRouter([
       { path: 'payroll', element: <PayrollPage /> },
       { path: 'performance', element: <PerformancePage /> },
       { path: 'supervisor-audit', element: <SupervisorAuditPage /> },
+      { path: 'supervisors', element: <SupervisorsPage /> },
       { path: 'cost-code', element: <CostCodePage /> },
       { path: 'custom-reports', element: <CustomReportsPage /> },
       { path: 'export', element: <ExportPage /> },

@@ -311,6 +311,222 @@ public sealed record AdminTenantLicenseResponse(
 
 public sealed record AdminActivateTenantLicenseRequest(Guid? LicenseId);
 
+public sealed record FieldAssignmentDto(
+    Guid Id,
+    Guid SiteId,
+    string SiteName,
+    string? SiteAddress,
+    Guid? ProjectId,
+    bool IsActive,
+    DateTimeOffset? ValidFrom,
+    DateTimeOffset? ValidUntil);
+
+public sealed record FieldMeResponse(
+    AuthUserResponse User,
+    TenantResponse Tenant,
+    IReadOnlyList<FieldAssignmentDto> Assignments);
+
+public sealed record FieldDashboardResponse(
+    Guid SiteId,
+    string SiteName,
+    DateOnly WorkDate,
+    string SupervisorName,
+    int TodaySeenWorkers,
+    int OpenWorkerNotes,
+    int SubmittedReportsToday,
+    int OpenWarehouseRequests,
+    IReadOnlyList<FieldActivityDto> RecentActivity);
+
+public sealed record FieldActivityDto(
+    DateTimeOffset Timestamp,
+    string Type,
+    string Text,
+    string? Status);
+
+public sealed record FieldSmetaItemDto(
+    Guid Id,
+    Guid SiteId,
+    string StageName,
+    string WorkName,
+    string Unit,
+    string? WorkCategory);
+
+public sealed record FieldDailyReportLineDto(
+    Guid Id,
+    Guid SmetaItemId,
+    string StageName,
+    string WorkName,
+    decimal ReportedQuantity,
+    string Unit,
+    string? Note);
+
+public sealed record FieldDailyReportDto(
+    Guid Id,
+    Guid SiteId,
+    string? SiteName,
+    Guid SupervisorUserId,
+    string? SupervisorName,
+    DateOnly ReportDate,
+    string? Shift,
+    FieldDailyReportStatus Status,
+    string? GeneralNote,
+    string? WeatherCondition,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? SubmittedAt,
+    DateTimeOffset? ReviewedAt,
+    string? ReviewNote,
+    IReadOnlyList<FieldDailyReportLineDto> Lines);
+
+public sealed record SaveFieldDailyReportRequest(
+    Guid SiteId,
+    DateOnly ReportDate,
+    string? Shift,
+    string? GeneralNote,
+    string? WeatherCondition,
+    IReadOnlyList<SaveFieldDailyReportLineRequest> Lines);
+
+public sealed record SaveFieldDailyReportLineRequest(
+    Guid SmetaItemId,
+    decimal ReportedQuantity,
+    string? Note);
+
+public sealed record ReviewFieldDailyReportRequest(FieldDailyReportStatus Status, string? ReviewNote);
+
+public sealed record FieldWorkerDto(
+    Guid Id,
+    Guid SiteId,
+    string ExternalWorkerCode,
+    string FullName,
+    string? Brigade,
+    string? Role,
+    string AttendanceState,
+    DateTimeOffset? FirstSeen,
+    DateTimeOffset? LastSeen,
+    int WorkedMinutes,
+    int RiskScore);
+
+public sealed record FieldWorkerEventDto(
+    Guid Id,
+    Guid SiteId,
+    Guid WorkerId,
+    string WorkerName,
+    Guid SupervisorUserId,
+    string? SupervisorName,
+    SupervisorWorkerEventType EventType,
+    DateTimeOffset EventDateTime,
+    string Reason,
+    int RiskDelta,
+    SupervisorWorkerEventStatus Status,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateFieldWorkerEventRequest(
+    Guid SiteId,
+    Guid WorkerId,
+    SupervisorWorkerEventType EventType,
+    DateTimeOffset? EventDateTime,
+    string Reason);
+
+public sealed record FieldSiteNoteDto(
+    Guid Id,
+    Guid SiteId,
+    string? SiteName,
+    Guid SupervisorUserId,
+    string? SupervisorName,
+    DateTimeOffset EventDateTime,
+    FieldSiteNoteCategory Category,
+    string Text,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateFieldSiteNoteRequest(
+    Guid SiteId,
+    DateTimeOffset? EventDateTime,
+    FieldSiteNoteCategory Category,
+    string Text);
+
+public sealed record FieldWarehouseCatalogItemDto(
+    Guid Id,
+    string Name,
+    string Category,
+    string Unit,
+    string? Code);
+
+public sealed record FieldWarehouseRequestDto(
+    Guid Id,
+    Guid SiteId,
+    string? SiteName,
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    decimal RequestedQuantity,
+    string Unit,
+    DateOnly? NeededBy,
+    FieldWarehouseUrgency Urgency,
+    string Reason,
+    string? Justification,
+    string? ManagerComment,
+    FieldWarehouseRequestStatus Status,
+    Guid SupervisorUserId,
+    string? SupervisorName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt);
+
+public sealed record CreateFieldWarehouseRequest(
+    Guid SiteId,
+    Guid CatalogItemId,
+    decimal RequestedQuantity,
+    DateOnly? NeededBy,
+    FieldWarehouseUrgency Urgency,
+    string Reason,
+    string? Justification);
+
+public sealed record ReviewFieldWarehouseRequest(FieldWarehouseRequestStatus Status, string? ManagerComment);
+
+public sealed record SupervisorSummaryDto(
+    Guid Id,
+    string FullName,
+    string Email,
+    string? Phone,
+    BuildTrackUserStatus Status,
+    DateTimeOffset? LastLoginAt,
+    IReadOnlyList<FieldAssignmentDto> Assignments,
+    int PendingDailyReports,
+    int OpenWarehouseRequests,
+    int RecentFieldEvents);
+
+public sealed record CreateSupervisorRequest(
+    string FullName,
+    string Email,
+    string? Phone,
+    string TemporaryPassword,
+    IReadOnlyList<Guid> SiteIds,
+    string? Notes,
+    DateTimeOffset? ValidFrom,
+    DateTimeOffset? ValidUntil);
+
+public sealed record UpdateSupervisorRequest(
+    string FullName,
+    string? Phone,
+    BuildTrackUserStatus Status,
+    IReadOnlyList<Guid> SiteIds,
+    string? Notes,
+    DateTimeOffset? ValidFrom,
+    DateTimeOffset? ValidUntil);
+
+public sealed record ResetSupervisorPasswordRequest(string TemporaryPassword);
+
+public sealed record SupervisorAuditEventDto(
+    Guid Id,
+    Guid? SiteId,
+    string? SiteName,
+    Guid? SupervisorUserId,
+    string? SupervisorName,
+    string Action,
+    string EntityType,
+    Guid? EntityId,
+    DateTimeOffset Timestamp,
+    bool RiskFlag,
+    string Description);
+
 
 
 

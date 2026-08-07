@@ -11,6 +11,7 @@ export const ru = {
   'nav.materialsGroup': 'Материалы',
   'nav.materials': 'Материалы',
   'nav.warehouse': 'Склад',
+  'nav.supervisors': 'Прорабы',
   'nav.supervisorAudit': 'Аудит прораба',
   'nav.export': 'Экспорт / 1C',
   'nav.settings': 'Настройки',

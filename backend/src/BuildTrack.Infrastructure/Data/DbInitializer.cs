@@ -27,12 +27,16 @@ CREATE TABLE IF NOT EXISTS users (
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
     "FullName" character varying(180) NOT NULL,
     "Email" character varying(180) NOT NULL UNIQUE,
+    "Phone" character varying(60) NULL,
     "PasswordHash" character varying(500) NOT NULL,
     "Role" character varying(40) NOT NULL,
     "Status" character varying(40) NOT NULL,
+    "LastLoginAt" timestamp with time zone NULL,
     "CreatedAt" timestamp with time zone NOT NULL,
     "UpdatedAt" timestamp with time zone NULL
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS "Phone" character varying(60) NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS "LastLoginAt" timestamp with time zone NULL;
 CREATE TABLE IF NOT EXISTS licenses (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
@@ -370,8 +374,166 @@ ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQuery
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQueryError" character varying(1000) NULL;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQueryCount" integer NOT NULL DEFAULT 0;
 ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQueryLastRecNo" bigint NULL;
+CREATE TABLE IF NOT EXISTS supervisor_site_assignments (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "SupervisorUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "Notes" character varying(500) NULL,
+    "ValidFrom" timestamp with time zone NULL,
+    "ValidUntil" timestamp with time zone NULL,
+    "CreatedByUserId" uuid NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_TenantId" ON supervisor_site_assignments ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_SupervisorUserId" ON supervisor_site_assignments ("SupervisorUserId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_SiteId" ON supervisor_site_assignments ("SiteId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_Access" ON supervisor_site_assignments ("TenantId", "SupervisorUserId", "SiteId", "IsActive");
+CREATE TABLE IF NOT EXISTS field_smeta_items (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "StageName" character varying(180) NOT NULL,
+    "WorkName" character varying(220) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "WorkCategory" character varying(100) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_field_smeta_items_TenantId" ON field_smeta_items ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_field_smeta_items_SiteId" ON field_smeta_items ("SiteId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_field_smeta_items_site_work" ON field_smeta_items ("TenantId", "SiteId", "WorkName");
+CREATE TABLE IF NOT EXISTS supervisor_daily_reports (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "SupervisorUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+    "ReportDate" date NOT NULL,
+    "Shift" character varying(80) NULL,
+    "Status" character varying(40) NOT NULL,
+    "GeneralNote" character varying(2000) NULL,
+    "WeatherCondition" character varying(120) NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "SubmittedAt" timestamp with time zone NULL,
+    "ReviewedAt" timestamp with time zone NULL,
+    "ReviewedByUserId" uuid NULL,
+    "ReviewNote" character varying(1000) NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_reports_TenantId" ON supervisor_daily_reports ("TenantId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_supervisor_daily_reports_daily" ON supervisor_daily_reports ("TenantId", "SupervisorUserId", "SiteId", "ReportDate");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_reports_SiteDate" ON supervisor_daily_reports ("SiteId", "ReportDate");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_reports_Status" ON supervisor_daily_reports ("Status");
+CREATE TABLE IF NOT EXISTS supervisor_daily_report_lines (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ReportId" uuid NOT NULL REFERENCES supervisor_daily_reports("Id") ON DELETE CASCADE,
+    "SmetaItemId" uuid NOT NULL REFERENCES field_smeta_items("Id") ON DELETE RESTRICT,
+    "ReportedQuantity" numeric(18,3) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "Note" character varying(1000) NULL,
+    "CreatedAt" timestamp with time zone NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_TenantId" ON supervisor_daily_report_lines ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_ReportId" ON supervisor_daily_report_lines ("ReportId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_SmetaItemId" ON supervisor_daily_report_lines ("SmetaItemId");
+CREATE TABLE IF NOT EXISTS supervisor_site_notes (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "SupervisorUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+    "EventDateTime" timestamp with time zone NOT NULL,
+    "Category" character varying(60) NOT NULL,
+    "Text" character varying(2000) NOT NULL,
+    "AttachmentPath" character varying(500) NULL,
+    "CreatedAt" timestamp with time zone NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_notes_TenantId" ON supervisor_site_notes ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_notes_SiteDate" ON supervisor_site_notes ("SiteId", "EventDateTime");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_site_notes_SupervisorUserId" ON supervisor_site_notes ("SupervisorUserId");
+CREATE TABLE IF NOT EXISTS supervisor_worker_events (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "WorkerId" uuid NOT NULL REFERENCES workers("Id") ON DELETE CASCADE,
+    "SupervisorUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+    "EventType" character varying(80) NOT NULL,
+    "EventDateTime" timestamp with time zone NOT NULL,
+    "Reason" character varying(1200) NOT NULL,
+    "RiskDelta" integer NOT NULL,
+    "Status" character varying(40) NOT NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "ReviewedAt" timestamp with time zone NULL,
+    "ReviewedByUserId" uuid NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_worker_events_TenantId" ON supervisor_worker_events ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_worker_events_SiteDate" ON supervisor_worker_events ("SiteId", "EventDateTime");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_worker_events_WorkerId" ON supervisor_worker_events ("WorkerId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_worker_events_SupervisorUserId" ON supervisor_worker_events ("SupervisorUserId");
+CREATE TABLE IF NOT EXISTS field_warehouse_catalog_items (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "Name" character varying(180) NOT NULL,
+    "Category" character varying(100) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "Code" character varying(80) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_field_warehouse_catalog_items_TenantId" ON field_warehouse_catalog_items ("TenantId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_field_warehouse_catalog_items_name" ON field_warehouse_catalog_items ("TenantId", "Name");
+CREATE TABLE IF NOT EXISTS field_warehouse_requests (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "SupervisorUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+    "CatalogItemId" uuid NOT NULL REFERENCES field_warehouse_catalog_items("Id") ON DELETE RESTRICT,
+    "RequestedQuantity" numeric(18,3) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "NeededBy" date NULL,
+    "Urgency" character varying(40) NOT NULL,
+    "Reason" character varying(1200) NOT NULL,
+    "Justification" character varying(1200) NULL,
+    "ManagerComment" character varying(1200) NULL,
+    "Status" character varying(60) NOT NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL,
+    "ReviewedAt" timestamp with time zone NULL,
+    "ReviewedByUserId" uuid NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_field_warehouse_requests_TenantId" ON field_warehouse_requests ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_field_warehouse_requests_SiteDate" ON field_warehouse_requests ("SiteId", "CreatedAt");
+CREATE INDEX IF NOT EXISTS "IX_field_warehouse_requests_SupervisorUserId" ON field_warehouse_requests ("SupervisorUserId");
+CREATE INDEX IF NOT EXISTS "IX_field_warehouse_requests_Status" ON field_warehouse_requests ("Status");
+CREATE TABLE IF NOT EXISTS supervisor_audit_events (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "ProjectId" uuid NULL,
+    "SiteId" uuid NULL,
+    "SupervisorUserId" uuid NULL,
+    "SupervisorNameSnapshot" character varying(180) NULL,
+    "Action" character varying(120) NOT NULL,
+    "EntityType" character varying(120) NOT NULL,
+    "EntityId" uuid NULL,
+    "Timestamp" timestamp with time zone NOT NULL,
+    "RiskFlag" boolean NOT NULL DEFAULT false,
+    "Description" character varying(1200) NOT NULL,
+    "MetadataJson" jsonb NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_TenantId" ON supervisor_audit_events ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_SiteTime" ON supervisor_audit_events ("SiteId", "Timestamp");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_SupervisorUserId" ON supervisor_audit_events ("SupervisorUserId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_Action" ON supervisor_audit_events ("Action");
 """, cancellationToken);
         await SeedAdminUserAsync(db, configuration, cancellationToken);
+        await SeedDemoFieldDataAsync(db, configuration, cancellationToken);
     }
 
     private static async Task SeedAdminUserAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken cancellationToken)
@@ -439,6 +601,138 @@ ALTER TABLE netsdk_runtime_diagnostics ADD COLUMN IF NOT EXISTS "LastRecordQuery
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SeedDemoFieldDataAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken cancellationToken)
+    {
+        var tenants = await db.Tenants.AsNoTracking().Select(x => x.Id).ToListAsync(cancellationToken);
+        foreach (var tenantId in tenants)
+        {
+            if (!await db.FieldWarehouseCatalogItems.AnyAsync(x => x.TenantId == tenantId, cancellationToken))
+            {
+                db.FieldWarehouseCatalogItems.AddRange(
+                    NewCatalogItem(tenantId, "Kaska", "PPE", "ədəd", "PPE-HELMET"),
+                    NewCatalogItem(tenantId, "İş əlcəyi", "PPE", "cüt", "PPE-GLOVE"),
+                    NewCatalogItem(tenantId, "Reflektor jilet", "PPE", "ədəd", "PPE-VEST"),
+                    NewCatalogItem(tenantId, "Sverlo 12mm", "Alət", "ədəd", "TOOL-DRILL-12"),
+                    NewCatalogItem(tenantId, "Kəsici disk", "Sərfiyyat", "ədəd", "CONS-CUT-DISC"),
+                    NewCatalogItem(tenantId, "Sement M400", "Material", "kisə", "MAT-CEMENT-M400"));
+            }
+        }
+
+        var sites = await db.Sites.AsNoTracking().Select(x => new { x.Id, x.TenantId }).ToListAsync(cancellationToken);
+        foreach (var site in sites)
+        {
+            if (await db.FieldSmetaItems.AnyAsync(x => x.TenantId == site.TenantId && x.SiteId == site.Id, cancellationToken)) continue;
+            db.FieldSmetaItems.AddRange(
+                NewSmetaItem(site.TenantId, site.Id, "Torpaq işləri", "Torpaq qazıntısı", "m3", "Kaba işlər"),
+                NewSmetaItem(site.TenantId, site.Id, "Bünövrə / Zirzəmi", "Armatur quraşdırılması", "ton", "Monolit"),
+                NewSmetaItem(site.TenantId, site.Id, "Bünövrə / Zirzəmi", "Beton tökülməsi", "m3", "Monolit"),
+                NewSmetaItem(site.TenantId, site.Id, "Hörgü işləri", "Kubik hörgü", "m2", "Hörgü"),
+                NewSmetaItem(site.TenantId, site.Id, "Suvaq işləri", "Daxili suvaq", "m2", "Suvaq"),
+                NewSmetaItem(site.TenantId, site.Id, "Dam örtüyü", "Dam konstruksiyası", "m2", "Dam"));
+        }
+
+        await SeedSupervisorUserAsync(db, configuration, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static FieldWarehouseCatalogItem NewCatalogItem(Guid tenantId, string name, string category, string unit, string code) => new()
+    {
+        TenantId = tenantId,
+        Name = name,
+        Category = category,
+        Unit = unit,
+        Code = code,
+        IsActive = true,
+    };
+
+    private static FieldSmetaItem NewSmetaItem(Guid tenantId, Guid siteId, string stage, string work, string unit, string category) => new()
+    {
+        TenantId = tenantId,
+        SiteId = siteId,
+        StageName = stage,
+        WorkName = work,
+        Unit = unit,
+        WorkCategory = category,
+        IsActive = true,
+    };
+
+    private static async Task SeedSupervisorUserAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken cancellationToken)
+    {
+        if (configuration is null) return;
+
+        var email = configuration["SEED_SUPERVISOR_EMAIL"];
+        var password = configuration["SEED_SUPERVISOR_PASSWORD"];
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password)) return;
+
+        var tenantId = DemoTenantId;
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        var fullName = string.IsNullOrWhiteSpace(configuration["SEED_SUPERVISOR_FULL_NAME"])
+            ? "Demo Prorab"
+            : configuration["SEED_SUPERVISOR_FULL_NAME"]!.Trim();
+        var phone = string.IsNullOrWhiteSpace(configuration["SEED_SUPERVISOR_PHONE"])
+            ? null
+            : configuration["SEED_SUPERVISOR_PHONE"]!.Trim();
+
+        var user = await db.Users.FirstOrDefaultAsync(x => x.Email == normalizedEmail, cancellationToken);
+        if (user is null)
+        {
+            user = new AppUser
+            {
+                TenantId = tenantId,
+                FullName = fullName,
+                Email = normalizedEmail,
+                Phone = phone,
+                PasswordHash = BuildTrackPasswordHasher.HashPassword(password),
+                Role = BuildTrackUserRole.Supervisor,
+                Status = BuildTrackUserStatus.Active,
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            user.TenantId = tenantId;
+            user.FullName = fullName;
+            user.Phone = phone;
+            user.Role = BuildTrackUserRole.Supervisor;
+            user.Status = BuildTrackUserStatus.Active;
+            user.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        Guid? siteId = null;
+        if (Guid.TryParse(configuration["SEED_SUPERVISOR_SITE_ID"], out var configuredSiteId))
+        {
+            siteId = configuredSiteId;
+        }
+        else
+        {
+            siteId = await db.Sites
+                .AsNoTracking()
+                .Where(x => x.TenantId == tenantId)
+                .OrderBy(x => x.Name)
+                .Select(x => (Guid?)x.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (siteId is null) return;
+        var assignmentExists = await db.SupervisorSiteAssignments.AnyAsync(
+            x => x.TenantId == tenantId
+                 && x.SupervisorUserId == user.Id
+                 && x.SiteId == siteId.Value
+                 && x.IsActive,
+            cancellationToken);
+        if (assignmentExists) return;
+
+        db.SupervisorSiteAssignments.Add(new SupervisorSiteAssignment
+        {
+            TenantId = tenantId,
+            SupervisorUserId = user.Id,
+            SiteId = siteId.Value,
+            IsActive = true,
+            Notes = "Seed supervisor assignment",
+        });
     }
 
     private static bool ParseBool(string? value)

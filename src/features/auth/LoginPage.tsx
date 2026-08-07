@@ -1,6 +1,7 @@
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd'
 import { Link, useNavigate } from 'react-router-dom'
+import { fieldPortalUrl, getHostMode } from '../../app/hostMode'
 import { AuthLandingLink } from './AuthLandingLink'
 import { LOGIN_FAILED_MESSAGE, useAuthStore } from './authStore'
 
@@ -12,7 +13,12 @@ export const LoginPage = () => {
     try {
       await login(values.email, values.password)
       message.success('Giriş uğurludur')
-      navigate(useAuthStore.getState().hasActiveLicense || hasActiveLicense ? '/' : '/license', { replace: true })
+      const state = useAuthStore.getState()
+      if (getHostMode() === 'ManagementApp' && state.user?.role === 'Supervisor') {
+        window.location.assign(fieldPortalUrl())
+        return
+      }
+      navigate(state.hasActiveLicense || hasActiveLicense ? '/' : '/license', { replace: true })
     } catch {
       message.error(LOGIN_FAILED_MESSAGE)
     }

@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using BuildTrack.Api;
 using BuildTrack.Api.Contracts;
 using BuildTrack.Api.Options;
 using BuildTrack.Api.Services;
@@ -84,6 +85,13 @@ app.Use(async (context, next) =>
     tenantContext.UserId = principal.UserId;
     tenantContext.Role = principal.Role.ToString();
 
+    if (IsSupervisorRole(tenantContext.Role) && path.Equals("/api/licenses/activate", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { error = "Supervisor users inherit the tenant license and cannot activate licenses" });
+        return;
+    }
+
     if (IsLicenseExemptPath(path))
     {
         await next();
@@ -100,6 +108,13 @@ app.Use(async (context, next) =>
     {
         context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
         await context.Response.WriteAsJsonAsync(new { error = "Active license is required" });
+        return;
+    }
+
+    if (IsSupervisorRole(tenantContext.Role) && !IsSupervisorAllowedApiPath(path))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { error = "Supervisor users must use the Field Portal API" });
         return;
     }
 
@@ -172,6 +187,10 @@ app.MapPost("/api/auth/login", async (
     {
         return Results.Unauthorized();
     }
+
+    user.LastLoginAt = DateTimeOffset.UtcNow;
+    user.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
 
     var license = await GetCurrentLicenseAsync(db, user.TenantId, ct);
     return CreateAuthResponseResult(tokenService, user, user.Tenant!, license);
@@ -1633,6 +1652,8 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
     return Results.Ok(ApiResponseMapper.ToAttendanceEventResponse(inserted, siteName, device.Name));
 });
 
+app.MapFieldPortalEndpoints();
+
 app.Run();
 
 static AiOptions BuildAiOptions(IConfiguration configuration)
@@ -1694,6 +1715,14 @@ static bool IsLicenseExemptPath(string path) =>
     path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/api/licenses/activate", StringComparison.OrdinalIgnoreCase);
+
+static bool IsSupervisorRole(string? role) =>
+    string.Equals(role, BuildTrackUserRole.Supervisor.ToString(), StringComparison.OrdinalIgnoreCase);
+
+static bool IsSupervisorAllowedApiPath(string path) =>
+    path.StartsWith("/api/field/", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
 
 static string ExtractBearerToken(HttpRequest request)
 {

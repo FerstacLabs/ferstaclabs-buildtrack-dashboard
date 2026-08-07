@@ -298,6 +298,196 @@ export interface ActiveRegisterRawEventRow {
   decodedJson?: string
   createdAt: string
 }
+
+export type FieldDailyReportStatus = 'Draft' | 'Submitted' | 'Approved' | 'NeedsCorrection' | 'Rejected'
+export type FieldWarehouseRequestStatus = 'Draft' | 'Submitted' | 'NeedsJustification' | 'PendingApproval' | 'Approved' | 'PartiallyApproved' | 'Rejected' | 'ReadyForPickup' | 'Issued' | 'Closed' | 'Cancelled'
+export type FieldWorkerEventType = 'Late' | 'LeftEarly' | 'Absent' | 'Permission' | 'Medical' | 'SiteTransfer' | 'SafetyWarning' | 'ManualAttendanceCorrectionRequest' | 'Other'
+export type FieldSiteNoteCategory = 'Weather' | 'MaterialDelay' | 'Equipment' | 'Labor' | 'Safety' | 'Quality' | 'Access' | 'Other'
+
+export interface FieldAssignment {
+  siteId: string
+  siteName: string
+  address?: string
+  assignedAt: string
+}
+
+export interface FieldMe {
+  userId: string
+  fullName: string
+  email: string
+  role: string
+  tenantId: string
+  tenantName: string
+  assignments: FieldAssignment[]
+}
+
+export interface FieldDashboard {
+  siteId: string
+  siteName: string
+  workDate: string
+  activeWorkers: number
+  todayReports: number
+  pendingReports: number
+  openWarehouseRequests: number
+  workerRiskEvents: number
+  recentActivity: FieldActivity[]
+}
+
+export interface FieldActivity {
+  type: string
+  title: string
+  timestamp: string
+  status?: string
+}
+
+export interface FieldSmetaItem {
+  id: string
+  siteId: string
+  stageName: string
+  workName: string
+  unit: string
+  workCategory?: string
+}
+
+export interface FieldDailyReportLine {
+  id: string
+  smetaItemId: string
+  stageName: string
+  workName: string
+  unit: string
+  completedQuantity: number
+  workerCount: number
+  workHours: number
+  note?: string
+}
+
+export interface FieldDailyReport {
+  id: string
+  siteId: string
+  siteName: string
+  supervisorUserId: string
+  supervisorName: string
+  reportDate: string
+  status: FieldDailyReportStatus
+  weather?: string
+  generalNote?: string
+  submittedAt?: string
+  reviewedAt?: string
+  reviewNote?: string
+  createdAt: string
+  updatedAt?: string
+  lines: FieldDailyReportLine[]
+}
+
+export interface SaveFieldDailyReportBody {
+  id?: string
+  siteId: string
+  reportDate: string
+  weather?: string
+  generalNote?: string
+  lines: {
+    smetaItemId: string
+    completedQuantity: number
+    workerCount: number
+    workHours: number
+    note?: string
+  }[]
+}
+
+export interface FieldWorker {
+  id: string
+  siteId: string
+  externalWorkerCode: string
+  fullName: string
+  brigade?: string
+  role?: string
+  todayStatus: string
+  firstSeenAt?: string
+  lastSeenAt?: string
+  workedMinutesToday: number
+  riskScore: number
+}
+
+export interface FieldWorkerEvent {
+  id: string
+  siteId: string
+  workerId: string
+  workerName: string
+  supervisorUserId: string
+  supervisorName: string
+  eventType: FieldWorkerEventType
+  eventDateTime: string
+  reason: string
+  riskDelta: number
+  status: 'Submitted' | 'Reviewed' | 'Rejected'
+  createdAt: string
+}
+
+export interface FieldSiteNote {
+  id: string
+  siteId: string
+  siteName: string
+  supervisorUserId: string
+  supervisorName: string
+  eventDateTime: string
+  category: FieldSiteNoteCategory
+  text: string
+  createdAt: string
+}
+
+export interface FieldWarehouseCatalogItem {
+  id: string
+  name: string
+  category?: string
+  unit: string
+  code?: string
+}
+
+export interface FieldWarehouseRequest {
+  id: string
+  siteId: string
+  siteName: string
+  supervisorUserId: string
+  supervisorName: string
+  catalogItemId: string
+  materialName: string
+  unit: string
+  requestedQuantity: number
+  reason: string
+  justification?: string
+  urgency: 'Normal' | 'Urgent' | 'Critical'
+  status: FieldWarehouseRequestStatus
+  managerNote?: string
+  createdAt: string
+  updatedAt?: string
+}
+
+export interface SupervisorSummary {
+  id: string
+  fullName: string
+  email: string
+  phone?: string
+  status: 'Active' | 'Disabled'
+  lastLoginAt?: string
+  assignments: FieldAssignment[]
+  pendingReports: number
+  openWarehouseRequests: number
+  recentAuditEvents: number
+}
+
+export interface SupervisorAuditEventRow {
+  id: string
+  siteId?: string
+  siteName?: string
+  supervisorUserId?: string
+  supervisorName?: string
+  eventType: string
+  entityType?: string
+  entityId?: string
+  requiresManagerReview: boolean
+  message?: string
+  timestamp: string
+}
 export interface ListenerStatus {
   ports: number[]
   defaultPorts: number[]
@@ -474,6 +664,49 @@ export const buildTrackBackendApi = {
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
   getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),
   getActiveRegisterRawEvents: async (limit = 100) => unwrapArray<ActiveRegisterRawEventRow>(await request<unknown>(`/api/dahua/active-register/raw-events?limit=${limit}`)),
+  getFieldMe: () => request<FieldMe>('/api/field/me'),
+  getFieldAssignments: async () => unwrapArray<FieldAssignment>(await request<unknown>('/api/field/assignments')),
+  getFieldDashboard: (siteId?: string) => request<FieldDashboard>(`/api/field/dashboard${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`),
+  getFieldSmetaItems: async (siteId: string) => unwrapArray<FieldSmetaItem>(await request<unknown>(`/api/field/smeta-items?siteId=${encodeURIComponent(siteId)}`)),
+  getFieldWorkers: async (siteId: string) => unwrapArray<FieldWorker>(await request<unknown>(`/api/field/workers?siteId=${encodeURIComponent(siteId)}`)),
+  getFieldDailyReports: async (siteId?: string) => unwrapArray<FieldDailyReport>(await request<unknown>(`/api/field/daily-reports${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  saveFieldDailyReport: (body: SaveFieldDailyReportBody) => request<FieldDailyReport>('/api/field/daily-reports', { method: 'POST', body: JSON.stringify(body) }),
+  submitFieldDailyReport: (id: string) => request<FieldDailyReport>(`/api/field/daily-reports/${id}/submit`, { method: 'POST' }),
+  getFieldSiteNotes: async (siteId?: string) => unwrapArray<FieldSiteNote>(await request<unknown>(`/api/field/site-notes${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  createFieldSiteNote: (body: { siteId: string; category: FieldSiteNoteCategory; text: string; eventDateTime?: string }) =>
+    request<FieldSiteNote>('/api/field/site-notes', { method: 'POST', body: JSON.stringify(body) }),
+  getFieldWorkerEvents: async (siteId?: string) => unwrapArray<FieldWorkerEvent>(await request<unknown>(`/api/field/worker-events${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  createFieldWorkerEvent: (body: { siteId: string; workerId: string; eventType: FieldWorkerEventType; eventDateTime?: string; reason: string }) =>
+    request<FieldWorkerEvent>('/api/field/worker-events', { method: 'POST', body: JSON.stringify(body) }),
+  getFieldWarehouseCatalog: async () => unwrapArray<FieldWarehouseCatalogItem>(await request<unknown>('/api/field/warehouse/catalog')),
+  getFieldWarehouseRequests: async (siteId?: string) => unwrapArray<FieldWarehouseRequest>(await request<unknown>(`/api/field/warehouse/requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  createFieldWarehouseRequest: (body: { siteId: string; catalogItemId: string; requestedQuantity: number; reason: string; justification?: string; urgency: 'Normal' | 'Urgent' | 'Critical' }) =>
+    request<FieldWarehouseRequest>('/api/field/warehouse/requests', { method: 'POST', body: JSON.stringify(body) }),
+  getSupervisors: async () => unwrapArray<SupervisorSummary>(await request<unknown>('/api/supervisors')),
+  createSupervisor: (body: { fullName: string; email: string; phone?: string; password: string; siteIds: string[] }) =>
+    request<SupervisorSummary>('/api/supervisors', {
+      method: 'POST',
+      body: JSON.stringify({
+        fullName: body.fullName,
+        email: body.email,
+        phone: body.phone,
+        temporaryPassword: body.password,
+        siteIds: body.siteIds,
+      }),
+    }),
+  updateSupervisor: (id: string, body: { fullName: string; phone?: string; siteIds: string[]; status: 'Active' | 'Disabled' }) =>
+    request<SupervisorSummary>(`/api/supervisors/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  resetSupervisorPassword: (id: string, password: string) =>
+    request<void>(`/api/supervisors/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ temporaryPassword: password }) }),
+  suspendSupervisor: (id: string) => request<void>(`/api/supervisors/${id}/suspend`, { method: 'POST' }),
+  reactivateSupervisor: (id: string) => request<void>(`/api/supervisors/${id}/reactivate`, { method: 'POST' }),
+  getManagementFieldReports: async (siteId?: string) => unwrapArray<FieldDailyReport>(await request<unknown>(`/api/management/field-reports${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  reviewManagementFieldReport: (id: string, body: { status: FieldDailyReportStatus; reviewNote?: string }) =>
+    request<FieldDailyReport>(`/api/management/field-reports/${id}/review`, { method: 'POST', body: JSON.stringify(body) }),
+  getManagementWarehouseRequests: async (siteId?: string) => unwrapArray<FieldWarehouseRequest>(await request<unknown>(`/api/management/field-warehouse-requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  reviewManagementWarehouseRequest: (id: string, body: { status: FieldWarehouseRequestStatus; managerNote?: string; approvedQuantity?: number }) =>
+    request<FieldWarehouseRequest>(`/api/management/field-warehouse-requests/${id}/review`, { method: 'POST', body: JSON.stringify(body) }),
+  getSupervisorAuditEvents: async (siteId?: string) => unwrapArray<SupervisorAuditEventRow>(await request<unknown>(`/api/supervisor-audit/events${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   getAdminLicenses: async () => unwrapArray<AdminTenantLicenseRow>(await request<unknown>('/api/admin/licenses')),
   createAdminLicense: (body: { tenantId: string; plan: LicensePlan; expiresAt?: string; maxProjects?: number; maxUsers?: number; maxCameras?: number }) =>
     request<CreateAdminLicenseResponse>('/api/admin/licenses', { method: 'POST', body: JSON.stringify(body) }),

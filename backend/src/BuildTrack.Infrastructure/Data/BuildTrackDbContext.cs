@@ -30,6 +30,15 @@ public sealed class BuildTrackDbContext : DbContext
     public DbSet<DeviceConnectionLog> DeviceConnectionLogs => Set<DeviceConnectionLog>();
     public DbSet<NetSdkRuntimeDiagnostics> NetSdkRuntimeDiagnostics => Set<NetSdkRuntimeDiagnostics>();
     public DbSet<DahuaActiveRegisterRawEvent> DahuaActiveRegisterRawEvents => Set<DahuaActiveRegisterRawEvent>();
+    public DbSet<SupervisorSiteAssignment> SupervisorSiteAssignments => Set<SupervisorSiteAssignment>();
+    public DbSet<FieldSmetaItem> FieldSmetaItems => Set<FieldSmetaItem>();
+    public DbSet<SupervisorDailyReport> SupervisorDailyReports => Set<SupervisorDailyReport>();
+    public DbSet<SupervisorDailyReportLine> SupervisorDailyReportLines => Set<SupervisorDailyReportLine>();
+    public DbSet<SupervisorSiteNote> SupervisorSiteNotes => Set<SupervisorSiteNote>();
+    public DbSet<SupervisorWorkerEvent> SupervisorWorkerEvents => Set<SupervisorWorkerEvent>();
+    public DbSet<FieldWarehouseCatalogItem> FieldWarehouseCatalogItems => Set<FieldWarehouseCatalogItem>();
+    public DbSet<FieldWarehouseRequest> FieldWarehouseRequests => Set<FieldWarehouseRequest>();
+    public DbSet<SupervisorAuditEvent> SupervisorAuditEvents => Set<SupervisorAuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -49,6 +58,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.Property(x => x.FullName).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Email).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Phone).HasMaxLength(60);
             entity.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired();
             entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(40).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
@@ -310,6 +320,158 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasIndex(x => x.CreatedAt);
             entity.HasIndex(x => x.CallbackCommand);
             entity.HasIndex(x => x.DecodeStatus);
+        });
+
+        modelBuilder.Entity<SupervisorSiteAssignment>(entity =>
+        {
+            entity.ToTable("supervisor_site_assignments");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.SupervisorUserId);
+            entity.HasIndex(x => x.SiteId);
+            entity.HasIndex(x => new { x.TenantId, x.SupervisorUserId, x.SiteId, x.IsActive });
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SupervisorUser).WithMany().HasForeignKey(x => x.SupervisorUserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FieldSmetaItem>(entity =>
+        {
+            entity.ToTable("field_smeta_items");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.StageName).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.WorkName).HasMaxLength(220).IsRequired();
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.WorkCategory).HasMaxLength(100);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.SiteId);
+            entity.HasIndex(x => new { x.TenantId, x.SiteId, x.WorkName }).IsUnique();
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SupervisorDailyReport>(entity =>
+        {
+            entity.ToTable("supervisor_daily_reports");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Shift).HasMaxLength(80);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.GeneralNote).HasMaxLength(2000);
+            entity.Property(x => x.WeatherCondition).HasMaxLength(120);
+            entity.Property(x => x.ReviewNote).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.SupervisorUserId, x.SiteId, x.ReportDate }).IsUnique();
+            entity.HasIndex(x => new { x.SiteId, x.ReportDate });
+            entity.HasIndex(x => x.Status);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SupervisorUser).WithMany().HasForeignKey(x => x.SupervisorUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SupervisorDailyReportLine>(entity =>
+        {
+            entity.ToTable("supervisor_daily_report_lines");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.ReportedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.ReportId);
+            entity.HasIndex(x => x.SmetaItemId);
+            entity.HasOne(x => x.Report).WithMany(x => x.Lines).HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SmetaItem).WithMany().HasForeignKey(x => x.SmetaItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SupervisorSiteNote>(entity =>
+        {
+            entity.ToTable("supervisor_site_notes");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Category).HasConversion<string>().HasMaxLength(60).IsRequired();
+            entity.Property(x => x.Text).HasMaxLength(2000).IsRequired();
+            entity.Property(x => x.AttachmentPath).HasMaxLength(500);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.SiteId, x.EventDateTime });
+            entity.HasIndex(x => x.SupervisorUserId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SupervisorUser).WithMany().HasForeignKey(x => x.SupervisorUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SupervisorWorkerEvent>(entity =>
+        {
+            entity.ToTable("supervisor_worker_events");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.EventType).HasConversion<string>().HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(1200).IsRequired();
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.SiteId, x.EventDateTime });
+            entity.HasIndex(x => x.WorkerId);
+            entity.HasIndex(x => x.SupervisorUserId);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Worker).WithMany().HasForeignKey(x => x.WorkerId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SupervisorUser).WithMany().HasForeignKey(x => x.SupervisorUserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FieldWarehouseCatalogItem>(entity =>
+        {
+            entity.ToTable("field_warehouse_catalog_items");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Category).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Code).HasMaxLength(80);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FieldWarehouseRequest>(entity =>
+        {
+            entity.ToTable("field_warehouse_requests");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.RequestedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Urgency).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(1200).IsRequired();
+            entity.Property(x => x.Justification).HasMaxLength(1200);
+            entity.Property(x => x.ManagerComment).HasMaxLength(1200);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(60).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.SiteId, x.CreatedAt });
+            entity.HasIndex(x => x.SupervisorUserId);
+            entity.HasIndex(x => x.Status);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SupervisorUser).WithMany().HasForeignKey(x => x.SupervisorUserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.CatalogItem).WithMany().HasForeignKey(x => x.CatalogItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SupervisorAuditEvent>(entity =>
+        {
+            entity.ToTable("supervisor_audit_events");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.SupervisorNameSnapshot).HasMaxLength(180);
+            entity.Property(x => x.Action).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.EntityType).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(1200).IsRequired();
+            entity.Property(x => x.MetadataJson).HasColumnType("jsonb");
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.SiteId, x.Timestamp });
+            entity.HasIndex(x => x.SupervisorUserId);
+            entity.HasIndex(x => x.Action);
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<DeviceConnectionLog>(entity =>
         {

@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAttendanceSessionService, AttendanceSessionService>();
         services.AddScoped<IWorkerCameraIdentityResolver, WorkerCameraIdentityResolver>();
         services.AddScoped<IWorkerSiteAssignmentService, WorkerSiteAssignmentService>();
+        services.AddScoped<IFieldAccessService, FieldAccessService>();
         services.AddScoped<ISecuritySnapshotStore, SecuritySnapshotStore>();
         services.AddScoped<ISecurityEventService, SecurityEventService>();
         services.AddScoped<IDeviceConnectionLogger, DeviceConnectionLogger>();

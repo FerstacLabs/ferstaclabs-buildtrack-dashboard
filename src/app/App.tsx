@@ -5,6 +5,8 @@ import ruRU from 'antd/locale/ru_RU'
 import { RouterProvider } from 'react-router-dom'
 import { I18nProvider, useI18n } from '../i18n'
 import { MarketingLandingPage } from '../features/marketing/MarketingLandingPage'
+import { getHostMode } from './hostMode'
+import { fieldRouter } from './fieldRoutes'
 import { router } from './routes'
 import { theme } from './theme'
 
@@ -16,10 +18,12 @@ const localeByLanguage = {
 
 const AppShell = () => {
   const { language } = useI18n()
-  const isMarketingHost = typeof window !== 'undefined' && window.location.hostname === 'buildtrack.ferstaclabs.com'
+  const hostMode = getHostMode()
   return (
     <ConfigProvider theme={theme} locale={localeByLanguage[language]}>
-      {isMarketingHost ? <MarketingLandingPage /> : <RouterProvider router={router} />}
+      {hostMode === 'Marketing'
+        ? <MarketingLandingPage />
+        : <RouterProvider router={hostMode === 'FieldPortal' ? fieldRouter : router} />}
     </ConfigProvider>
   )
 }

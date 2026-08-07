@@ -24,10 +24,26 @@ VITE_API_BASE_URL=https://api.ferstaclabs.com
 
 The React app reads only `VITE_API_BASE_URL` for the backend API URL. If it is missing, local development falls back to `http://46.101.182.202:8080`. On Vercel, always set the HTTPS API URL to avoid mixed-content blocking.
 
+BuildTrack uses host-based routing:
+
+```text
+buildtrack.ferstaclabs.com       marketing site
+app.buildtrack.ferstaclabs.com   management dashboard
+field.buildtrack.ferstaclabs.com field / prorab portal
+```
+
+For the field portal deployment, set:
+
+```env
+VITE_API_BASE_URL=https://api.ferstaclabs.com
+VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
+VITE_FIELD_BASE_URL=https://field.buildtrack.ferstaclabs.com
+```
+
 Backend CORS is controlled by:
 
 ```env
-CORS_ALLOWED_ORIGINS=https://ferstaclabs-buildtrack-dashboard.vercel.app
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
 If multiple origins are needed, separate them with commas. The docker-compose file keeps the backend API on port `8080`; Vercel should never point to a frontend container on the VPS.
@@ -59,7 +75,13 @@ SEED_ADMIN_RESET_PASSWORD=false
 SEED_ADMIN_FULL_NAME=FerstacLabs Admin
 SEED_ADMIN_TENANT_NAME=FerstacLabs Demo
 
-CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
+SEED_SUPERVISOR_EMAIL=prorab@example.com
+SEED_SUPERVISOR_PASSWORD=replace-with-secure-password
+SEED_SUPERVISOR_FULL_NAME=Demo Prorab
+SEED_SUPERVISOR_PHONE=+994...
+SEED_SUPERVISOR_SITE_ID=
+
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
 If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure default admin password. The demo tenant still receives an active Unlimited license.
@@ -67,6 +89,8 @@ If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure
 To rotate the seeded admin password without deleting tenant or demo data, set `SEED_ADMIN_RESET_PASSWORD=true` together with the new `SEED_ADMIN_PASSWORD`, restart the API once, then set `SEED_ADMIN_RESET_PASSWORD=false` again.
 
 The seeded demo admin can manage tenant licenses from the app at `/admin/licenses`. The page lists all tenants, generates one-time raw license keys, and can directly activate a selected tenant license for onboarding/demo use.
+
+If `SEED_SUPERVISOR_EMAIL` and `SEED_SUPERVISOR_PASSWORD` are set, the initializer creates or updates a Supervisor account for the demo tenant and assigns it to `SEED_SUPERVISOR_SITE_ID` when provided. Field users inherit the tenant license and cannot activate licenses themselves.
 
 You can also create a tenant license as the demo/admin account with curl:
 
@@ -92,6 +116,7 @@ Frontend environment for Vercel:
 VITE_API_BASE_URL=/backend
 VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
 VITE_MARKETING_BASE_URL=https://buildtrack.ferstaclabs.com
+VITE_FIELD_BASE_URL=https://field.buildtrack.ferstaclabs.com
 ```
 
 Keep the `/backend` rewrite before the SPA fallback in `vercel.json`. The VPS backend still runs in Docker on port `8080`; HTTPS should be provided by Nginx or another reverse proxy.
