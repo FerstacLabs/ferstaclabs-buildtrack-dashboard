@@ -3,7 +3,6 @@ using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Services;
 using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace BuildTrack.Tests;
 
@@ -121,8 +120,7 @@ public sealed class SupplyChainServiceTests
         new SupplyChainService(
             db,
             new WarehouseAvailabilityService(db),
-            new WarehouseUsagePolicyService(db),
-            NullLogger<SupplyChainService>.Instance);
+            new WarehouseUsagePolicyService(db));
 
     private static async Task<SeedIds> SeedAsync(BuildTrackDbContext db, Guid tenantId, string itemCode, string itemName, decimal openingStock)
     {

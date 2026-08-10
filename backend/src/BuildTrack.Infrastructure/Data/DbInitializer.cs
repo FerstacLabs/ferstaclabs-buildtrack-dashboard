@@ -10,6 +10,174 @@ public static class DbInitializer
 {
     public static readonly Guid DemoTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
+    public sealed record SupplyCatalogSeedItem(
+        string Code,
+        string NameAz,
+        string NameRu,
+        string NameEn,
+        string Category,
+        string Subcategory,
+        string Unit,
+        SupplyItemType ItemType,
+        string SearchAliases);
+
+    public static readonly IReadOnlyList<SupplyCatalogSeedItem> SupplyCatalogSeedItems =
+    [
+        new("MAT-CEMENT-M400", "Sement M400", "Цемент M400", "Cement M400", "Beton və sement", "Sement", "kisə", SupplyItemType.ConstructionMaterial, "sement cement цемент m400"),
+        new("MAT-CEMENT-M500", "Sement M500", "Цемент M500", "Cement M500", "Beton və sement", "Sement", "kisə", SupplyItemType.ConstructionMaterial, "sement cement цемент m500"),
+        new("MAT-CONCRETE-B15", "Beton B15", "Бетон B15", "Concrete B15", "Beton və sement", "Beton", "m3", SupplyItemType.Concrete, "beton бетон concrete b15"),
+        new("MAT-CONCRETE-B20", "Beton B20", "Бетон B20", "Concrete B20", "Beton və sement", "Beton", "m3", SupplyItemType.Concrete, "beton бетон concrete b20"),
+        new("MAT-CONCRETE-B25", "Beton B25", "Бетон B25", "Concrete B25", "Beton və sement", "Beton", "m3", SupplyItemType.Concrete, "beton бетон concrete b25"),
+        new("MAT-CONCRETE-B30", "Beton B30", "Бетон B30", "Concrete B30", "Beton və sement", "Beton", "m3", SupplyItemType.Concrete, "beton бетон concrete b30"),
+        new("MAT-CONCRETE-B35", "Beton B35", "Бетон B35", "Concrete B35", "Beton və sement", "Beton", "m3", SupplyItemType.Concrete, "beton бетон concrete b35"),
+        new("MAT-SAND", "Qum", "Песок", "Sand", "Beton və sement", "Aqreqat", "m3", SupplyItemType.ConstructionMaterial, "qum sand песок"),
+        new("MAT-GRAVEL", "Çınqıl", "Щебень", "Gravel", "Beton və sement", "Aqreqat", "m3", SupplyItemType.ConstructionMaterial, "cinqil çınqıl gravel щебень"),
+        new("CHEM-CONCRETE-ADDITIVE", "Beton qatqısı", "Добавка для бетона", "Concrete additive", "Beton və sement", "Qatqı", "litr", SupplyItemType.Chemical, "beton qatqi concrete additive добавка"),
+        new("CHEM-WATERPROOF-ADDITIVE", "Hidroizolyasiya qatqısı", "Гидроизоляционная добавка", "Waterproof additive", "Beton və sement", "Qatqı", "litr", SupplyItemType.Chemical, "hidroizolyasiya qatqi waterproof additive"),
+        new("MAT-MASONRY-MORTAR", "Hörgü məhlulu", "Кладочный раствор", "Masonry mortar", "Beton və sement", "Məhlul", "kisə", SupplyItemType.ConstructionMaterial, "horgu hörgü mehlul masonry mortar раствор"),
+
+        new("STEEL-REBAR-08", "Armatur 8 mm", "Арматура 8 мм", "Rebar 8 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 8"),
+        new("STEEL-REBAR-10", "Armatur 10 mm", "Арматура 10 мм", "Rebar 10 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 10"),
+        new("STEEL-REBAR-12", "Armatur 12 mm", "Арматура 12 мм", "Rebar 12 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 12"),
+        new("STEEL-REBAR-14", "Armatur 14 mm", "Арматура 14 мм", "Rebar 14 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 14"),
+        new("STEEL-REBAR-16", "Armatur 16 mm", "Арматура 16 мм", "Rebar 16 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 16"),
+        new("STEEL-REBAR-18", "Armatur 18 mm", "Арматура 18 мм", "Rebar 18 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 18"),
+        new("STEEL-REBAR-20", "Armatur 20 mm", "Арматура 20 мм", "Rebar 20 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 20"),
+        new("STEEL-REBAR-22", "Armatur 22 mm", "Арматура 22 мм", "Rebar 22 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 22"),
+        new("STEEL-REBAR-25", "Armatur 25 mm", "Арматура 25 мм", "Rebar 25 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 25"),
+        new("STEEL-REBAR-28", "Armatur 28 mm", "Арматура 28 мм", "Rebar 28 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 28"),
+        new("STEEL-REBAR-32", "Armatur 32 mm", "Арматура 32 мм", "Rebar 32 mm", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel 32"),
+        new("MAT-REBAR-A3", "Armatur A3", "Арматура A3", "Rebar A3", "Armatur və metal", "Armatur", "ton", SupplyItemType.Steel, "armatur арматура rebar steel a3"),
+        new("STEEL-BINDING-WIRE", "Bağlama məftili", "Вязальная проволока", "Binding wire", "Armatur və metal", "Məftil", "kg", SupplyItemType.Steel, "baglama məftil wire binding проволока"),
+        new("STEEL-MESH", "Metal tor", "Металлическая сетка", "Metal mesh", "Armatur və metal", "Tor", "m2", SupplyItemType.Steel, "metal tor mesh сетка"),
+        new("STEEL-PROFILE", "Profil", "Профиль", "Metal profile", "Armatur və metal", "Profil", "m", SupplyItemType.Steel, "profil metal profile профиль"),
+        new("STEEL-ANGLE-IRON", "Bucaq dəmiri", "Уголок металлический", "Angle iron", "Armatur və metal", "Profil", "m", SupplyItemType.Steel, "bucaq dəmir angle iron уголок"),
+        new("STEEL-PIPE", "Metal boru", "Металлическая труба", "Steel pipe", "Armatur və metal", "Boru", "m", SupplyItemType.Steel, "metal boru steel pipe труба"),
+
+        new("FORM-PLYWOOD", "Qəlib faneri", "Фанера для опалубки", "Formwork plywood", "Qəlib və iskele", "Qəlib", "vərəq", SupplyItemType.Formwork, "qelib qəlib faner plywood formwork"),
+        new("FORM-TIMBER", "Taxta", "Доска", "Timber", "Qəlib və iskele", "Taxta", "m3", SupplyItemType.Formwork, "taxta timber wood доска"),
+        new("FORM-TELESCOPIC-PROP", "Teleskopik dayaq", "Телескопическая стойка", "Telescopic prop", "Qəlib və iskele", "Dayaq", "ədəd", SupplyItemType.Formwork, "teleskopik dayaq prop стойка"),
+        new("FORM-LOCK", "Qəlib kilidi", "Замок опалубки", "Formwork lock", "Qəlib və iskele", "Qəlib aksesuarı", "ədəd", SupplyItemType.Formwork, "qelib qəlib kilid lock замок"),
+        new("FORM-ANCHOR", "Anker", "Анкер", "Anchor", "Qəlib və iskele", "Anker", "ədəd", SupplyItemType.Fastener, "anker anchor анкер"),
+        new("SCAF-ELEMENT", "İskele elementi", "Элемент лесов", "Scaffolding element", "Qəlib və iskele", "İskele", "ədəd", SupplyItemType.Equipment, "iskele scaffolding леса"),
+        new("SCAF-PLATFORM", "İskele platforması", "Платформа лесов", "Scaffolding platform", "Qəlib və iskele", "İskele", "ədəd", SupplyItemType.Equipment, "iskele platform scaffolding"),
+
+        new("MASON-BRICK", "Kərpic", "Кирпич", "Brick", "Hörgü", "Kərpic", "ədəd", SupplyItemType.ConstructionMaterial, "kerpic kərpic brick кирпич"),
+        new("MASON-AAC-BLOCK", "Qazbeton blok", "Газобетонный блок", "AAC block / gas block", "Hörgü", "Blok", "m3", SupplyItemType.ConstructionMaterial, "qazbeton gasblock aac block газобетон"),
+        new("MASON-CONCRETE-BLOCK", "Beton blok", "Бетонный блок", "Concrete block", "Hörgü", "Blok", "ədəd", SupplyItemType.ConstructionMaterial, "beton blok concrete block"),
+        new("MASON-MORTAR", "Hörgü məhlulu", "Кладочный раствор", "Masonry mortar", "Hörgü", "Məhlul", "kisə", SupplyItemType.ConstructionMaterial, "horgu hörgü masonry mortar"),
+        new("MASON-MESH", "Hörgü toru", "Кладочная сетка", "Masonry mesh", "Hörgü", "Tor", "m2", SupplyItemType.Steel, "horgu hörgü tor masonry mesh"),
+
+        new("ROOF-BITUMEN-MEMBRANE", "Bitum membran", "Битумная мембрана", "Bitumen membrane", "Dam və izolyasiya", "Membran", "rulon", SupplyItemType.ConstructionMaterial, "bitum membrane membran битум"),
+        new("ROOF-MINERAL-WOOL", "Mineral yun", "Минеральная вата", "Mineral wool", "Dam və izolyasiya", "İzolyasiya", "m2", SupplyItemType.ConstructionMaterial, "mineral yun wool вата"),
+        new("ROOF-XPS", "XPS", "XPS", "XPS", "Dam və izolyasiya", "İzolyasiya", "m2", SupplyItemType.ConstructionMaterial, "xps insulation izolyasiya"),
+        new("ROOF-EPS", "EPS", "EPS", "EPS", "Dam və izolyasiya", "İzolyasiya", "m2", SupplyItemType.ConstructionMaterial, "eps insulation izolyasiya"),
+        new("ROOF-VAPOR-BARRIER", "Buxar bariyeri", "Пароизоляция", "Vapor barrier", "Dam və izolyasiya", "Bariyer", "rulon", SupplyItemType.ConstructionMaterial, "buxar bariyer vapor barrier"),
+        new("MAT-WATERPROOF-ROLL", "Hidroizolyasiya rulonu", "Гидроизоляционный рулон", "Waterproofing roll", "Dam və izolyasiya", "Su izolyasiyası", "rulon", SupplyItemType.Chemical, "hidroizolyasiya waterproofing membrane roll"),
+        new("ROOF-MATERIAL", "Dam örtüyü", "Кровельный материал", "Roofing material", "Dam və izolyasiya", "Dam örtüyü", "m2", SupplyItemType.ConstructionMaterial, "dam roof roofing кровля"),
+
+        new("FIN-GYPSUM-BOARD", "Alçıpan", "Гипсокартон", "Gypsum board", "Alçıpan və finishing", "Alçıpan", "vərəq", SupplyItemType.Finishing, "alcipan alçıpan gypsum drywall гипсокартон"),
+        new("FIN-MOISTURE-GYPSUM", "Nəmə davamlı alçıpan", "Влагостойкий гипсокартон", "Moisture-resistant gypsum board", "Alçıpan və finishing", "Alçıpan", "vərəq", SupplyItemType.Finishing, "neme davamli alcipan moisture resistant drywall"),
+        new("FIN-UD-PROFILE", "UD profil", "UD профиль", "UD profile", "Alçıpan və finishing", "Profil", "m", SupplyItemType.Finishing, "ud profil profile"),
+        new("FIN-CD-PROFILE", "CD profil", "CD профиль", "CD profile", "Alçıpan və finishing", "Profil", "m", SupplyItemType.Finishing, "cd profil profile"),
+        new("FIN-PLASTER", "Suvaq", "Штукатурка", "Plaster", "Alçıpan və finishing", "Suvaq", "kisə", SupplyItemType.Finishing, "suvaq plaster штукатурка"),
+        new("FIN-PUTTY", "Şpaklyovka", "Шпаклевка", "Putty", "Alçıpan və finishing", "Şpaklyovka", "kisə", SupplyItemType.Finishing, "spaklyovka şpaklyovka putty шпаклевка"),
+        new("FIN-PRIMER", "Astar", "Грунтовка", "Primer", "Alçıpan və finishing", "Boya", "litr", SupplyItemType.Finishing, "astar primer грунтовка"),
+        new("FIN-PAINT-INTERIOR", "Daxili boya", "Интерьерная краска", "Interior paint", "Alçıpan və finishing", "Boya", "litr", SupplyItemType.Finishing, "daxili boya paint краска"),
+        new("FIN-PAINT-EXTERIOR", "Xarici boya", "Фасадная краска", "Exterior paint", "Alçıpan və finishing", "Boya", "litr", SupplyItemType.Finishing, "xarici boya exterior paint фасадная краска"),
+        new("FIN-TILE", "Kafel", "Кафель", "Tile", "Alçıpan və finishing", "Kafel", "m2", SupplyItemType.Finishing, "kafel tile плитка"),
+        new("FIN-FLOOR-TILE", "Metlax", "Напольная плитка", "Floor tile", "Alçıpan və finishing", "Kafel", "m2", SupplyItemType.Finishing, "metlax floor tile напольная плитка"),
+        new("FIN-TILE-ADHESIVE", "Kafel yapışqanı", "Клей для плитки", "Tile adhesive", "Alçıpan və finishing", "Yapışqan", "kisə", SupplyItemType.Chemical, "kafel yapisqan yapışqan tile adhesive клей"),
+        new("FIN-GROUT", "Derz dolğusu", "Затирка", "Grout", "Alçıpan və finishing", "Derz", "kg", SupplyItemType.Finishing, "derz grout затирка"),
+
+        new("ELEC-CABLE-1-5", "Kabel 1.5 mm2", "Кабель 1.5 мм2", "Cable 1.5 mm2", "Elektrik", "Kabel", "m", SupplyItemType.Electrical, "kabel кабель cable 1.5"),
+        new("ELEC-CABLE-2-5", "Kabel 2.5 mm2", "Кабель 2.5 мм2", "Cable 2.5 mm2", "Elektrik", "Kabel", "m", SupplyItemType.Electrical, "kabel кабель cable 2.5"),
+        new("ELEC-CABLE-4", "Kabel 4 mm2", "Кабель 4 мм2", "Cable 4 mm2", "Elektrik", "Kabel", "m", SupplyItemType.Electrical, "kabel кабель cable 4"),
+        new("ELEC-CABLE-6", "Kabel 6 mm2", "Кабель 6 мм2", "Cable 6 mm2", "Elektrik", "Kabel", "m", SupplyItemType.Electrical, "kabel кабель cable 6"),
+        new("ELEC-CABLE-10", "Kabel 10 mm2", "Кабель 10 мм2", "Cable 10 mm2", "Elektrik", "Kabel", "m", SupplyItemType.Electrical, "kabel кабель cable 10"),
+        new("ELEC-CABLE-CONDUIT", "Kabel kanalı", "Кабель-канал", "Cable conduit", "Elektrik", "Kanal", "m", SupplyItemType.Electrical, "kabel kanal conduit кабель канал"),
+        new("ELEC-CORRUGATED-CONDUIT", "Gofra", "Гофра", "Corrugated conduit", "Elektrik", "Gofra", "m", SupplyItemType.Electrical, "gofra corrugated conduit"),
+        new("ELEC-CIRCUIT-BREAKER", "Avtomat", "Автоматический выключатель", "Circuit breaker", "Elektrik", "Avtomat", "ədəd", SupplyItemType.Electrical, "avtomat breaker выключатель"),
+        new("ELEC-DISTRIBUTION-BOX", "Elektrik qutusu", "Распределительная коробка", "Distribution box", "Elektrik", "Qutu", "ədəd", SupplyItemType.Electrical, "elektrik qutu distribution box"),
+        new("ELEC-SOCKET", "Rozetka", "Розетка", "Socket", "Elektrik", "Aksesuar", "ədəd", SupplyItemType.Electrical, "rozetka socket розетка"),
+        new("ELEC-SWITCH", "Açar", "Выключатель", "Switch", "Elektrik", "Aksesuar", "ədəd", SupplyItemType.Electrical, "acar açar switch выключатель"),
+        new("ELEC-JUNCTION-BOX", "Junction box", "Соединительная коробка", "Junction box", "Elektrik", "Qutu", "ədəd", SupplyItemType.Electrical, "junction box elektrik qutu"),
+        new("ELEC-LIGHTING-FIXTURE", "İşıqlandırma", "Светильник", "Lighting fixture", "Elektrik", "İşıqlandırma", "ədəd", SupplyItemType.Electrical, "isiq işıq lighting fixture светильник"),
+        new("ELEC-EXT-CABLE-30", "Uzatma kabeli 30m", "Удлинитель 30м", "Extension cable 30m", "Elektrik", "Kabel", "ədəd", SupplyItemType.Electrical, "kabel кабель cable extension uzatma"),
+
+        new("PLUMB-PPR-20", "PPR boru 20", "PPR труба 20", "PPR pipe 20", "Santexnika", "Boru", "m", SupplyItemType.Plumbing, "ppr boru pipe труба 20"),
+        new("PLUMB-PPR-25", "PPR boru 25", "PPR труба 25", "PPR pipe 25", "Santexnika", "Boru", "m", SupplyItemType.Plumbing, "ppr boru pipe труба 25"),
+        new("PLUMB-PPR-32", "PPR boru 32", "PPR труба 32", "PPR pipe 32", "Santexnika", "Boru", "m", SupplyItemType.Plumbing, "ppr boru pipe труба 32"),
+        new("PLUMB-PVC-SEWER-50", "PVC kanalizasiya borusu 50", "PVC канализационная труба 50", "PVC sewer pipe 50", "Santexnika", "Kanalizasiya", "m", SupplyItemType.Plumbing, "pvc kanalizasiya boru sewer pipe 50"),
+        new("PLUMB-PVC-SEWER-110", "PVC kanalizasiya borusu 110", "PVC канализационная труба 110", "PVC sewer pipe 110", "Santexnika", "Kanalizasiya", "m", SupplyItemType.Plumbing, "pvc kanalizasiya boru sewer pipe 110"),
+        new("PLUMB-PE-PIPE", "PE boru", "PE труба", "PE pipe", "Santexnika", "Boru", "m", SupplyItemType.Plumbing, "pe boru pipe труба"),
+        new("PLUMB-COUPLING", "Mufta", "Муфта", "Coupling", "Santexnika", "Fitinq", "ədəd", SupplyItemType.Plumbing, "mufta coupling фитинг"),
+        new("PLUMB-ELBOW", "Dirsək", "Колено", "Elbow", "Santexnika", "Fitinq", "ədəd", SupplyItemType.Plumbing, "dirsek dirsək elbow колено"),
+        new("PLUMB-TEE", "Tee", "Тройник", "Tee", "Santexnika", "Fitinq", "ədəd", SupplyItemType.Plumbing, "tee тройник fitinq"),
+        new("PLUMB-VALVE", "Ventil", "Вентиль", "Valve", "Santexnika", "Armatur", "ədəd", SupplyItemType.Plumbing, "ventil valve вентиль"),
+        new("PLUMB-FAUCET", "Kran", "Кран", "Faucet", "Santexnika", "Armatur", "ədəd", SupplyItemType.Plumbing, "kran faucet кран"),
+        new("PLUMB-PUMP", "Nasos", "Насос", "Pump", "Santexnika", "Avadanlıq", "ədəd", SupplyItemType.Plumbing, "nasos pump насос"),
+        new("PLUMB-FITTINGS", "Ümumi fitinqlər", "Фитинги", "Common fittings", "Santexnika", "Fitinq", "ədəd", SupplyItemType.Plumbing, "fitinq fittings фитинги"),
+
+        new("HVAC-AIR-DUCT", "Hava kanalı", "Воздуховод", "Air duct", "HVAC", "Hava kanalı", "m", SupplyItemType.HVAC, "hava kanal air duct воздуховод"),
+        new("HVAC-DUCT-FITTING", "Kanal fitinqi", "Фитинг воздуховода", "Duct fitting", "HVAC", "Fitinq", "ədəd", SupplyItemType.HVAC, "duct fitting kanal fitinq"),
+        new("HVAC-INSULATION", "HVAC izolyasiya", "HVAC изоляция", "HVAC insulation", "HVAC", "İzolyasiya", "m2", SupplyItemType.HVAC, "hvac insulation izolyasiya"),
+        new("HVAC-DIFFUSER", "Diffuzor", "Диффузор", "Diffuser", "HVAC", "Aksesuar", "ədəd", SupplyItemType.HVAC, "diffuzor diffuser диффузор"),
+        new("HVAC-FAN", "Ventilyator", "Вентилятор", "Fan", "HVAC", "Avadanlıq", "ədəd", SupplyItemType.HVAC, "ventilyator fan вентилятор"),
+        new("HVAC-DRAIN-PIPE", "Drenaj borusu", "Дренажная труба", "Drain pipe", "HVAC", "Drenaj", "m", SupplyItemType.HVAC, "drenaj drain pipe boru"),
+
+        new("PPE-HELMET", "Kaska", "Каска", "Safety helmet", "PPE", "Baş qoruyucu", "ədəd", SupplyItemType.PPE, "kaska каска helmet hardhat safety"),
+        new("PPE-GLOVE", "İş əlcəyi", "Рабочие перчатки", "Work gloves", "PPE", "Əl qoruyucu", "cüt", SupplyItemType.PPE, "elcek əlcək əlcəyi перчатки gloves glove"),
+        new("PPE-VEST", "Reflektor jilet", "Сигнальный жилет", "Reflective vest", "PPE", "Görünürlük", "ədəd", SupplyItemType.PPE, "jilet vest reflective жилет"),
+        new("PPE-GLASSES", "Qoruyucu eynək", "Защитные очки", "Safety glasses", "PPE", "Göz qoruyucu", "ədəd", SupplyItemType.PPE, "eynek eynək glasses goggles очки"),
+        new("PPE-RESPIRATOR", "Respirator", "Респиратор", "Respirator", "PPE", "Tənəffüs qoruyucu", "ədəd", SupplyItemType.PPE, "respirator mask респиратор"),
+        new("PPE-HEARING-PROTECTION", "Qulaqlıq", "Защита слуха", "Hearing protection", "PPE", "Eşitmə qoruyucu", "ədəd", SupplyItemType.PPE, "qulaqliq qulaqlıq hearing protection"),
+        new("PPE-SAFETY-HARNESS", "Təhlükəsizlik kəməri", "Страховочная привязь", "Safety harness", "PPE", "Hündürlük qoruyucu", "ədəd", SupplyItemType.PPE, "tehlukesizlik təhlükəsizlik kemer harness"),
+        new("PPE-SAFETY-SHOES", "İş ayaqqabısı", "Защитная обувь", "Safety shoes", "PPE", "Ayaq qoruyucu", "cüt", SupplyItemType.PPE, "ayaqqabi ayaqqabısı shoes boots обувь"),
+        new("PPE-COVERALL", "Kombinezon", "Комбинезон", "Coverall", "PPE", "Geyim", "ədəd", SupplyItemType.PPE, "kombinezon coverall комбинезон"),
+
+        new("TOOL-DRILL", "Drel", "Дрель", "Drill", "Alət", "Elektrik aləti", "ədəd", SupplyItemType.Tool, "drel drill дрель"),
+        new("TOOL-ROTARY-HAMMER", "Perforator", "Перфоратор", "Rotary hammer", "Alət", "Elektrik aləti", "ədəd", SupplyItemType.Tool, "perforator rotary hammer перфоратор"),
+        new("TOOL-ANGLE-GRINDER", "Bolqar", "УШМ болгарка", "Angle grinder", "Alət", "Elektrik aləti", "ədəd", SupplyItemType.Tool, "bolqar grinder болгарка"),
+        new("TOOL-SCREWDRIVER-DRILL", "Şurupovyor", "Шуруповерт", "Screwdriver/drill", "Alət", "Elektrik aləti", "ədəd", SupplyItemType.Tool, "surupovyor şurupovyor screwdriver drill шуруповерт"),
+        new("TOOL-LASER-LEVEL", "Lazer səviyyə", "Лазерный уровень", "Laser level", "Alət", "Ölçü aləti", "ədəd", SupplyItemType.Tool, "lazer seviye səviyyə laser level"),
+        new("TOOL-TAPE-MEASURE", "Ruletka", "Рулетка", "Tape measure", "Alət", "Ölçü aləti", "ədəd", SupplyItemType.Tool, "ruletka tape measure рулетка"),
+        new("TOOL-HAMMER", "Çəkic", "Молоток", "Hammer", "Alət", "Əl aləti", "ədəd", SupplyItemType.Tool, "cekic çəkic hammer молоток"),
+        new("TOOL-PLIERS", "Kəlbətin", "Плоскогубцы", "Pliers", "Alət", "Əl aləti", "ədəd", SupplyItemType.Tool, "kelbetin kəlbətin pliers"),
+        new("TOOL-WRENCH-SET", "Açar dəsti", "Набор ключей", "Wrench set", "Alət", "Əl aləti", "dəst", SupplyItemType.Tool, "acar açar wrench set ключи"),
+        new("TOOL-SCREWDRIVER-SET", "Tornavida dəsti", "Набор отверток", "Screwdriver set", "Alət", "Əl aləti", "dəst", SupplyItemType.Tool, "tornavida screwdriver set отвертка"),
+        new("TOOL-SAW", "Mişar", "Пила", "Saw", "Alət", "Əl aləti", "ədəd", SupplyItemType.Tool, "misar mişar saw пила"),
+
+        new("CONS-DRILL-BIT-6", "Sverlo 6 mm", "Сверло 6 мм", "Drill bit 6 mm", "Sərfiyyat", "Sverlo", "ədəd", SupplyItemType.Consumable, "sverlo drill bit сверло 6"),
+        new("TOOL-DRILL-8", "Sverlo 8 mm", "Сверло 8 мм", "Drill bit 8 mm", "Sərfiyyat", "Sverlo", "ədəd", SupplyItemType.Consumable, "sverlo drill bit сверло 8"),
+        new("CONS-DRILL-BIT-10", "Sverlo 10 mm", "Сверло 10 мм", "Drill bit 10 mm", "Sərfiyyat", "Sverlo", "ədəd", SupplyItemType.Consumable, "sverlo drill bit сверло 10"),
+        new("TOOL-DRILL-12", "Sverlo 12 mm", "Сверло 12 мм", "Drill bit 12 mm", "Sərfiyyat", "Sverlo", "ədəd", SupplyItemType.Consumable, "sverlo drill bit сверло 12"),
+        new("CONS-DRILL-BIT-14", "Sverlo 14 mm", "Сверло 14 мм", "Drill bit 14 mm", "Sərfiyyat", "Sverlo", "ədəd", SupplyItemType.Consumable, "sverlo drill bit сверло 14"),
+        new("CONS-CUT-DISC", "Kəsici disk", "Отрезной диск", "Cutting disc", "Sərfiyyat", "Disk", "ədəd", SupplyItemType.Consumable, "disk cutting grinder cut disc отрезной"),
+        new("CONS-GRINDING-DISC", "Cilalama diski", "Шлифовальный диск", "Grinding disc", "Sərfiyyat", "Disk", "ədəd", SupplyItemType.Consumable, "cilalama grinding disc диск"),
+        new("CONS-WELD-ELECTRODE", "Qaynaq elektrodu", "Сварочный электрод", "Welding electrode", "Sərfiyyat", "Qaynaq", "kg", SupplyItemType.Consumable, "qaynaq electrode welding электрод"),
+        new("FAST-DOWEL", "Dübel", "Дюбель", "Dowel", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "dubel dübel dowel дюбель"),
+        new("FAST-SCREW", "Şurup", "Шуруп", "Screw", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "surup şurup screw шуруп"),
+        new("FAST-SELF-TAPPING-SCREW", "Samorez", "Саморез", "Self-tapping screw", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "samorez self tapping screw"),
+        new("FAST-BOLT", "Bolt", "Болт", "Bolt", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "bolt болт"),
+        new("FAST-NUT", "Qayka", "Гайка", "Nut", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "qayka nut гайка"),
+        new("FAST-WASHER", "Şayba", "Шайба", "Washer", "Sərfiyyat", "Bərkidici", "ədəd", SupplyItemType.Fastener, "sayba şayba washer шайба"),
+        new("CHEM-SILICONE", "Silikon", "Силикон", "Silicone", "Sərfiyyat", "Kimyəvi", "ədəd", SupplyItemType.Chemical, "silikon silicone силикон"),
+        new("CHEM-PU-FOAM", "Köpük", "Монтажная пена", "PU foam", "Sərfiyyat", "Kimyəvi", "ədəd", SupplyItemType.Chemical, "kopuk köpük foam пена"),
+        new("ELEC-TAPE", "İzolyasiya lenti", "Изолента", "Electrical tape", "Sərfiyyat", "Lent", "rulon", SupplyItemType.Consumable, "izolyasiya lent tape изолента"),
+        new("CONS-ADHESIVE-TAPE", "Skotç", "Скотч", "Adhesive tape", "Sərfiyyat", "Lent", "rulon", SupplyItemType.Consumable, "skotc skotç adhesive tape скотч"),
+
+        new("CHEM-SOLVENT", "Solvent", "Растворитель", "Solvent", "Kimyəvi məhsullar", "Həlledici", "litr", SupplyItemType.Chemical, "solvent həlledici растворитель"),
+        new("CHEM-ADHESIVE", "Yapışqan", "Клей", "Adhesive", "Kimyəvi məhsullar", "Yapışqan", "ədəd", SupplyItemType.Chemical, "yapisqan yapışqan adhesive glue клей"),
+        new("CHEM-MASTIC", "Mastika", "Мастика", "Mastic", "Kimyəvi məhsullar", "Mastika", "kg", SupplyItemType.Chemical, "mastika mastic мастика"),
+        new("CHEM-ANTI-CORROSION", "Antikor örtük", "Антикоррозионное покрытие", "Anti-corrosion coating", "Kimyəvi məhsullar", "Örtük", "litr", SupplyItemType.Chemical, "antikor anti corrosion coating"),
+        new("CHEM-LUBRICANT", "Yağ", "Смазка", "Lubricant", "Kimyəvi məhsullar", "Yağ", "litr", SupplyItemType.Chemical, "yag yağ lubricant смазка"),
+        new("CHEM-CLEANER", "Təmizləyici", "Очиститель", "Cleaner", "Kimyəvi məhsullar", "Təmizləyici", "litr", SupplyItemType.Chemical, "temizleyici təmizləyici cleaner очиститель"),
+
+        new("FUEL-DIESEL", "Dizel", "Дизель", "Diesel", "Yanacaq", "Dizel", "litr", SupplyItemType.Fuel, "dizel diesel дизель"),
+        new("FUEL-PETROL", "Benzin", "Бензин", "Petrol", "Yanacaq", "Benzin", "litr", SupplyItemType.Fuel, "benzin petrol gasoline бензин"),
+    ];
+
     public static async Task EnsureDatabaseAsync(BuildTrackDbContext db, IConfiguration? configuration = null, CancellationToken cancellationToken = default)
     {
         await db.Database.EnsureCreatedAsync(cancellationToken);
@@ -971,14 +1139,23 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         {
             ("eded", "ədəd", "piece", "штука"),
             ("cut", "cüt", "pair", "пара"),
+            ("dest", "dəst", "set", "комплект"),
+            ("paket", "paket", "packet", "пакет"),
+            ("qutu", "qutu", "box", "коробка"),
             ("kise", "kisə", "bag", "мешок"),
+            ("palet", "palet", "pallet", "паллет"),
+            ("vereq", "vərəq", "sheet", "лист"),
             ("kg", "kq", "kg", "кг"),
+            ("qram", "qram", "gram", "грамм"),
             ("ton", "ton", "ton", "тонна"),
             ("m", "m", "m", "м"),
             ("m2", "m2", "m2", "м2"),
             ("m3", "m3", "m3", "м3"),
             ("rulon", "rulon", "roll", "рулон"),
+            ("ml", "ml", "ml", "мл"),
             ("litr", "litr", "liter", "литр"),
+            ("saat", "saat", "hour", "час"),
+            ("gun", "gün", "day", "день"),
         };
 
         foreach (var (code, az, en, ru) in units)
@@ -990,19 +1167,10 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         var tenants = await db.Tenants.AsNoTracking().Select(x => x.Id).ToListAsync(cancellationToken);
         foreach (var tenantId in tenants)
         {
-            await UpsertCatalogAsync(db, tenantId, "PPE-HELMET", "Kaska", "Каска", "Safety helmet", "PPE", "Baş qoruyucu", "ədəd", SupplyItemType.PPE, "helmet hardhat safety kaska каска");
-            await UpsertCatalogAsync(db, tenantId, "PPE-GLOVE", "İş əlcəyi", "Рабочие перчатки", "Work gloves", "PPE", "Əl qoruyucu", "cüt", SupplyItemType.PPE, "elcek glove перчатки əlcək əlcəyi");
-            await UpsertCatalogAsync(db, tenantId, "PPE-VEST", "Reflektor jilet", "Сигнальный жилет", "Reflective vest", "PPE", "Görünürlük", "ədəd", SupplyItemType.PPE, "jilet vest reflective");
-            await UpsertCatalogAsync(db, tenantId, "PPE-GLASSES", "Qoruyucu eynək", "Защитные очки", "Safety glasses", "PPE", "Göz qoruyucu", "ədəd", SupplyItemType.PPE, "eynek glasses goggles");
-            await UpsertCatalogAsync(db, tenantId, "TOOL-DRILL-12", "Sverlo 12mm", "Сверло 12мм", "Drill bit 12mm", "Alət", "Sverlo", "ədəd", SupplyItemType.Tool, "sverlo drill bit сверло");
-            await UpsertCatalogAsync(db, tenantId, "TOOL-DRILL-8", "Sverlo 8mm", "Сверло 8мм", "Drill bit 8mm", "Alət", "Sverlo", "ədəd", SupplyItemType.Tool, "sverlo drill bit сверло");
-            await UpsertCatalogAsync(db, tenantId, "CONS-CUT-DISC", "Kəsici disk", "Отрезной диск", "Cutting disc", "Sərfiyyat", "Disk", "ədəd", SupplyItemType.Consumable, "disk cutting grinder");
-            await UpsertCatalogAsync(db, tenantId, "CONS-WELD-ELECTRODE", "Qaynaq elektrodu", "Сварочный электрод", "Welding electrode", "Sərfiyyat", "Qaynaq", "kq", SupplyItemType.Consumable, "qaynaq electrode welding");
-            await UpsertCatalogAsync(db, tenantId, "MAT-CEMENT-M400", "Sement M400", "Цемент M400", "Cement M400", "Material", "Sement", "kisə", SupplyItemType.ConstructionMaterial, "sement cement цемент");
-            await UpsertCatalogAsync(db, tenantId, "MAT-WATERPROOF-ROLL", "Hidroizolyasiya rulonu", "Гидроизоляционный рулон", "Waterproofing roll", "Material", "İzolyasiya", "rulon", SupplyItemType.Chemical, "hidroizolyasiya waterproofing");
-            await UpsertCatalogAsync(db, tenantId, "MAT-REBAR-A3", "Armatur A3", "Арматура A3", "Rebar A3", "Material", "Armatur", "ton", SupplyItemType.Steel, "armatur rebar steel");
-            await UpsertCatalogAsync(db, tenantId, "MAT-CONCRETE-B25", "Beton B25", "Бетон B25", "Concrete B25", "Material", "Beton", "m3", SupplyItemType.Concrete, "beton concrete");
-            await UpsertCatalogAsync(db, tenantId, "ELEC-EXT-CABLE-30", "Uzatma kabeli 30m", "Удлинитель 30м", "Extension cable 30m", "Elektrik", "Kabel", "ədəd", SupplyItemType.Electrical, "kabel cable extension");
+            foreach (var item in SupplyCatalogSeedItems)
+            {
+                await UpsertCatalogAsync(db, tenantId, item.Code, item.NameAz, item.NameRu, item.NameEn, item.Category, item.Subcategory, item.Unit, item.ItemType, item.SearchAliases);
+            }
 
             var warehouse = await db.Warehouses.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.IsDefault, cancellationToken);
             if (warehouse is null)

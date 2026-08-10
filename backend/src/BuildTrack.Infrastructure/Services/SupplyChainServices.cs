@@ -178,8 +178,7 @@ public sealed class SupplyAttachmentStorage(IConfiguration configuration) : ISup
 public sealed class SupplyChainService(
     BuildTrackDbContext db,
     IWarehouseAvailabilityService availabilityService,
-    IWarehouseUsagePolicyService usagePolicy,
-    ILogger<SupplyChainService> logger) : ISupplyChainService
+    IWarehouseUsagePolicyService usagePolicy) : ISupplyChainService
 {
     public async Task<FieldWarehouseRequest> CreateFieldRequestAsync(CreateSupplyRequestInput input, CancellationToken ct)
     {

@@ -342,8 +342,9 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> GetFieldWarehouseCatalogAsync(BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         await EnsureDefaultCatalogAsync(db, RequireTenantId(tenantContext), ct);
+        var tenantId = RequireTenantId(tenantContext);
         var rows = await db.FieldWarehouseCatalogItems.AsNoTracking()
-            .Where(x => x.IsActive)
+            .Where(x => x.TenantId == tenantId && x.IsActive)
             .OrderBy(x => x.Category)
             .ThenBy(x => x.Name)
             .Select(x => new FieldWarehouseCatalogItemDto(x.Id, x.Name, x.Category, x.Unit, x.Code))
