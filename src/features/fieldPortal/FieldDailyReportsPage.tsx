@@ -234,7 +234,7 @@ export const FieldDailyReportsPage = () => {
             {
               title: 'Status',
               dataIndex: 'status',
-              render: (status) => <FieldStatusTag status={status} />,
+              render: (_, row) => <FieldStatusTag key={`${row.id}:${row.status}`} status={row.status} />,
             },
             {
               title: 'Əməliyyat',

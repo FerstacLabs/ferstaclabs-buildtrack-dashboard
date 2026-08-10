@@ -321,8 +321,7 @@ export const SupervisorsPage = () => {
             {
               title: 'Status',
               dataIndex: 'status',
-              shouldCellUpdate: (record, previous) => record.status !== previous.status,
-              render: (status) => <FieldStatusTag status={status} />,
+              render: (_, row) => <FieldStatusTag key={`${row.id}:${row.status}`} status={row.status} />,
             },
             { title: 'Əməliyyat', render: (_, row) => reportActions(row) },
           ]}
@@ -429,7 +428,7 @@ export const SupervisorsPage = () => {
               <Descriptions.Item label="Tarix">{selectedReport.reportDate}</Descriptions.Item>
               <Descriptions.Item label="Obyekt">{selectedReport.siteName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Prorab">{selectedReport.supervisorName || DASH}</Descriptions.Item>
-              <Descriptions.Item label="Status"><FieldStatusTag status={selectedReport.status} /></Descriptions.Item>
+              <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedReport.id}:${selectedReport.status}`} status={selectedReport.status} /></Descriptions.Item>
               <Descriptions.Item label="Hava şəraiti">{selectedReport.weatherCondition || selectedReport.weather || DASH}</Descriptions.Item>
               <Descriptions.Item label="Ümumi qeyd">{selectedReport.generalNote || DASH}</Descriptions.Item>
               <Descriptions.Item label="Göndərilmə vaxtı">{formatDateTime(selectedReport.submittedAt)}</Descriptions.Item>

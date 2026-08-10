@@ -3,10 +3,14 @@ import { fieldStatusColor, fieldStatusLabel } from './fieldPortalStore'
 
 export const FieldStatusTag = ({ status }: { status?: string }) => {
   const canonicalStatus = status?.trim()
+  const statusKey = canonicalStatus || 'unknown'
+  const label = fieldStatusLabel(canonicalStatus)
 
   return (
-    <Tag color={fieldStatusColor(canonicalStatus)} data-status={canonicalStatus ?? ''}>
-      {fieldStatusLabel(canonicalStatus)}
+    <Tag key={statusKey} color={fieldStatusColor(canonicalStatus)} data-status={canonicalStatus ?? ''}>
+      <span key={`status-text:${statusKey}`}>
+        {label}
+      </span>
     </Tag>
   )
 }
