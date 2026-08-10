@@ -37,6 +37,10 @@ const getTotalWorkHours = (report: FieldDailyReport) => {
   return values.reduce((sum, value) => sum + value, 0)
 }
 
+const canEditReport = (status: FieldDailyReport['status']) => status === 'Draft' || status === 'NeedsCorrection'
+
+const submitLabel = (status: FieldDailyReport['status']) => status === 'NeedsCorrection' ? 'Yenidən göndər' : 'Göndər'
+
 export const FieldDailyReportsPage = () => {
   const selectedSiteId = useFieldPortalStore((state) => state.selectedSiteId)
   const [reports, setReports] = useState<FieldDailyReport[]>([])
@@ -115,6 +119,18 @@ export const FieldDailyReportsPage = () => {
   const saveReport = async (values: ReportFormValues) => {
     if (!selectedSiteId) return
     if (saving) return
+    if (!editingReport) {
+      const requestedDate = values.reportDate.format('YYYY-MM-DD')
+      const existing = reports.find((report) => report.reportDate === requestedDate)
+      if (existing) {
+        message.warning(existing.status === 'NeedsCorrection'
+          ? 'Bu tarix üçün hesabat artıq mövcuddur və düzəliş tələb olunur. Mövcud hesabatı redaktə edin.'
+          : 'Bu tarix üçün hesabat artıq mövcuddur.')
+        if (existing.status === 'NeedsCorrection' || existing.status === 'Draft') openEditDrawer(existing)
+        return
+      }
+    }
+
     const body: SaveFieldDailyReportBody = {
       siteId: selectedSiteId,
       reportDate: editingReport?.reportDate ?? values.reportDate.format('YYYY-MM-DD'),
@@ -126,7 +142,7 @@ export const FieldDailyReportsPage = () => {
     try {
       if (editingReport) {
         await buildTrackBackendApi.updateFieldDailyReport(editingReport.id, body)
-        message.success('Gündəlik hesabat yeniləndi')
+        message.success(editingReport.status === 'NeedsCorrection' ? 'Düzəlişlər saxlanıldı' : 'Gündəlik hesabat yeniləndi')
       } else {
         await buildTrackBackendApi.saveFieldDailyReport(body)
         message.success('Gündəlik hesabat saxlanıldı')
@@ -136,7 +152,9 @@ export const FieldDailyReportsPage = () => {
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Gündəlik hesabat saxlanmadı'
       const friendly = error instanceof BackendApiError && error.status === 409 && text.includes('daily report already exists')
-        ? 'Bu tarix üçün artıq gündəlik hesabat mövcuddur.'
+        ? text.includes('NeedsCorrection')
+          ? 'Bu tarix üçün hesabat artıq mövcuddur və düzəliş tələb olunur. Mövcud hesabatı redaktə edin.'
+          : 'Bu tarix üçün gündəlik hesabat artıq mövcuddur.'
         : error instanceof BackendApiError && error.status === 409 && text.includes('changed by another operation')
           ? 'Hesabat başqa əməliyyat zamanı dəyişdirilib. Səhifəni yeniləyib təkrar cəhd edin.'
           : text.includes('Reported quantity must be greater than zero')
@@ -195,14 +213,14 @@ export const FieldDailyReportsPage = () => {
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
             {
               title: 'Əməliyyat',
-              render: (_, row) => row.status === 'Draft'
+              render: (_, row) => canEditReport(row.status)
                 ? (
                   <Space wrap>
                     <Button icon={<EditOutlined />} onClick={() => openEditDrawer(row)}>
                       Düzəliş et
                     </Button>
                     <Button icon={<SendOutlined />} loading={submittingId === row.id} onClick={() => submitReport(row.id)}>
-                      Göndər
+                      {submitLabel(row.status)}
                     </Button>
                   </Space>
                 )
@@ -214,6 +232,14 @@ export const FieldDailyReportsPage = () => {
               <Space direction="vertical" className="full-width" size="middle">
                 <Card size="small">
                   <Space direction="vertical" className="full-width">
+                    {row.status === 'NeedsCorrection' && (
+                      <Alert
+                        showIcon
+                        type="warning"
+                        message="Düzəliş tələb olunur"
+                        description={`Rəhbərin qeydi: ${row.reviewNote?.trim() || '—'}`}
+                      />
+                    )}
                     <span><strong>Hava şəraiti:</strong> {row.weatherCondition ?? row.weather ?? '—'}</span>
                     <span><strong>Ümumi qeyd:</strong> {row.generalNote?.trim() || '—'}</span>
                   </Space>
@@ -243,6 +269,15 @@ export const FieldDailyReportsPage = () => {
         width={680}
         onClose={closeDrawer}
       >
+        {editingReport?.status === 'NeedsCorrection' && (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 16 }}
+            message="Düzəliş tələb olunur"
+            description={`Rəhbərin qeydi: ${editingReport.reviewNote?.trim() || '—'}`}
+          />
+        )}
         <Form layout="vertical" form={form} onFinish={saveReport}>
           <Form.Item name="reportDate" label="Hesabat tarixi" rules={[{ required: true, message: 'Tarix seçin' }]}>
             <DatePicker className="full-width" disabled={Boolean(editingReport)} />

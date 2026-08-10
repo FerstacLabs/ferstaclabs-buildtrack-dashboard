@@ -212,28 +212,24 @@ public static class FieldPortalEndpoints
         var report = await db.SupervisorDailyReports
             .Include(x => x.Lines)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == request.SiteId && x.SupervisorUserId == userId && x.ReportDate == request.ReportDate, ct);
-        if (report is null)
+        if (report is not null)
         {
-            report = new SupervisorDailyReport
-            {
-                TenantId = tenantId,
-                SiteId = request.SiteId,
-                SupervisorUserId = userId,
-                ReportDate = request.ReportDate,
-                Status = FieldDailyReportStatus.Draft,
-            };
-            db.SupervisorDailyReports.Add(report);
+            return DailyReportDuplicateConflict(report);
         }
-        else if (report.Status == FieldDailyReportStatus.Submitted || report.Status == FieldDailyReportStatus.Approved)
+
+        report = new SupervisorDailyReport
         {
-            return Results.BadRequest(new { error = "Submitted reports are read-only for supervisor" });
-        }
+            TenantId = tenantId,
+            SiteId = request.SiteId,
+            SupervisorUserId = userId,
+            ReportDate = request.ReportDate,
+            Status = FieldDailyReportStatus.Draft,
+        };
+        db.SupervisorDailyReports.Add(report);
 
         report.Shift = Clean(request.Shift);
         report.GeneralNote = Clean(request.GeneralNote);
         report.WeatherCondition = Clean(request.WeatherCondition);
-        report.Status = FieldDailyReportStatus.Draft;
-        report.Lines.Clear();
         foreach (var line in request.Lines)
         {
             report.Lines.Add(new SupervisorDailyReportLine
@@ -248,7 +244,15 @@ public static class FieldPortalEndpoints
             });
         }
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsUniqueDailyReportConflict(ex))
+        {
+            return Results.Conflict(new { error = "A daily report already exists for this site and date." });
+        }
+
         await WriteAuditAsync(db, tenantId, request.SiteId, userId, "DailyReportCreated", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yaradıldı.", ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
     }
@@ -269,7 +273,7 @@ public static class FieldPortalEndpoints
         if (report is null) return Results.NotFound();
         await fieldAccess.RequireSiteAccessAsync(report.SiteId, ct);
         if (report.SupervisorUserId != userId) return Results.Forbid();
-        if (report.Status != FieldDailyReportStatus.Draft) return Results.BadRequest(new { error = "Only draft reports can be edited" });
+        if (!CanSupervisorEditDailyReport(report.Status)) return Results.BadRequest(new { error = "Only draft or correction reports can be edited" });
         if (request.SiteId != report.SiteId) return Results.BadRequest(new { error = "Report site cannot be changed" });
         if (request.ReportDate != report.ReportDate) return Results.Conflict(new { error = "A daily report already exists for this site and date." });
         if (request.Lines.Count == 0) return Results.BadRequest(new { error = "At least one report line is required" });
@@ -299,7 +303,11 @@ public static class FieldPortalEndpoints
             return Results.Conflict(new { error = "A daily report already exists for this site and date." });
         }
 
-        await WriteAuditAsync(db, tenantId, report.SiteId, userId, "DailyReportUpdated", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yeniləndi.", ct);
+        var auditAction = report.Status == FieldDailyReportStatus.NeedsCorrection ? "DailyReportCorrectionUpdated" : "DailyReportUpdated";
+        var auditDescription = report.Status == FieldDailyReportStatus.NeedsCorrection
+            ? $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabatda tələb olunan düzəlişlər edildi."
+            : $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yeniləndi.";
+        await WriteAuditAsync(db, tenantId, report.SiteId, userId, auditAction, "SupervisorDailyReport", report.Id, false, auditDescription, ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
     }
 
@@ -379,17 +387,33 @@ public static class FieldPortalEndpoints
         return false;
     }
 
+    internal static bool CanSupervisorEditDailyReport(FieldDailyReportStatus status) =>
+        status is FieldDailyReportStatus.Draft or FieldDailyReportStatus.NeedsCorrection;
+
+    internal static bool CanSubmitDailyReport(FieldDailyReportStatus status) =>
+        status is FieldDailyReportStatus.Draft or FieldDailyReportStatus.NeedsCorrection;
+
+    internal static IResult DailyReportDuplicateConflict(SupervisorDailyReport report) =>
+        Results.Conflict(new
+        {
+            error = "A daily report already exists for this site and date.",
+            existingReportId = report.Id,
+            existingStatus = report.Status.ToString(),
+        });
+
     private static async Task<IResult> SubmitFieldDailyReportAsync(Guid id, BuildTrackDbContext db, ITenantContext tenantContext, IFieldAccessService fieldAccess, CancellationToken ct)
     {
         var report = await db.SupervisorDailyReports.Include(x => x.Lines).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (report is null) return Results.NotFound();
         await fieldAccess.RequireSiteAccessAsync(report.SiteId, ct);
         if (report.SupervisorUserId != RequireUserId(tenantContext) && !IsManagementRole(tenantContext.Role)) return Results.Forbid();
+        if (!CanSubmitDailyReport(report.Status)) return Results.BadRequest(new { error = "Only draft or correction reports can be submitted" });
         if (report.Lines.Count == 0) return Results.BadRequest(new { error = "Report lines are required before submit" });
+        var wasCorrection = report.Status == FieldDailyReportStatus.NeedsCorrection;
         report.Status = FieldDailyReportStatus.Submitted;
         report.SubmittedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, "DailyReportSubmitted", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat təsdiq üçün göndərildi.", ct);
+        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, wasCorrection ? "DailyReportResubmitted" : "DailyReportSubmitted", "SupervisorDailyReport", report.Id, false, wasCorrection ? $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yenidən təsdiq üçün göndərildi." : $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat təsdiq üçün göndərildi.", ct);
         return Results.Ok(await LoadReportDtoAsync(db, id, ct));
     }
 

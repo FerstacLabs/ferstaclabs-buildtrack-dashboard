@@ -1,6 +1,7 @@
 using BuildTrack.Api;
 using BuildTrack.Api.Contracts;
 using BuildTrack.Domain.Entities;
+using Microsoft.AspNetCore.Http;
 
 namespace BuildTrack.Tests;
 
@@ -145,6 +146,73 @@ public sealed class FieldDailyReportDraftUpdateTests
 
         Assert.NotEqual(report.ReportDate, staleFormDate);
         Assert.Equal(new DateOnly(2026, 8, 11), report.ReportDate);
+    }
+
+    [Theory]
+    [InlineData(FieldDailyReportStatus.Draft, true)]
+    [InlineData(FieldDailyReportStatus.NeedsCorrection, true)]
+    [InlineData(FieldDailyReportStatus.Submitted, false)]
+    [InlineData(FieldDailyReportStatus.Approved, false)]
+    [InlineData(FieldDailyReportStatus.Rejected, false)]
+    public void SupervisorCanEditOnlyDraftOrNeedsCorrection(FieldDailyReportStatus status, bool expected)
+    {
+        Assert.Equal(expected, FieldPortalEndpoints.CanSupervisorEditDailyReport(status));
+    }
+
+    [Theory]
+    [InlineData(FieldDailyReportStatus.Draft, true)]
+    [InlineData(FieldDailyReportStatus.NeedsCorrection, true)]
+    [InlineData(FieldDailyReportStatus.Submitted, false)]
+    [InlineData(FieldDailyReportStatus.Approved, false)]
+    [InlineData(FieldDailyReportStatus.Rejected, false)]
+    public void SupervisorCanSubmitOnlyDraftOrNeedsCorrection(FieldDailyReportStatus status, bool expected)
+    {
+        Assert.Equal(expected, FieldPortalEndpoints.CanSubmitDailyReport(status));
+    }
+
+    [Fact]
+    public void DuplicateDailyReportCreateReturnsConflictShape()
+    {
+        var report = NewReport(Guid.NewGuid());
+        report.Status = FieldDailyReportStatus.NeedsCorrection;
+
+        var result = FieldPortalEndpoints.DailyReportDuplicateConflict(report);
+
+        var statusResult = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status409Conflict, statusResult.StatusCode);
+    }
+
+    [Fact]
+    public void NeedsCorrectionLineSyncKeepsSameReportStatusAndId()
+    {
+        var tenantId = Guid.NewGuid();
+        var item = NewSmetaItem("m3");
+        var report = NewReport(tenantId, new SupervisorDailyReportLine
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SmetaItemId = item.Id,
+            ReportedQuantity = 100,
+            WorkerCount = 10,
+            WorkHours = 8,
+            Unit = "m3",
+        });
+        report.Status = FieldDailyReportStatus.NeedsCorrection;
+        var reportId = report.Id;
+        var lineId = report.Lines.Single().Id;
+
+        var result = FieldPortalEndpoints.SyncDailyReportLines(
+            report,
+            [new SaveFieldDailyReportLineRequest(lineId, item.Id, 50, 15, 8, "Edilməli idi 100, edildi 50")],
+            new Dictionary<Guid, FieldSmetaItem> { [item.Id] = item },
+            tenantId);
+
+        Assert.Null(result);
+        Assert.Equal(reportId, report.Id);
+        Assert.Equal(FieldDailyReportStatus.NeedsCorrection, report.Status);
+        Assert.Single(report.Lines);
+        Assert.Equal(lineId, report.Lines.Single().Id);
+        Assert.Equal(50, report.Lines.Single().ReportedQuantity);
     }
 
     private static SupervisorDailyReport NewReport(Guid tenantId, params SupervisorDailyReportLine[] lines)
