@@ -271,6 +271,7 @@ public static class FieldPortalEndpoints
         if (report.SupervisorUserId != userId) return Results.Forbid();
         if (report.Status != FieldDailyReportStatus.Draft) return Results.BadRequest(new { error = "Only draft reports can be edited" });
         if (request.SiteId != report.SiteId) return Results.BadRequest(new { error = "Report site cannot be changed" });
+        if (request.ReportDate != report.ReportDate) return Results.Conflict(new { error = "A daily report already exists for this site and date." });
         if (request.Lines.Count == 0) return Results.BadRequest(new { error = "At least one report line is required" });
         if (request.Lines.Any(x => x.ReportedQuantity <= 0)) return Results.BadRequest(new { error = "Reported quantity must be greater than zero" });
 
@@ -278,28 +279,104 @@ public static class FieldPortalEndpoints
         var items = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId && x.SiteId == report.SiteId && itemIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         if (items.Count != itemIds.Length) return Results.BadRequest(new { error = "Smeta item does not belong to the assigned site" });
 
-        report.ReportDate = request.ReportDate;
         report.Shift = Clean(request.Shift);
         report.GeneralNote = Clean(request.GeneralNote);
         report.WeatherCondition = Clean(request.WeatherCondition);
-        report.Lines.Clear();
-        foreach (var line in request.Lines)
+
+        var lineSync = SyncDailyReportLines(report, request.Lines, items, tenantId);
+        if (lineSync is not null) return lineSync;
+
+        try
         {
-            report.Lines.Add(new SupervisorDailyReportLine
-            {
-                TenantId = tenantId,
-                SmetaItemId = line.SmetaItemId,
-                ReportedQuantity = line.ReportedQuantity,
-                WorkerCount = line.WorkerCount,
-                WorkHours = line.WorkHours,
-                Unit = items[line.SmetaItemId].Unit,
-                Note = Clean(line.Note),
-            });
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Results.Conflict(new { error = "Report was changed by another operation. Refresh and try again." });
+        }
+        catch (DbUpdateException ex) when (IsUniqueDailyReportConflict(ex))
+        {
+            return Results.Conflict(new { error = "A daily report already exists for this site and date." });
         }
 
-        await db.SaveChangesAsync(ct);
         await WriteAuditAsync(db, tenantId, report.SiteId, userId, "DailyReportUpdated", "SupervisorDailyReport", report.Id, false, "Sahə gündəlik hesabatı yeniləndi", ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
+    }
+
+    internal static IResult? SyncDailyReportLines(
+        SupervisorDailyReport report,
+        IReadOnlyList<SaveFieldDailyReportLineRequest> requestLines,
+        IReadOnlyDictionary<Guid, FieldSmetaItem> items,
+        Guid tenantId)
+    {
+        var existingById = report.Lines.ToDictionary(x => x.Id);
+        var matchedExistingIds = new HashSet<Guid>();
+        var usedFallbackSmetaItemIds = new HashSet<Guid>();
+
+        foreach (var requestLine in requestLines)
+        {
+            SupervisorDailyReportLine? line = null;
+            if (requestLine.Id is Guid lineId)
+            {
+                if (!existingById.TryGetValue(lineId, out line))
+                {
+                    return Results.BadRequest(new { error = "Report line does not belong to this daily report" });
+                }
+            }
+            else
+            {
+                line = report.Lines.FirstOrDefault(x =>
+                    !matchedExistingIds.Contains(x.Id)
+                    && !usedFallbackSmetaItemIds.Contains(x.SmetaItemId)
+                    && x.SmetaItemId == requestLine.SmetaItemId);
+                if (line is not null)
+                {
+                    usedFallbackSmetaItemIds.Add(requestLine.SmetaItemId);
+                }
+            }
+
+            if (line is null)
+            {
+                line = new SupervisorDailyReportLine
+                {
+                    TenantId = tenantId,
+                };
+                report.Lines.Add(line);
+            }
+
+            matchedExistingIds.Add(line.Id);
+            line.SmetaItemId = requestLine.SmetaItemId;
+            line.ReportedQuantity = requestLine.ReportedQuantity;
+            line.WorkerCount = requestLine.WorkerCount;
+            line.WorkHours = requestLine.WorkHours;
+            line.Unit = items[requestLine.SmetaItemId].Unit;
+            line.Note = Clean(requestLine.Note);
+        }
+
+        foreach (var existing in report.Lines.Where(x => !matchedExistingIds.Contains(x.Id)).ToArray())
+        {
+            report.Lines.Remove(existing);
+        }
+
+        return null;
+    }
+
+    private static bool IsUniqueDailyReportConflict(DbUpdateException ex)
+    {
+        var current = ex.InnerException;
+        while (current is not null)
+        {
+            if (current.GetType().FullName == "Npgsql.PostgresException"
+                && string.Equals(current.GetType().GetProperty("SqlState")?.GetValue(current)?.ToString(), "23505", StringComparison.Ordinal)
+                && string.Equals(current.GetType().GetProperty("ConstraintName")?.GetValue(current)?.ToString(), "UX_supervisor_daily_reports_daily", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 
     private static async Task<IResult> SubmitFieldDailyReportAsync(Guid id, BuildTrackDbContext db, ITenantContext tenantContext, IFieldAccessService fieldAccess, CancellationToken ct)

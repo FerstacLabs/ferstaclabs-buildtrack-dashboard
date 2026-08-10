@@ -388,6 +388,7 @@ public sealed record SaveFieldDailyReportRequest(
     IReadOnlyList<SaveFieldDailyReportLineRequest> Lines);
 
 public sealed record SaveFieldDailyReportLineRequest(
+    Guid? Id,
     Guid SmetaItemId,
     decimal ReportedQuantity,
     int? WorkerCount,

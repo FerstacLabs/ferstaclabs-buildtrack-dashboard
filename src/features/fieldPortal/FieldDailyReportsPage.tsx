@@ -3,6 +3,7 @@ import { Alert, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Sele
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  BackendApiError,
   buildTrackBackendApi,
   type FieldDailyReport,
   type FieldSmetaItem,
@@ -15,6 +16,7 @@ type ReportFormValues = {
   weather?: string
   generalNote?: string
   lines: {
+    id?: string
     smetaItemId: string
     reportedQuantity: number
     workerCount: number
@@ -81,6 +83,7 @@ export const FieldDailyReportsPage = () => {
 
   const openCreateDrawer = () => {
     setEditingReport(null)
+    form.resetFields()
     form.setFieldsValue({
       reportDate: dayjs(),
       weather: undefined,
@@ -92,11 +95,13 @@ export const FieldDailyReportsPage = () => {
 
   const openEditDrawer = (report: FieldDailyReport) => {
     setEditingReport(report)
+    form.resetFields()
     form.setFieldsValue({
       reportDate: dayjs(report.reportDate),
       weather: report.weatherCondition ?? report.weather,
       generalNote: report.generalNote,
       lines: report.lines.map((line) => ({
+        id: line.id,
         smetaItemId: line.smetaItemId,
         reportedQuantity: line.reportedQuantity,
         workerCount: line.workerCount ?? 1,
@@ -112,7 +117,7 @@ export const FieldDailyReportsPage = () => {
     if (saving) return
     const body: SaveFieldDailyReportBody = {
       siteId: selectedSiteId,
-      reportDate: values.reportDate.format('YYYY-MM-DD'),
+      reportDate: editingReport?.reportDate ?? values.reportDate.format('YYYY-MM-DD'),
       weatherCondition: values.weather,
       generalNote: values.generalNote,
       lines: values.lines,
@@ -130,9 +135,13 @@ export const FieldDailyReportsPage = () => {
       await load()
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Gündəlik hesabat saxlanmadı'
-      const friendly = text.includes('Reported quantity must be greater than zero')
-        ? 'Fakt miqdar 0-dan böyük olmalıdır.'
-        : text || 'Gündəlik hesabat saxlanmadı'
+      const friendly = error instanceof BackendApiError && error.status === 409 && text.includes('daily report already exists')
+        ? 'Bu tarix üçün artıq gündəlik hesabat mövcuddur.'
+        : error instanceof BackendApiError && error.status === 409 && text.includes('changed by another operation')
+          ? 'Hesabat başqa əməliyyat zamanı dəyişdirilib. Səhifəni yeniləyib təkrar cəhd edin.'
+          : text.includes('Reported quantity must be greater than zero')
+            ? 'Fakt miqdar 0-dan böyük olmalıdır.'
+            : text || 'Gündəlik hesabat saxlanmadı'
       message.error(friendly)
     } finally {
       setSaving(false)
@@ -236,7 +245,7 @@ export const FieldDailyReportsPage = () => {
       >
         <Form layout="vertical" form={form} onFinish={saveReport}>
           <Form.Item name="reportDate" label="Hesabat tarixi" rules={[{ required: true, message: 'Tarix seçin' }]}>
-            <DatePicker className="full-width" />
+            <DatePicker className="full-width" disabled={Boolean(editingReport)} />
           </Form.Item>
           <Form.Item name="weather" label="Hava şəraiti">
             <Input placeholder="Məsələn: günəşli, küləkli" />
@@ -246,6 +255,9 @@ export const FieldDailyReportsPage = () => {
               <Space direction="vertical" className="full-width">
                 {fields.map((field) => (
                   <Card key={field.key} size="small" title={`İş sətri ${field.name + 1}`}>
+                    <Form.Item name={[field.name, 'id']} hidden>
+                      <Input />
+                    </Form.Item>
                     <Form.Item name={[field.name, 'smetaItemId']} label="Smeta işi" rules={[{ required: true, message: 'İş seçin' }]}>
                       <Select showSearch options={smetaOptions} optionFilterProp="label" />
                     </Form.Item>

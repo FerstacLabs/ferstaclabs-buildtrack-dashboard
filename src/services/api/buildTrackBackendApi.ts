@@ -387,6 +387,7 @@ export interface SaveFieldDailyReportBody {
   weatherCondition?: string
   generalNote?: string
   lines: {
+    id?: string
     smetaItemId: string
     reportedQuantity: number
     workerCount: number
