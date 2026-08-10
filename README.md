@@ -30,6 +30,7 @@ BuildTrack uses host-based routing:
 buildtrack.ferstaclabs.com       marketing site
 app.buildtrack.ferstaclabs.com   management dashboard
 field.buildtrack.ferstaclabs.com field / prorab portal
+supply.buildtrack.ferstaclabs.com supply / procurement portal
 ```
 
 For the field portal deployment, set:
@@ -38,12 +39,13 @@ For the field portal deployment, set:
 VITE_API_BASE_URL=https://api.ferstaclabs.com
 VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
 VITE_FIELD_BASE_URL=https://field.buildtrack.ferstaclabs.com
+VITE_SUPPLY_BASE_URL=https://supply.buildtrack.ferstaclabs.com
 ```
 
 Backend CORS is controlled by:
 
 ```env
-CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
 If multiple origins are needed, separate them with commas. The docker-compose file keeps the backend API on port `8080`; Vercel should never point to a frontend container on the VPS.
@@ -81,7 +83,7 @@ SEED_SUPERVISOR_FULL_NAME=Demo Prorab
 SEED_SUPERVISOR_PHONE=+994...
 SEED_SUPERVISOR_SITE_ID=
 
-CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
 If `SEED_ADMIN_PASSWORD` is missing, the initializer does not create an insecure default admin password. The demo tenant still receives an active Unlimited license.
@@ -117,9 +119,24 @@ VITE_API_BASE_URL=/backend
 VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
 VITE_MARKETING_BASE_URL=https://buildtrack.ferstaclabs.com
 VITE_FIELD_BASE_URL=https://field.buildtrack.ferstaclabs.com
+VITE_SUPPLY_BASE_URL=https://supply.buildtrack.ferstaclabs.com
 ```
 
 Keep the `/backend` rewrite before the SPA fallback in `vercel.json`. The VPS backend still runs in Docker on port `8080`; HTTPS should be provided by Nginx or another reverse proxy.
+
+## Supply / procurement workflow
+
+BuildTrack Supply runs from `supply.buildtrack.ferstaclabs.com` and uses the same backend, tenant, license and PostgreSQL database as the management and field portals. Procurement agents are created by management users and can only access assigned buying tasks from the Supply Portal.
+
+Relevant deployment values:
+
+```env
+VITE_SUPPLY_BASE_URL=https://supply.buildtrack.ferstaclabs.com
+SUPPLY_ATTACHMENT_STORAGE_PATH=/app/data/supply-attachments
+CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
+```
+
+The Docker stack mounts `./data:/app/data`, so procurement product photos, receipts and invoices saved under `SUPPLY_ATTACHMENT_STORAGE_PATH` survive container recreation. The warehouse request chain is continuous: field cart request, private availability check, reservation, shortfall procurement need, supply task, evidence upload, management verification, goods receipt, reservation fulfillment and final warehouse issue.
 
 ## AI assistant backend setup
 

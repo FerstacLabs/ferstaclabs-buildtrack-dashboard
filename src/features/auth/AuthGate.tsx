@@ -2,7 +2,7 @@ import { Spin } from 'antd'
 import type { ReactNode } from 'react'
 import { useEffect } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { fieldPortalUrl, getHostMode, managementAppUrl } from '../../app/hostMode'
+import { fieldPortalUrl, getHostMode, managementAppUrl, supplyPortalUrl } from '../../app/hostMode'
 import { useAuthStore } from './authStore'
 
 const AuthLoader = () => (
@@ -28,8 +28,16 @@ export const RequireAuth = ({ children }: { children: ReactNode }) => {
     window.location.assign(fieldPortalUrl())
     return <AuthLoader />
   }
+  if (hostMode === 'ManagementApp' && user?.role === 'ProcurementAgent') {
+    window.location.assign(supplyPortalUrl())
+    return <AuthLoader />
+  }
   if (hostMode === 'FieldPortal' && user && !['Supervisor', 'Owner', 'Admin', 'Manager'].includes(user.role)) {
     window.location.assign(managementAppUrl())
+    return <AuthLoader />
+  }
+  if (hostMode === 'SupplyPortal' && user && !['ProcurementAgent', 'Owner', 'Admin', 'Manager'].includes(user.role)) {
+    window.location.assign(user.role === 'Supervisor' ? fieldPortalUrl() : managementAppUrl())
     return <AuthLoader />
   }
 
@@ -61,6 +69,10 @@ export const PublicAuthPage = ({ children }: { children: ReactNode }) => {
   if (isAuthenticated) {
     if (hostMode === 'ManagementApp' && user?.role === 'Supervisor') {
       window.location.assign(fieldPortalUrl())
+      return <AuthLoader />
+    }
+    if (hostMode === 'ManagementApp' && user?.role === 'ProcurementAgent') {
+      window.location.assign(supplyPortalUrl())
       return <AuthLoader />
     }
     return <Navigate to={hasActiveLicense ? '/' : '/license'} replace />

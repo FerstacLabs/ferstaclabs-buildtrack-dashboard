@@ -8,6 +8,7 @@ import { MarketingLandingPage } from '../features/marketing/MarketingLandingPage
 import { getHostMode } from './hostMode'
 import { fieldRouter } from './fieldRoutes'
 import { router } from './routes'
+import { supplyRouter } from './supplyRoutes'
 import { theme } from './theme'
 
 const localeByLanguage = {
@@ -23,7 +24,7 @@ const AppShell = () => {
     <ConfigProvider theme={theme} locale={localeByLanguage[language]}>
       {hostMode === 'Marketing'
         ? <MarketingLandingPage />
-        : <RouterProvider router={hostMode === 'FieldPortal' ? fieldRouter : router} />}
+        : <RouterProvider router={hostMode === 'FieldPortal' ? fieldRouter : hostMode === 'SupplyPortal' ? supplyRouter : router} />}
     </ConfigProvider>
   )
 }

@@ -45,11 +45,13 @@ public enum FieldWarehouseRequestStatus
 {
     Draft,
     Submitted,
+    UnderReview,
     NeedsJustification,
     PendingApproval,
     Approved,
     PartiallyApproved,
     Rejected,
+    InFulfillment,
     ReadyForPickup,
     Issued,
     Closed,
@@ -180,11 +182,21 @@ public sealed class FieldWarehouseCatalogItem
     public Guid TenantId { get; set; }
     public Tenant? Tenant { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? NameAz { get; set; }
+    public string? NameRu { get; set; }
+    public string? NameEn { get; set; }
     public string Category { get; set; } = string.Empty;
+    public string? Subcategory { get; set; }
     public string Unit { get; set; } = string.Empty;
     public string? Code { get; set; }
+    public SupplyItemType ItemType { get; set; } = SupplyItemType.Other;
+    public string? Description { get; set; }
+    public string? SearchAliases { get; set; }
+    public string? SpecificationSchemaJson { get; set; }
+    public bool IsCustom { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAt { get; set; }
 }
 
 public sealed class FieldWarehouseRequest
@@ -199,18 +211,26 @@ public sealed class FieldWarehouseRequest
     public AppUser? SupervisorUser { get; set; }
     public Guid CatalogItemId { get; set; }
     public FieldWarehouseCatalogItem? CatalogItem { get; set; }
+    public string Code { get; set; } = string.Empty;
     public decimal RequestedQuantity { get; set; }
+    public decimal ApprovedQuantity { get; set; }
+    public decimal ReservedQuantity { get; set; }
+    public decimal IssuedQuantity { get; set; }
     public string Unit { get; set; } = string.Empty;
     public DateOnly? NeededBy { get; set; }
     public FieldWarehouseUrgency Urgency { get; set; } = FieldWarehouseUrgency.Normal;
     public string Reason { get; set; } = string.Empty;
+    public string? GeneralNote { get; set; }
     public string? Justification { get; set; }
     public string? ManagerComment { get; set; }
+    public bool AbnormalRequest { get; set; }
     public FieldWarehouseRequestStatus Status { get; set; } = FieldWarehouseRequestStatus.PendingApproval;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? SubmittedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public DateTimeOffset? ReviewedAt { get; set; }
     public Guid? ReviewedByUserId { get; set; }
+    public ICollection<FieldWarehouseRequestLine> Lines { get; set; } = new List<FieldWarehouseRequestLine>();
 }
 
 public sealed class SupervisorAuditEvent

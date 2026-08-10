@@ -450,6 +450,35 @@ public sealed record FieldWarehouseCatalogItemDto(
     string Unit,
     string? Code);
 
+public sealed record CatalogSearchItemDto(
+    Guid Id,
+    string Name,
+    string? NameAz,
+    string? NameRu,
+    string? NameEn,
+    string Category,
+    string? Subcategory,
+    string Unit,
+    string? Code,
+    SupplyItemType ItemType);
+
+public sealed record SupplyUnitDto(
+    Guid Id,
+    string Code,
+    string NameAz,
+    string NameEn,
+    string NameRu);
+
+public sealed record FieldWarehouseRequestLineDto(
+    Guid Id,
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    decimal RequestedQuantity,
+    string Unit,
+    string? Reason,
+    FieldWarehouseRequestLineStatus Status);
+
 public sealed record FieldWarehouseRequestDto(
     Guid Id,
     Guid SiteId,
@@ -468,7 +497,11 @@ public sealed record FieldWarehouseRequestDto(
     Guid SupervisorUserId,
     string? SupervisorName,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? Code = null,
+    string? GeneralNote = null,
+    bool AbnormalRequest = false,
+    IReadOnlyList<FieldWarehouseRequestLineDto>? Lines = null);
 
 public sealed record CreateFieldWarehouseRequest(
     Guid SiteId,
@@ -479,7 +512,197 @@ public sealed record CreateFieldWarehouseRequest(
     string Reason,
     string? Justification);
 
+public sealed record CreateFieldWarehouseCartRequest(
+    Guid SiteId,
+    DateOnly? NeededBy,
+    FieldWarehouseUrgency Urgency,
+    string? GeneralNote,
+    IReadOnlyList<CreateFieldWarehouseCartLineRequest> Lines);
+
+public sealed record CreateFieldWarehouseCartLineRequest(
+    Guid CatalogItemId,
+    decimal RequestedQuantity,
+    string? Reason,
+    string? SpecificationJson = null);
+
 public sealed record ReviewFieldWarehouseRequest(FieldWarehouseRequestStatus Status, string? ManagerComment);
+
+public sealed record ManagementWarehouseLineDto(
+    Guid Id,
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    decimal RequestedQuantity,
+    decimal ApprovedQuantity,
+    decimal ReservedQuantity,
+    decimal IssuedQuantity,
+    decimal OnHandQuantity,
+    decimal AvailableQuantity,
+    decimal ShortfallQuantity,
+    string Unit,
+    string? Reason,
+    FieldWarehouseRequestLineStatus Status);
+
+public sealed record ManagementWarehouseRequestDto(
+    Guid Id,
+    string Code,
+    Guid SiteId,
+    string? SiteName,
+    Guid SupervisorUserId,
+    string? SupervisorName,
+    DateOnly? NeededBy,
+    FieldWarehouseUrgency Urgency,
+    FieldWarehouseRequestStatus Status,
+    string? GeneralNote,
+    string? Justification,
+    string? ManagerComment,
+    bool AbnormalRequest,
+    decimal TotalRequested,
+    decimal TotalReserved,
+    decimal TotalShortfall,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? UpdatedAt,
+    IReadOnlyList<ManagementWarehouseLineDto> Lines);
+
+public sealed record WarehouseStockItemDto(
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    string? Subcategory,
+    string Unit,
+    string? Code,
+    decimal OnHandQuantity,
+    decimal ReservedQuantity,
+    decimal AvailableQuantity,
+    string StockStatus);
+
+public sealed record ProcurementNeedDto(
+    Guid Id,
+    Guid SourceRequestId,
+    Guid SourceRequestLineId,
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    decimal RequiredQuantity,
+    decimal AlreadyAvailableQuantity,
+    decimal ShortfallQuantity,
+    decimal PurchasedQuantity,
+    decimal ReceivedQuantity,
+    string Unit,
+    FieldWarehouseUrgency Priority,
+    DateOnly? RequiredBy,
+    ProcurementNeedStatus Status,
+    string Reason,
+    DateTimeOffset CreatedAt);
+
+public sealed record ProcurementTaskLineDto(
+    Guid Id,
+    Guid ProcurementNeedId,
+    Guid CatalogItemId,
+    string ItemName,
+    string Category,
+    decimal RequestedQuantity,
+    decimal PurchasedQuantity,
+    decimal AcceptedQuantity,
+    string Unit,
+    ProcurementTaskLineStatus Status,
+    string? Note,
+    decimal? UnitPrice,
+    Guid? SupplierId,
+    string? SupplierName);
+
+public sealed record ProcurementTaskDto(
+    Guid Id,
+    string Code,
+    Guid? AssignedProcurementUserId,
+    string? AssignedProcurementUserName,
+    ProcurementTaskStatus Status,
+    FieldWarehouseUrgency Priority,
+    DateOnly? RequiredBy,
+    string? ManagerInstruction,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? AssignedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? SubmittedAt,
+    DateTimeOffset? VerifiedAt,
+    string? VerificationNote,
+    IReadOnlyList<ProcurementTaskLineDto> Lines);
+
+public sealed record SupplierDto(
+    Guid Id,
+    string Name,
+    string? TaxId,
+    string? Phone,
+    string? Email,
+    string? Address,
+    string? ContactPerson,
+    string? Categories,
+    SupplierStatus Status,
+    string? Notes);
+
+public sealed record SaveSupplierRequest(
+    string Name,
+    string? TaxId,
+    string? Phone,
+    string? Email,
+    string? Address,
+    string? ContactPerson,
+    string? Categories,
+    SupplierStatus Status = SupplierStatus.Active,
+    string? Notes = null);
+
+public sealed record ApproveProcurementNeedRequest(string? ManagerComment);
+
+public sealed record AssignProcurementTaskRequest(IReadOnlyList<Guid> NeedIds, Guid? AssignedProcurementUserId, string? ManagerInstruction);
+
+public sealed record UpdateProcurementTaskLinePurchaseRequest(decimal PurchasedQuantity, decimal? UnitPrice, Guid? SupplierId, string? Note);
+
+public sealed record SubmitProcurementTaskRequest(string? Note);
+
+public sealed record VerifyProcurementTaskRequest(string? VerificationNote);
+
+public sealed record CreateGoodsReceiptRequest(Guid TaskId, Guid? WarehouseId, string? Note);
+
+public sealed record IssueWarehouseRequest(Guid? WarehouseId, string? RecipientName, string? HandoverNote);
+
+public sealed record ProcurementAgentDto(
+    Guid Id,
+    string FullName,
+    string Email,
+    string? Phone,
+    BuildTrackUserStatus Status,
+    int OpenTasks,
+    DateTimeOffset? LastLoginAt);
+
+public sealed record CreateProcurementAgentRequest(string FullName, string Email, string? Phone, string TemporaryPassword);
+
+public sealed record UpdateProcurementAgentRequest(string FullName, string? Phone, BuildTrackUserStatus Status);
+
+public sealed record SupplyDashboardDto(
+    int AssignedTasks,
+    int ShoppingTasks,
+    int SubmittedTasks,
+    int UnreadNotifications,
+    IReadOnlyList<ProcurementTaskDto> RecentTasks);
+
+public sealed record SupplyNotificationDto(
+    Guid Id,
+    SupplyNotificationAudience Audience,
+    string Title,
+    string Message,
+    string? ReferenceType,
+    Guid? ReferenceId,
+    SupplyNotificationStatus Status,
+    DateTimeOffset CreatedAt);
+
+public sealed record ProcurementTraceDto(
+    Guid FieldRequestId,
+    string RequestCode,
+    FieldWarehouseRequestStatus RequestStatus,
+    IReadOnlyList<ManagementWarehouseLineDto> RequestLines,
+    IReadOnlyList<ProcurementNeedDto> Needs,
+    IReadOnlyList<ProcurementTaskDto> Tasks,
+    IReadOnlyList<string> AuditTrail);
 
 public sealed record SupervisorSummaryDto(
     Guid Id,

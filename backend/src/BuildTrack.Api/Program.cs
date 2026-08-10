@@ -92,6 +92,13 @@ app.Use(async (context, next) =>
         return;
     }
 
+    if (IsProcurementAgentRole(tenantContext.Role) && path.Equals("/api/licenses/activate", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { error = "Procurement users inherit the tenant license and cannot activate licenses" });
+        return;
+    }
+
     if (IsLicenseExemptPath(path))
     {
         await next();
@@ -115,6 +122,13 @@ app.Use(async (context, next) =>
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsJsonAsync(new { error = "Supervisor users must use the Field Portal API" });
+        return;
+    }
+
+    if (IsProcurementAgentRole(tenantContext.Role) && !IsProcurementAgentAllowedApiPath(path))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new { error = "Procurement users must use the Supply Portal API" });
         return;
     }
 
@@ -1653,6 +1667,7 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
 });
 
 app.MapFieldPortalEndpoints();
+app.MapSupplyChainEndpoints();
 
 app.Run();
 
@@ -1719,8 +1734,18 @@ static bool IsLicenseExemptPath(string path) =>
 static bool IsSupervisorRole(string? role) =>
     string.Equals(role, BuildTrackUserRole.Supervisor.ToString(), StringComparison.OrdinalIgnoreCase);
 
+static bool IsProcurementAgentRole(string? role) =>
+    string.Equals(role, BuildTrackUserRole.ProcurementAgent.ToString(), StringComparison.OrdinalIgnoreCase);
+
 static bool IsSupervisorAllowedApiPath(string path) =>
     path.StartsWith("/api/field/", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/api/catalog/", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
+
+static bool IsProcurementAgentAllowedApiPath(string path) =>
+    path.StartsWith("/api/supply/", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/api/procurement/suppliers", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
 

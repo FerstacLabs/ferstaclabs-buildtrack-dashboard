@@ -44,7 +44,7 @@ services:
       SEED_SUPERVISOR_FULL_NAME: ${SEED_SUPERVISOR_FULL_NAME:-}
       SEED_SUPERVISOR_PHONE: ${SEED_SUPERVISOR_PHONE:-}
       SEED_SUPERVISOR_SITE_ID: ${SEED_SUPERVISOR_SITE_ID:-}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ferstaclabs-buildtrack-dashboard.vercel.app,https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ferstaclabs-buildtrack-dashboard.vercel.app,https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com}
       OPENAI_ASSISTANT_ENABLED: ${OPENAI_ASSISTANT_ENABLED:-false}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -60,6 +60,7 @@ services:
       DAHUA_SIMULATOR_ENABLED: "false"
       DAHUA_DEV_SIMULATOR_ACTIONS_ENABLED: "false"
       SECURITY_SNAPSHOT_STORAGE_PATH: /app/data/security-snapshots
+      SUPPLY_ATTACHMENT_STORAGE_PATH: /app/data/supply-attachments
     ports:
       - "8080:8080"
     volumes:
@@ -142,6 +143,7 @@ services:
       DAHUA_SIMULATOR_ENABLED: "false"
       DAHUA_DEV_SIMULATOR_ACTIONS_ENABLED: "false"
       SECURITY_SNAPSHOT_STORAGE_PATH: /app/data/security-snapshots
+      SUPPLY_ATTACHMENT_STORAGE_PATH: /app/data/supply-attachments
       DAHUA_ATTENDANCE_RECENTLY_SEEN_MINUTES: "15"
     ports:
       - "9500:9500/tcp"

@@ -11,7 +11,7 @@ export interface AuthUser {
   tenantId: string
   fullName: string
   email: string
-  role: 'Owner' | 'Admin' | 'Manager' | 'Supervisor' | 'User'
+  role: 'Owner' | 'Admin' | 'Manager' | 'Supervisor' | 'ProcurementAgent' | 'User'
   status: 'Active' | 'Disabled'
 }
 

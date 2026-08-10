@@ -372,6 +372,7 @@ public static class FieldPortalEndpoints
             SiteId = request.SiteId,
             SupervisorUserId = RequireUserId(tenantContext),
             CatalogItemId = catalog.Id,
+            Code = $"FR-{DateTime.UtcNow:yyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..4]}",
             RequestedQuantity = request.RequestedQuantity,
             Unit = catalog.Unit,
             NeededBy = request.NeededBy,
@@ -380,6 +381,15 @@ public static class FieldPortalEndpoints
             Justification = Clean(request.Justification),
             Status = unusuallyHigh ? FieldWarehouseRequestStatus.NeedsJustification : FieldWarehouseRequestStatus.PendingApproval,
         };
+        warehouseRequest.Lines.Add(new FieldWarehouseRequestLine
+        {
+            TenantId = warehouseRequest.TenantId,
+            CatalogItemId = catalog.Id,
+            RequestedQuantity = request.RequestedQuantity,
+            Unit = catalog.Unit,
+            Reason = request.Reason.Trim(),
+            Status = FieldWarehouseRequestLineStatus.Pending,
+        });
         db.FieldWarehouseRequests.Add(warehouseRequest);
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync(db, warehouseRequest.TenantId, warehouseRequest.SiteId, warehouseRequest.SupervisorUserId, "WarehouseRequestCreated", "FieldWarehouseRequest", warehouseRequest.Id, unusuallyHigh, $"{catalog.Name}: {warehouseRequest.RequestedQuantity} {catalog.Unit} sorğusu", ct);
@@ -648,6 +658,8 @@ public static class FieldPortalEndpoints
             .Include(x => x.Site)
             .Include(x => x.SupervisorUser)
             .Include(x => x.CatalogItem)
+            .Include(x => x.Lines)
+            .ThenInclude(x => x.CatalogItem)
             .Where(x => siteIds.Contains(x.SiteId))
             .OrderByDescending(x => x.CreatedAt)
             .Take(150)
@@ -669,7 +681,19 @@ public static class FieldPortalEndpoints
                 x.SupervisorUserId,
                 x.SupervisorUser!.FullName,
                 x.CreatedAt,
-                x.UpdatedAt))
+                x.UpdatedAt,
+                x.Code,
+                x.GeneralNote,
+                x.AbnormalRequest,
+                x.Lines.Select(line => new FieldWarehouseRequestLineDto(
+                    line.Id,
+                    line.CatalogItemId,
+                    line.CatalogItem!.Name,
+                    line.CatalogItem.Category,
+                    line.RequestedQuantity,
+                    line.Unit,
+                    line.Reason,
+                    line.Status)).ToArray()))
             .ToListAsync(ct);
     }
 

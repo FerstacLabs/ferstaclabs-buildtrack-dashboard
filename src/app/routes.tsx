@@ -18,6 +18,7 @@ import { ImportPage } from '../features/import/ImportPage'
 import { MaterialsPage } from '../features/materials/MaterialsPage'
 import { PayrollPage } from '../features/payroll/PayrollPage'
 import { PerformancePage } from '../features/performance/PerformancePage'
+import { ProcurementPage } from '../features/procurement/ProcurementPage'
 import { ProjectCrewsPage } from '../features/projectProgress/ProjectCrewsPage'
 import { ProjectEstimatePage } from '../features/projectProgress/ProjectEstimatePage'
 import { ProjectTimelinePage } from '../features/projectProgress/ProjectTimelinePage'
@@ -55,6 +56,7 @@ export const router = createBrowserRouter([
       { path: 'daily-reports', element: <DailyReportsPage /> },
       { path: 'materials', element: <MaterialsPage /> },
       { path: 'warehouse', element: <WarehousePage /> },
+      { path: 'procurement', element: <ProcurementPage /> },
       { path: 'daily-attendance', element: <DailyAttendancePage /> },
       { path: 'attendance-live', element: <AttendanceLivePage /> },
       { path: 'site-hours', element: <SiteHoursPage /> },

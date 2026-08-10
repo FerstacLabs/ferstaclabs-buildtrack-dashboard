@@ -11,6 +11,7 @@ export const en = {
   'nav.materialsGroup': 'Materials',
   'nav.materials': 'Materials',
   'nav.warehouse': 'Warehouse',
+  'nav.procurement': 'Supply / Procurement',
   'nav.supervisors': 'Supervisors',
   'nav.supervisorAudit': 'Foreman Audit',
   'nav.export': 'Export / 1C',

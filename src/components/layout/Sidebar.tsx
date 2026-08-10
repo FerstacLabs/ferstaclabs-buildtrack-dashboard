@@ -18,6 +18,7 @@ import {
   ThunderboltOutlined,
   ToolOutlined,
   UserOutlined,
+  ShoppingCartOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { useMemo, useState } from 'react'
@@ -67,6 +68,7 @@ const groups: SidebarGroup[] = [
     children: [
       { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
       { labelKey: 'nav.warehouse', path: '/warehouse', icon: <InboxOutlined /> },
+      { labelKey: 'nav.procurement', path: '/procurement', icon: <ShoppingCartOutlined /> },
     ],
   },
   {

@@ -6,6 +6,7 @@ public enum BuildTrackUserRole
     Admin,
     Manager,
     Supervisor,
+    ProcurementAgent,
     User,
 }
 

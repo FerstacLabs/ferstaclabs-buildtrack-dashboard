@@ -1,4 +1,5 @@
 export const ru = {
+  'nav.procurement': 'Supply / Procurement',
   'app.language.az': 'Azərbaycanca',
   'app.language.en': 'English',
   'app.language.ru': 'Русский',

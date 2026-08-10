@@ -9,10 +9,11 @@ import {
 } from '@ant-design/icons'
 import { Alert, Button, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tag, Timeline, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
+import { buildTrackBackendApi } from '../../services/api/buildTrackBackendApi'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
 
 type WarehouseCategory = 'PPE' | 'Tool' | 'Consumable' | 'Material'
@@ -148,10 +149,60 @@ const stockStatusLabel: Record<WarehouseStatus, string> = {
 }
 
 export const WarehousePage = () => {
-  const [items] = useState(initialItems)
+  const [items, setItems] = useState(initialItems)
   const [requests, setRequests] = useState(initialRequests)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
   const [form] = Form.useForm<RequestFormValues>()
+
+  useEffect(() => {
+    let mounted = true
+    const loadBackendWarehouse = async () => {
+      try {
+        const [stockRows, requestRows] = await Promise.all([
+          buildTrackBackendApi.getWarehouseStock(),
+          buildTrackBackendApi.getProcurementWarehouseRequests(),
+        ])
+        if (!mounted) return
+        if (stockRows.length) {
+          setItems(stockRows.map((row) => ({
+            id: row.catalogItemId,
+            name: row.itemName,
+            category: row.category === 'PPE' ? 'PPE' : row.category === 'Alət' ? 'Tool' : row.category === 'Sərfiyyat' ? 'Consumable' : 'Material',
+            unit: row.unit,
+            stockQuantity: row.onHandQuantity,
+            reservedQuantity: row.reservedQuantity,
+            minimumQuantity: row.stockStatus === 'Bitib' ? 10 : 30,
+            unitPrice: 0,
+            location: row.subcategory ?? 'Mərkəzi anbar',
+            lastUpdated: new Date().toLocaleString('az-AZ', { hour12: false }),
+            supplier: 'BuildTrack',
+          })))
+        }
+        if (requestRows.length) {
+          setRequests(requestRows.map((row) => ({
+            id: row.code,
+            itemId: row.lines[0]?.catalogItemId ?? row.id,
+            itemName: row.lines.map((line) => line.itemName).join(', '),
+            requestedQuantity: row.totalRequested,
+            availableQuantity: row.totalReserved,
+            shortageQuantity: row.totalShortfall,
+            foremanName: row.supervisorName ?? 'Prorab',
+            crewName: row.siteName ?? 'Obyekt',
+            siteName: row.siteName ?? 'Obyekt',
+            reason: row.generalNote ?? row.lines[0]?.reason ?? '-',
+            status: row.totalShortfall > 0 ? 'Çatışmazlıq var' : row.status === 'Issued' ? 'Verildi' : row.status === 'ReadyForPickup' ? 'Tam təmin olunur' : 'Təsdiq gözləyir',
+            createdAt: new Date(row.createdAt).toLocaleString('az-AZ', { hour12: false }),
+          })))
+        }
+      } catch {
+        // Demo fallback remains available when backend procurement endpoints are not deployed yet.
+      }
+    }
+    void loadBackendWarehouse()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const rows = items.map((item) => {
     const availableQuantity = Math.max(0, item.stockQuantity - item.reservedQuantity)

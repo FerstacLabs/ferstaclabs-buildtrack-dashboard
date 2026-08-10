@@ -438,28 +438,200 @@ export interface FieldSiteNote {
 export interface FieldWarehouseCatalogItem {
   id: string
   name: string
+  nameAz?: string
+  nameRu?: string
+  nameEn?: string
   category?: string
+  subcategory?: string
   unit: string
   code?: string
+  itemType?: string
+  searchAliases?: string
+}
+
+export interface FieldWarehouseRequestLine {
+  id: string
+  catalogItemId: string
+  itemName: string
+  category: string
+  requestedQuantity: number
+  unit: string
+  reason?: string
+  status: string
 }
 
 export interface FieldWarehouseRequest {
   id: string
+  code?: string
   siteId: string
   siteName: string
   supervisorUserId: string
   supervisorName: string
   catalogItemId: string
+  itemName?: string
   materialName: string
   unit: string
   requestedQuantity: number
   reason: string
+  generalNote?: string
   justification?: string
   urgency: 'Normal' | 'Urgent' | 'Critical'
   status: FieldWarehouseRequestStatus
   managerNote?: string
+  managerComment?: string
+  abnormalRequest?: boolean
+  lines?: FieldWarehouseRequestLine[]
   createdAt: string
   updatedAt?: string
+}
+
+export interface ManagementWarehouseLine {
+  id: string
+  catalogItemId: string
+  itemName: string
+  category: string
+  requestedQuantity: number
+  approvedQuantity: number
+  reservedQuantity: number
+  issuedQuantity: number
+  onHandQuantity: number
+  availableQuantity: number
+  shortfallQuantity: number
+  unit: string
+  reason?: string
+  status: string
+}
+
+export interface ManagementWarehouseRequest {
+  id: string
+  code: string
+  siteId: string
+  siteName?: string
+  supervisorUserId: string
+  supervisorName?: string
+  neededBy?: string
+  urgency: 'Normal' | 'Urgent' | 'Critical'
+  status: FieldWarehouseRequestStatus
+  generalNote?: string
+  justification?: string
+  managerComment?: string
+  abnormalRequest: boolean
+  totalRequested: number
+  totalReserved: number
+  totalShortfall: number
+  createdAt: string
+  updatedAt?: string
+  lines: ManagementWarehouseLine[]
+}
+
+export interface WarehouseStockItem {
+  catalogItemId: string
+  itemName: string
+  category: string
+  subcategory?: string
+  unit: string
+  code?: string
+  onHandQuantity: number
+  reservedQuantity: number
+  availableQuantity: number
+  stockStatus: string
+}
+
+export interface ProcurementNeed {
+  id: string
+  sourceRequestId: string
+  sourceRequestLineId: string
+  catalogItemId: string
+  itemName: string
+  category: string
+  requiredQuantity: number
+  alreadyAvailableQuantity: number
+  shortfallQuantity: number
+  purchasedQuantity: number
+  receivedQuantity: number
+  unit: string
+  priority: 'Normal' | 'Urgent' | 'Critical'
+  requiredBy?: string
+  status: string
+  reason: string
+  createdAt: string
+}
+
+export interface ProcurementTaskLine {
+  id: string
+  procurementNeedId: string
+  catalogItemId: string
+  itemName: string
+  category: string
+  requestedQuantity: number
+  purchasedQuantity: number
+  acceptedQuantity: number
+  unit: string
+  status: string
+  note?: string
+  unitPrice?: number
+  supplierId?: string
+  supplierName?: string
+}
+
+export interface ProcurementTask {
+  id: string
+  code: string
+  assignedProcurementUserId?: string
+  assignedProcurementUserName?: string
+  status: string
+  priority: 'Normal' | 'Urgent' | 'Critical'
+  requiredBy?: string
+  managerInstruction?: string
+  createdAt: string
+  assignedAt?: string
+  startedAt?: string
+  submittedAt?: string
+  verifiedAt?: string
+  verificationNote?: string
+  lines: ProcurementTaskLine[]
+}
+
+export interface SupplierRow {
+  id: string
+  name: string
+  taxId?: string
+  phone?: string
+  email?: string
+  address?: string
+  contactPerson?: string
+  categories?: string
+  status: string
+  notes?: string
+}
+
+export interface ProcurementAgent {
+  id: string
+  fullName: string
+  email: string
+  phone?: string
+  status: 'Active' | 'Disabled'
+  openTasks: number
+  lastLoginAt?: string
+}
+
+export interface SupplyDashboard {
+  assignedTasks: number
+  shoppingTasks: number
+  submittedTasks: number
+  unreadNotifications: number
+  recentTasks: ProcurementTask[]
+}
+
+export interface SupplyNotification {
+  id: string
+  audience: string
+  title: string
+  message: string
+  referenceType?: string
+  referenceId?: string
+  status: 'Unread' | 'Read'
+  createdAt: string
 }
 
 export interface SupervisorSummary {
@@ -679,9 +851,56 @@ export const buildTrackBackendApi = {
   createFieldWorkerEvent: (body: { siteId: string; workerId: string; eventType: FieldWorkerEventType; eventDateTime?: string; reason: string }) =>
     request<FieldWorkerEvent>('/api/field/worker-events', { method: 'POST', body: JSON.stringify(body) }),
   getFieldWarehouseCatalog: async () => unwrapArray<FieldWarehouseCatalogItem>(await request<unknown>('/api/field/warehouse/catalog')),
+  searchCatalogItems: async (params?: { q?: string; category?: string; subcategory?: string; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (params?.q) query.set('q', params.q)
+    if (params?.category) query.set('category', params.category)
+    if (params?.subcategory) query.set('subcategory', params.subcategory)
+    if (params?.limit) query.set('limit', String(params.limit))
+    return unwrapArray<FieldWarehouseCatalogItem>(await request<unknown>(`/api/catalog/items/search${query.toString() ? `?${query}` : ''}`))
+  },
   getFieldWarehouseRequests: async (siteId?: string) => unwrapArray<FieldWarehouseRequest>(await request<unknown>(`/api/field/warehouse/requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   createFieldWarehouseRequest: (body: { siteId: string; catalogItemId: string; requestedQuantity: number; reason: string; justification?: string; urgency: 'Normal' | 'Urgent' | 'Critical' }) =>
     request<FieldWarehouseRequest>('/api/field/warehouse/requests', { method: 'POST', body: JSON.stringify(body) }),
+  createFieldWarehouseCartRequest: (body: { siteId: string; neededBy?: string; urgency: 'Normal' | 'Urgent' | 'Critical'; generalNote?: string; lines: { catalogItemId: string; requestedQuantity: number; reason?: string; specificationJson?: string }[] }) =>
+    request<FieldWarehouseRequest>('/api/field/warehouse/cart-requests', { method: 'POST', body: JSON.stringify(body) }),
+  getWarehouseStock: async () => unwrapArray<WarehouseStockItem>(await request<unknown>('/api/procurement/warehouse/stock')),
+  getProcurementWarehouseRequests: async (siteId?: string) => unwrapArray<ManagementWarehouseRequest>(await request<unknown>(`/api/procurement/warehouse/requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
+  approveProcurementWarehouseRequest: (id: string, managerComment?: string) =>
+    request(`/api/procurement/warehouse/requests/${id}/approve`, { method: 'POST', body: JSON.stringify({ managerComment }) }),
+  issueProcurementWarehouseRequest: (id: string, body: { recipientName?: string; handoverNote?: string; warehouseId?: string }) =>
+    request(`/api/procurement/warehouse/requests/${id}/issue`, { method: 'POST', body: JSON.stringify(body) }),
+  getProcurementNeeds: async () => unwrapArray<ProcurementNeed>(await request<unknown>('/api/procurement/needs')),
+  getProcurementTasks: async () => unwrapArray<ProcurementTask>(await request<unknown>('/api/procurement/tasks')),
+  getProcurementTask: (id: string) => request<ProcurementTask>(`/api/procurement/tasks/${id}`),
+  createProcurementTask: (body: { needIds: string[]; assignedProcurementUserId?: string; managerInstruction?: string }) =>
+    request<ProcurementTask>('/api/procurement/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  verifyProcurementTask: (id: string, verificationNote?: string) =>
+    request<ProcurementTask>(`/api/procurement/tasks/${id}/verify`, { method: 'POST', body: JSON.stringify({ verificationNote }) }),
+  createGoodsReceipt: (body: { taskId: string; warehouseId?: string; note?: string }) =>
+    request(`/api/procurement/goods-receipts`, { method: 'POST', body: JSON.stringify(body) }),
+  getSuppliers: async () => unwrapArray<SupplierRow>(await request<unknown>('/api/procurement/suppliers')),
+  saveSupplier: (body: Partial<SupplierRow> & { name: string }) => request<SupplierRow>('/api/procurement/suppliers', { method: 'POST', body: JSON.stringify(body) }),
+  getProcurementAgents: async () => unwrapArray<ProcurementAgent>(await request<unknown>('/api/procurement/agents')),
+  createProcurementAgent: (body: { fullName: string; email: string; phone?: string; temporaryPassword: string }) =>
+    request<ProcurementAgent>('/api/procurement/agents', { method: 'POST', body: JSON.stringify(body) }),
+  updateProcurementAgent: (id: string, body: { fullName: string; phone?: string; status: 'Active' | 'Disabled' }) =>
+    request<void>(`/api/procurement/agents/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  resetProcurementAgentPassword: (id: string, temporaryPassword: string) =>
+    request<void>(`/api/procurement/agents/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ temporaryPassword }) }),
+  getProcurementTrace: (fieldRequestId: string) => request(`/api/procurement/trace/${fieldRequestId}`),
+  getSupplyMe: () => request('/api/supply/me'),
+  getSupplyDashboard: () => request<SupplyDashboard>('/api/supply/dashboard'),
+  getSupplyTasks: async () => unwrapArray<ProcurementTask>(await request<unknown>('/api/supply/tasks')),
+  getSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}`),
+  acceptSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}/accept`, { method: 'POST' }),
+  startSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}/start`, { method: 'POST' }),
+  updateSupplyTaskLinePurchase: (taskId: string, lineId: string, body: { purchasedQuantity: number; unitPrice?: number; supplierId?: string; note?: string }) =>
+    request(`/api/supply/tasks/${taskId}/lines/${lineId}/purchase`, { method: 'POST', body: JSON.stringify(body) }),
+  uploadSupplyTaskAttachment: (taskId: string, formData: FormData) => uploadRequest(`/api/supply/tasks/${taskId}/attachments`, formData),
+  submitSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}/submit`, { method: 'POST' }),
+  getSupplyNotifications: async () => unwrapArray<SupplyNotification>(await request<unknown>('/api/supply/notifications')),
+  getSupplySettings: () => request('/api/supply/settings'),
   getSupervisors: async () => unwrapArray<SupervisorSummary>(await request<unknown>('/api/supervisors')),
   createSupervisor: (body: { fullName: string; email: string; phone?: string; password: string; siteIds: string[] }) =>
     request<SupervisorSummary>('/api/supervisors', {
@@ -712,6 +931,20 @@ export const buildTrackBackendApi = {
     request<CreateAdminLicenseResponse>('/api/admin/licenses', { method: 'POST', body: JSON.stringify(body) }),
   activateTenantLicense: (tenantId: string, licenseId?: string) =>
     request<LicenseResponse>(`/api/admin/licenses/${tenantId}/activate`, { method: 'POST', body: JSON.stringify({ licenseId }) }),
+}
+
+const uploadRequest = async <T>(path: string, body: FormData): Promise<T> => {
+  const url = `${API_BASE}${path}`
+  const headers = new Headers()
+  Object.entries(authHeader()).forEach(([key, value]) => headers.set(key, value))
+  const response = await fetch(url, { method: 'POST', headers, body })
+  const text = response.status === 204 ? '' : await response.text()
+  const parsed = parseJsonBody(text)
+  if (!response.ok) {
+    console.error('BuildTrack backend upload failed', { url, status: response.status, parsed })
+    throw new BackendApiError(typeof parsed === 'string' ? parsed : JSON.stringify(parsed ?? ''), url, response.status, text)
+  }
+  return parsed as T
 }
 
 

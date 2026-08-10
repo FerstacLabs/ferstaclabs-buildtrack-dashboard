@@ -1,4 +1,4 @@
-import { PlusOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -8,13 +8,27 @@ import {
 } from '../../services/api/buildTrackBackendApi'
 import { fieldStatusColor, fieldStatusLabel, useFieldPortalStore } from './fieldPortalStore'
 
+interface CartLineForm {
+  catalogItemId?: string
+  requestedQuantity?: number
+  reason?: string
+}
+
+interface CartRequestForm {
+  urgency: 'Normal' | 'Urgent' | 'Critical'
+  generalNote?: string
+  lines: CartLineForm[]
+}
+
+const defaultLine = (): CartLineForm => ({ requestedQuantity: 1 })
+
 export const FieldWarehouseRequestsPage = () => {
   const selectedSiteId = useFieldPortalStore((state) => state.selectedSiteId)
   const [catalog, setCatalog] = useState<FieldWarehouseCatalogItem[]>([])
   const [requests, setRequests] = useState<FieldWarehouseRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [form] = Form.useForm()
+  const [form] = Form.useForm<CartRequestForm>()
 
   const load = async () => {
     if (!selectedSiteId) return
@@ -35,15 +49,41 @@ export const FieldWarehouseRequestsPage = () => {
     void load()
   }, [selectedSiteId])
 
+  const catalogById = useMemo(() => new Map(catalog.map((item) => [item.id, item])), [catalog])
+
   const catalogOptions = useMemo(() => catalog.map((item) => ({
     value: item.id,
     label: `${item.name} (${item.unit})`,
+    searchText: `${item.name} ${item.category ?? ''} ${item.subcategory ?? ''} ${item.searchAliases ?? ''}`.toLocaleLowerCase('az-AZ'),
   })), [catalog])
 
-  const createRequest = async (values: { catalogItemId: string; requestedQuantity: number; urgency: 'Normal' | 'Urgent' | 'Critical'; reason: string; justification?: string }) => {
+  const openCart = () => {
+    form.setFieldsValue({ urgency: 'Normal', lines: [defaultLine()] })
+    setDrawerOpen(true)
+  }
+
+  const createCartRequest = async (values: CartRequestForm) => {
     if (!selectedSiteId) return
-    await buildTrackBackendApi.createFieldWarehouseRequest({ siteId: selectedSiteId, ...values })
-    message.success('Anbar sorğusu yaradıldı')
+    const lines = (values.lines ?? [])
+      .filter((line) => line.catalogItemId && Number(line.requestedQuantity) > 0)
+      .map((line) => ({
+        catalogItemId: line.catalogItemId!,
+        requestedQuantity: Number(line.requestedQuantity),
+        reason: line.reason?.trim() || values.generalNote?.trim() || 'Sahə ehtiyacı',
+      }))
+
+    if (!lines.length) {
+      void message.warning('Ən azı bir material sətri əlavə edin')
+      return
+    }
+
+    await buildTrackBackendApi.createFieldWarehouseCartRequest({
+      siteId: selectedSiteId,
+      urgency: values.urgency,
+      generalNote: values.generalNote,
+      lines,
+    })
+    void message.success('Anbar sorğusu yaradıldı')
     setDrawerOpen(false)
     form.resetFields()
     await load()
@@ -58,11 +98,8 @@ export const FieldWarehouseRequestsPage = () => {
           <span className="field-eyebrow">1C-ready anbar prosesi</span>
           <h2>Anbar sorğuları</h2>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-          form.setFieldsValue({ urgency: 'Normal' })
-          setDrawerOpen(true)
-        }}>
-          Material sorğusu
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCart}>
+          Material səbəti yarat
         </Button>
       </div>
       <Alert
@@ -70,7 +107,7 @@ export const FieldWarehouseRequestsPage = () => {
         showIcon
         className="field-alert"
         message="Prorab anbar qalığını görmür"
-        description="Sistem stok yoxlamasını idarəetmə və gələcək 1C inteqrasiyası tərəfində aparacaq. Çatışmazlıq varsa sorğu əsaslandırma ilə təsdiq axınına düşür."
+        description="Sistem stok yoxlamasını serverdə aparır. Anbarda yetərli miqdar varsa rezerv edilir, çatışmayan hissə isə rəhbərlik təsdiqindən sonra satınalma ehtiyacına çevrilir."
       />
       <Card className="soft-card">
         <Table
@@ -78,28 +115,46 @@ export const FieldWarehouseRequestsPage = () => {
           loading={loading}
           dataSource={requests}
           pagination={{ pageSize: 8 }}
+          expandable={{
+            expandedRowRender: (row) => (
+              <Table
+                rowKey="id"
+                pagination={false}
+                dataSource={row.lines?.length ? row.lines : [{
+                  id: `${row.id}-legacy`,
+                  catalogItemId: row.catalogItemId,
+                  itemName: row.materialName,
+                  category: '',
+                  requestedQuantity: row.requestedQuantity,
+                  unit: row.unit,
+                  status: row.status,
+                  reason: row.reason,
+                }]}
+                columns={[
+                  { title: 'Material', dataIndex: 'itemName' },
+                  { title: 'Miqdar', render: (_, line) => `${line.requestedQuantity} ${line.unit}` },
+                  { title: 'Sətir statusu', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+                  { title: 'Səbəb', dataIndex: 'reason', render: (value) => value || '-' },
+                ]}
+              />
+            ),
+          }}
           columns={[
-            { title: 'Material', dataIndex: 'materialName' },
-            { title: 'Miqdar', render: (_, row) => `${row.requestedQuantity} ${row.unit}` },
+            { title: 'Sorğu', dataIndex: 'code', render: (value, row) => value || row.id.slice(0, 8) },
+            { title: 'Material', render: (_, row) => row.lines?.length ? `${row.lines.length} sətir` : row.materialName },
+            { title: 'Miqdar', render: (_, row) => row.lines?.length ? `${row.lines.reduce((sum, line) => sum + line.requestedQuantity, 0)} vahid` : `${row.requestedQuantity} ${row.unit}` },
             { title: 'Təcillik', dataIndex: 'urgency' },
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
-            { title: 'Səbəb', dataIndex: 'reason' },
-            { title: 'Rəhbər qeydi', dataIndex: 'managerNote', render: (value) => value || '-' },
+            { title: 'Qeyd', render: (_, row) => row.generalNote || row.reason || '-' },
             { title: 'Tarix', dataIndex: 'createdAt', render: (value) => new Date(value).toLocaleString('az-AZ') },
           ]}
         />
       </Card>
-      <Drawer title="Material sorğusu yarat" open={drawerOpen} width={560} onClose={() => setDrawerOpen(false)}>
+      <Drawer title="Material səbəti yarat" open={drawerOpen} width={720} onClose={() => setDrawerOpen(false)}>
         <Typography.Paragraph type="secondary">
-          Anbar qalığı prorab üçün gizlidir. Lazım olan material miqdarını və səbəbi yazın.
+          Bir sorğuda bir neçə material əlavə edin. Anbar qalığı gizli qalır; sistem yalnız nəticə statusunu göstərəcək.
         </Typography.Paragraph>
-        <Form layout="vertical" form={form} onFinish={createRequest}>
-          <Form.Item name="catalogItemId" label="Material" rules={[{ required: true, message: 'Material seçin' }]}>
-            <Select showSearch options={catalogOptions} optionFilterProp="label" />
-          </Form.Item>
-          <Form.Item name="requestedQuantity" label="Lazım olan miqdar" rules={[{ required: true, message: 'Miqdar yazın' }]}>
-            <InputNumber min={1} className="full-width" />
-          </Form.Item>
+        <Form layout="vertical" form={form} onFinish={createCartRequest} initialValues={{ urgency: 'Normal', lines: [defaultLine()] }}>
           <Form.Item name="urgency" label="Təcillik">
             <Select options={[
               { value: 'Normal', label: 'Normal' },
@@ -107,14 +162,63 @@ export const FieldWarehouseRequestsPage = () => {
               { value: 'Critical', label: 'Kritik' },
             ]} />
           </Form.Item>
-          <Form.Item name="reason" label="Səbəb" rules={[{ required: true, message: 'Səbəb yazın' }]}>
-            <Input.TextArea rows={3} />
+          <Form.Item name="generalNote" label="Ümumi sorğu qeydi">
+            <Input.TextArea rows={3} placeholder="Məsələn: 2-ci mərtəbə monolit işləri üçün PPE və sərfiyyat lazımdır" />
           </Form.Item>
-          <Form.Item name="justification" label="Əlavə əsaslandırma">
-            <Input.TextArea rows={3} placeholder="Miqdar böyükdürsə və ya çatışmazlıq varsa rəhbərlik üçün izah yazın" />
-          </Form.Item>
-          <Space>
-            <Button type="primary" htmlType="submit">Sorğu yarat</Button>
+          <Form.List name="lines">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" size={12} className="full-width">
+                {fields.map((field, index) => (
+                  <Card key={field.key} size="small" className="soft-card">
+                    <div className="field-cart-line">
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'catalogItemId']}
+                        label={`Material ${index + 1}`}
+                        rules={[{ required: true, message: 'Material seçin' }]}
+                      >
+                        <Select
+                          showSearch
+                          placeholder="Material axtarın"
+                          options={catalogOptions}
+                          optionFilterProp="searchText"
+                          filterOption={(input, option) => String(option?.searchText ?? option?.label ?? '').toLocaleLowerCase('az-AZ').includes(input.toLocaleLowerCase('az-AZ'))}
+                          optionRender={(option) => {
+                            const item = catalogById.get(String(option.value))
+                            return (
+                              <div>
+                                <strong>{item?.name ?? option.label}</strong>
+                                <div className="muted-text">{[item?.category, item?.subcategory, item?.unit].filter(Boolean).join(' / ')}</div>
+                              </div>
+                            )
+                          }}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        {...field}
+                        name={[field.name, 'requestedQuantity']}
+                        label="Miqdar"
+                        rules={[{ required: true, message: 'Miqdar yazın' }]}
+                      >
+                        <InputNumber min={1} className="full-width" />
+                      </Form.Item>
+                      <Form.Item {...field} name={[field.name, 'reason']} label="Səbəb">
+                        <Input placeholder="Hansı iş üçün lazımdır?" />
+                      </Form.Item>
+                      <Button danger icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)}>
+                        Sil
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+                <Button icon={<PlusOutlined />} onClick={() => add(defaultLine())}>
+                  Sətir əlavə et
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+          <Space className="field-form-actions">
+            <Button type="primary" htmlType="submit">Sorğu göndər</Button>
             <Button onClick={() => setDrawerOpen(false)}>Bağla</Button>
           </Space>
         </Form>

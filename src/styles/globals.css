@@ -210,6 +210,30 @@ body {
   padding: 28px 24px 80px 252px;
 }
 
+.supply-shell .field-sidebar,
+.supply-sidebar {
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.12), transparent 22%),
+    linear-gradient(180deg, #073f50 0%, #005d5f 48%, #003f43 100%);
+}
+
+.supply-header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(20, 121, 255, 0.18);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--bt-navy);
+  background: rgba(20, 121, 255, 0.08);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.supply-page .ant-table-cell strong {
+  color: var(--bt-navy);
+}
+
 main,
 .layout-content,
 .main-content,
@@ -2072,6 +2096,17 @@ main,
   margin-bottom: 12px;
 }
 
+.field-cart-line {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 120px minmax(180px, 0.8fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.field-form-actions {
+  margin-top: 18px;
+}
+
 .field-kpi-card {
   min-height: 132px;
   border: 1px solid #dce8ef;
@@ -2133,5 +2168,9 @@ main,
   .field-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .field-cart-line {
+    grid-template-columns: 1fr;
   }
 }
