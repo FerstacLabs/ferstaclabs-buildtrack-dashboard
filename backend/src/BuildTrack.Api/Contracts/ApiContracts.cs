@@ -376,6 +376,8 @@ public sealed record FieldDailyReportDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset? SubmittedAt,
     DateTimeOffset? ReviewedAt,
+    Guid? ReviewedByUserId,
+    string? ReviewedByName,
     string? ReviewNote,
     IReadOnlyList<FieldDailyReportLineDto> Lines);
 

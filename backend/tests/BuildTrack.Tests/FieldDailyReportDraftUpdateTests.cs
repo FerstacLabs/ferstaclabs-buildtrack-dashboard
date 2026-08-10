@@ -124,6 +124,18 @@ public sealed class FieldDailyReportDraftUpdateTests
         Assert.Contains(nameof(SaveFieldDailyReportLineRequest.Id), propertyNames);
     }
 
+    [Theory]
+    [InlineData(FieldDailyReportStatus.Approved, "təsdiqləndi")]
+    [InlineData(FieldDailyReportStatus.NeedsCorrection, "düzəliş tələb olundu")]
+    [InlineData(FieldDailyReportStatus.Rejected, "rədd edildi")]
+    public void DailyReportReviewAuditDescriptionsAreHumanReadable(FieldDailyReportStatus status, string expectedText)
+    {
+        var description = FieldPortalEndpoints.BuildDailyReportReviewDescription(new DateOnly(2026, 8, 11), status);
+
+        Assert.Contains("2026-08-11", description);
+        Assert.Contains(expectedText, description, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void DraftEditKeepsRouteReportDateAsCanonicalIdentity()
     {

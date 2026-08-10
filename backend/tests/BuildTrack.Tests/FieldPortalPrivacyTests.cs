@@ -37,6 +37,35 @@ public sealed class FieldPortalPrivacyTests
     }
 
     [Fact]
+    public void FieldDailyReportReadContractReturnsReviewTraceabilityFields()
+    {
+        var reportProperties = typeof(FieldDailyReportDto)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(x => x.Name)
+            .ToArray();
+
+        Assert.Contains(nameof(FieldDailyReportDto.WeatherCondition), reportProperties);
+        Assert.Contains(nameof(FieldDailyReportDto.GeneralNote), reportProperties);
+        Assert.Contains(nameof(FieldDailyReportDto.ReviewedAt), reportProperties);
+        Assert.Contains(nameof(FieldDailyReportDto.ReviewedByUserId), reportProperties);
+        Assert.Contains(nameof(FieldDailyReportDto.ReviewedByName), reportProperties);
+        Assert.Contains(nameof(FieldDailyReportDto.ReviewNote), reportProperties);
+    }
+
+    [Fact]
+    public void SupervisorAuditContractReturnsActionAndDescription()
+    {
+        var auditProperties = typeof(SupervisorAuditEventDto)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(x => x.Name)
+            .ToArray();
+
+        Assert.Contains(nameof(SupervisorAuditEventDto.Action), auditProperties);
+        Assert.Contains(nameof(SupervisorAuditEventDto.EntityType), auditProperties);
+        Assert.Contains(nameof(SupervisorAuditEventDto.Description), auditProperties);
+    }
+
+    [Fact]
     public void SupervisorDailyReportLineStoresWorkerCountAndWorkHours()
     {
         var lineProperties = typeof(SupervisorDailyReportLine)

@@ -1,10 +1,13 @@
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Button, Card, Drawer, Form, Input, Select, Space, Table, Tag, message } from 'antd'
+import { EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Card, DatePicker, Descriptions, Drawer, Form, Input, Select, Space, Table, Tag, message } from 'antd'
+import type { Dayjs } from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import {
   buildTrackBackendApi,
   type BackendSite,
   type FieldDailyReport,
+  type FieldDailyReportLine,
+  type FieldDailyReportStatus,
   type FieldWarehouseRequest,
   type SupervisorAuditEventRow,
   type SupervisorSummary,
@@ -20,6 +23,62 @@ type SupervisorFormValues = {
   status?: 'Active' | 'Disabled'
 }
 
+const DASH = '—'
+
+const isNumber = (value: unknown) => value !== null && value !== undefined && Number.isFinite(Number(value))
+
+const formatNumber = (value: unknown) => (isNumber(value) ? Number(value).toLocaleString('az-AZ') : DASH)
+
+const formatHours = (value: unknown) => (isNumber(value) ? `${Number(value).toLocaleString('az-AZ')} saat` : DASH)
+
+const formatDateTime = (value?: string) => (value ? new Date(value).toLocaleString('az-AZ') : DASH)
+
+const totalLineValue = (lines: FieldDailyReportLine[], key: 'workerCount' | 'workHours') => {
+  const values = lines.map((line) => Number(line[key])).filter(Number.isFinite)
+  if (!values.length) return undefined
+  return values.reduce((sum, value) => sum + value, 0)
+}
+
+const actionLabel = (action?: string) => {
+  const labels: Record<string, string> = {
+    DailyReportCreated: 'Gündəlik hesabat yaradıldı',
+    DailyReportUpdated: 'Gündəlik hesabat yeniləndi',
+    DailyReportSubmitted: 'Gündəlik hesabat göndərildi',
+    DailyReportApproved: 'Gündəlik hesabat təsdiqləndi',
+    DailyReportNeedsCorrection: 'Düzəliş tələb olundu',
+    DailyReportRejected: 'Gündəlik hesabat rədd edildi',
+    WarehouseRequestCreated: 'Anbar sorğusu yaradıldı',
+    WarehouseRequestApproved: 'Anbar sorğusu təsdiqləndi',
+    WarehouseRequestNeedsJustification: 'Əsaslandırma tələb olundu',
+    WarehouseRequestRejected: 'Anbar sorğusu rədd edildi',
+    WarehouseRequestIssued: 'Anbar sorğusu verildi',
+    SiteNoteCreated: 'Sahə qeydi əlavə edildi',
+    AssignmentChanged: 'Prorab təyinatı dəyişdirildi',
+    SupervisorPasswordReset: 'Prorab şifrəsi yeniləndi',
+  }
+  const value = action?.trim()
+  return value ? labels[value] ?? value : 'Məlumat mövcud deyil'
+}
+
+const moduleLabel = (entityType?: string) => {
+  const labels: Record<string, string> = {
+    SupervisorDailyReport: 'Gündəlik hesabat',
+    FieldWarehouseRequest: 'Anbar sorğusu',
+    SupervisorSiteNote: 'Sahə qeydi',
+    SupervisorWorkerEvent: 'İşçi hadisəsi',
+    AppUser: 'Prorab idarəetməsi',
+  }
+  const value = entityType?.trim()
+  return value ? labels[value] ?? value : DASH
+}
+
+const decisionLabel = (status: FieldDailyReportStatus) => {
+  if (status === 'Approved') return 'Təsdiqlənib'
+  if (status === 'NeedsCorrection') return 'Düzəliş tələb olunur'
+  if (status === 'Rejected') return 'Rədd edilib'
+  return fieldStatusLabel(status)
+}
+
 export const SupervisorsPage = () => {
   const [rows, setRows] = useState<SupervisorSummary[]>([])
   const [sites, setSites] = useState<BackendSite[]>([])
@@ -27,8 +86,16 @@ export const SupervisorsPage = () => {
   const [warehouseRequests, setWarehouseRequests] = useState<FieldWarehouseRequest[]>([])
   const [auditEvents, setAuditEvents] = useState<SupervisorAuditEventRow[]>([])
   const [editing, setEditing] = useState<SupervisorSummary>()
+  const [selectedReport, setSelectedReport] = useState<FieldDailyReport | null>(null)
+  const [selectedAudit, setSelectedAudit] = useState<SupervisorAuditEventRow | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [reportDrawerOpen, setReportDrawerOpen] = useState(false)
+  const [auditDrawerOpen, setAuditDrawerOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [auditDateRange, setAuditDateRange] = useState<[Dayjs, Dayjs] | null>(null)
+  const [auditSiteId, setAuditSiteId] = useState<string>()
+  const [auditSupervisorId, setAuditSupervisorId] = useState<string>()
+  const [auditAction, setAuditAction] = useState<string>()
   const [form] = Form.useForm<SupervisorFormValues>()
 
   const load = async () => {
@@ -57,6 +124,28 @@ export const SupervisorsPage = () => {
 
   const siteOptions = useMemo(() => sites.map((site) => ({ value: site.id, label: site.name })), [sites])
 
+  const supervisorOptions = useMemo(
+    () => rows.map((row) => ({ value: row.id, label: row.fullName })),
+    [rows],
+  )
+
+  const auditActionOptions = useMemo(() => {
+    const actions = Array.from(new Set(auditEvents.map((event) => event.action ?? event.eventType).filter(Boolean) as string[]))
+    return actions.map((action) => ({ value: action, label: actionLabel(action) }))
+  }, [auditEvents])
+
+  const filteredAuditEvents = useMemo(() => auditEvents.filter((event) => {
+    if (auditSiteId && event.siteId !== auditSiteId) return false
+    if (auditSupervisorId && event.supervisorUserId !== auditSupervisorId) return false
+    const action = event.action ?? event.eventType
+    if (auditAction && action !== auditAction) return false
+    if (auditDateRange) {
+      const timestamp = new Date(event.timestamp).getTime()
+      if (timestamp < auditDateRange[0].startOf('day').valueOf() || timestamp > auditDateRange[1].endOf('day').valueOf()) return false
+    }
+    return true
+  }), [auditAction, auditDateRange, auditEvents, auditSiteId, auditSupervisorId])
+
   const openNew = () => {
     setEditing(undefined)
     form.resetFields()
@@ -74,6 +163,16 @@ export const SupervisorsPage = () => {
       siteIds: row.assignments.map((assignment) => assignment.siteId),
     })
     setDrawerOpen(true)
+  }
+
+  const openReport = (row: FieldDailyReport) => {
+    setSelectedReport(row)
+    setReportDrawerOpen(true)
+  }
+
+  const openAudit = (row: SupervisorAuditEventRow) => {
+    setSelectedAudit(row)
+    setAuditDrawerOpen(true)
   }
 
   const save = async (values: SupervisorFormValues) => {
@@ -111,9 +210,16 @@ export const SupervisorsPage = () => {
   }
 
   const reviewReport = async (row: FieldDailyReport, status: 'Approved' | 'NeedsCorrection' | 'Rejected') => {
-    const reviewNote = status === 'Approved' ? 'Təsdiqləndi' : window.prompt('Rəhbər qeydi') || undefined
-    await buildTrackBackendApi.reviewManagementFieldReport(row.id, { status, reviewNote })
+    const reviewNote = status === 'Approved'
+      ? 'Təsdiqləndi'
+      : window.prompt(status === 'NeedsCorrection' ? 'Düzəliş səbəbi' : 'Rədd səbəbi')?.trim()
+    if (status !== 'Approved' && !reviewNote) {
+      message.warning('Rəhbər qeydi daxil edilməlidir')
+      return
+    }
+    const updated = await buildTrackBackendApi.reviewManagementFieldReport(row.id, { status, reviewNote })
     message.success('Hesabat statusu yeniləndi')
+    setSelectedReport(updated)
     await load()
   }
 
@@ -123,6 +229,18 @@ export const SupervisorsPage = () => {
     message.success('Anbar sorğusu yeniləndi')
     await load()
   }
+
+  const reportActions = (row: FieldDailyReport) => (
+    <Space wrap>
+      <Button icon={<EyeOutlined />} onClick={() => openReport(row)}>Bax</Button>
+      <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Approved')}>Təsdiq et</Button>
+      <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'NeedsCorrection')}>Düzəliş tələb et</Button>
+      <Button danger disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Rejected')}>Rədd et</Button>
+    </Space>
+  )
+
+  const selectedReportTotalHours = selectedReport ? totalLineValue(selectedReport.lines, 'workHours') : undefined
+  const selectedReportTotalWorkers = selectedReport ? totalLineValue(selectedReport.lines, 'workerCount') : undefined
 
   return (
     <div className="page-stack">
@@ -177,16 +295,7 @@ export const SupervisorsPage = () => {
             { title: 'Prorab', dataIndex: 'supervisorName' },
             { title: 'Sətir', render: (_, row) => row.lines.length },
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
-            {
-              title: 'Əməliyyat',
-              render: (_, row) => (
-                <Space wrap>
-                  <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Approved')}>Təsdiq</Button>
-                  <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'NeedsCorrection')}>Düzəliş</Button>
-                  <Button danger disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Rejected')}>Rədd</Button>
-                </Space>
-              ),
-            },
+            { title: 'Əməliyyat', render: (_, row) => reportActions(row) },
           ]}
         />
       </Card>
@@ -217,21 +326,29 @@ export const SupervisorsPage = () => {
         />
       </Card>
       <Card className="soft-card" title="Supervisor audit axını">
+        <Space wrap style={{ marginBottom: 16 }}>
+          <DatePicker.RangePicker onChange={(range) => setAuditDateRange(range as [Dayjs, Dayjs] | null)} />
+          <Select allowClear placeholder="Obyekt" style={{ minWidth: 180 }} options={siteOptions} value={auditSiteId} onChange={setAuditSiteId} />
+          <Select allowClear placeholder="Prorab" style={{ minWidth: 180 }} options={supervisorOptions} value={auditSupervisorId} onChange={setAuditSupervisorId} />
+          <Select allowClear placeholder="Hadisə / modul" style={{ minWidth: 220 }} options={auditActionOptions} value={auditAction} onChange={setAuditAction} />
+        </Space>
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={auditEvents}
+          dataSource={filteredAuditEvents}
           pagination={{ pageSize: 6 }}
           columns={[
-            { title: 'Vaxt', dataIndex: 'timestamp', render: (value) => new Date(value).toLocaleString('az-AZ') },
-            { title: 'Obyekt', dataIndex: 'siteName' },
-            { title: 'Prorab', dataIndex: 'supervisorName' },
-            { title: 'Hadisə', dataIndex: 'eventType' },
-            { title: 'Yoxlama', dataIndex: 'requiresManagerReview', render: (value) => value ? <Tag color="orange">Baxılmalıdır</Tag> : <Tag color="green">Normal</Tag> },
-            { title: 'Qeyd', dataIndex: 'message' },
+            { title: 'Vaxt', dataIndex: 'timestamp', render: formatDateTime },
+            { title: 'Obyekt', render: (_, row) => row.siteName || DASH },
+            { title: 'Prorab', render: (_, row) => row.supervisorName || DASH },
+            { title: 'Hadisə', render: (_, row) => actionLabel(row.action ?? row.eventType) },
+            { title: 'Bölmə', render: (_, row) => moduleLabel(row.entityType) },
+            { title: 'Nəticə', render: (_, row) => row.requiresManagerReview ? <Tag color="orange">Diqqət tələb edir</Tag> : <Tag color="green">Uğurlu</Tag> },
+            { title: 'Ətraflı', render: (_, row) => <Button icon={<EyeOutlined />} onClick={() => openAudit(row)}>Bax</Button> },
           ]}
         />
       </Card>
+
       <Drawer title={editing ? 'Prorab redaktəsi' : 'Yeni prorab'} open={drawerOpen} width={560} onClose={() => setDrawerOpen(false)}>
         <Form layout="vertical" form={form} onFinish={save}>
           <Form.Item name="fullName" label="Ad Soyad" rules={[{ required: true, message: 'Ad Soyad daxil edin' }]}>
@@ -261,6 +378,73 @@ export const SupervisorsPage = () => {
           )}
           <Button type="primary" htmlType="submit">Yadda saxla</Button>
         </Form>
+      </Drawer>
+
+      <Drawer
+        title="Gündəlik hesabat"
+        open={reportDrawerOpen}
+        width={860}
+        onClose={() => setReportDrawerOpen(false)}
+        footer={selectedReport?.status === 'Submitted' ? reportActions(selectedReport) : null}
+      >
+        {selectedReport && (
+          <Space direction="vertical" className="full-width" size="middle">
+            <Card size="small">
+              <Space wrap size="large">
+                <div><strong>Sətir sayı:</strong> {selectedReport.lines.length}</div>
+                <div><strong>Ümumi iş saatı:</strong> {formatHours(selectedReportTotalHours)}</div>
+                <div><strong>Ümumi işçi sayı:</strong> {formatNumber(selectedReportTotalWorkers)}</div>
+              </Space>
+            </Card>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="Tarix">{selectedReport.reportDate}</Descriptions.Item>
+              <Descriptions.Item label="Obyekt">{selectedReport.siteName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Prorab">{selectedReport.supervisorName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Status"><Tag color={fieldStatusColor(selectedReport.status)}>{fieldStatusLabel(selectedReport.status)}</Tag></Descriptions.Item>
+              <Descriptions.Item label="Hava şəraiti">{selectedReport.weatherCondition || selectedReport.weather || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Ümumi qeyd">{selectedReport.generalNote || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Göndərilmə vaxtı">{formatDateTime(selectedReport.submittedAt)}</Descriptions.Item>
+              {selectedReport.status !== 'Submitted' && selectedReport.status !== 'Draft' && (
+                <>
+                  <Descriptions.Item label="Qərar">{decisionLabel(selectedReport.status)}</Descriptions.Item>
+                  <Descriptions.Item label="Qərarı verən">{selectedReport.reviewedByName || DASH}</Descriptions.Item>
+                  <Descriptions.Item label="Qərar vaxtı">{formatDateTime(selectedReport.reviewedAt)}</Descriptions.Item>
+                  <Descriptions.Item label="Rəhbər qeydi">{selectedReport.reviewNote || DASH}</Descriptions.Item>
+                </>
+              )}
+            </Descriptions>
+            <Table
+              size="small"
+              rowKey="id"
+              dataSource={selectedReport.lines}
+              pagination={false}
+              columns={[
+                { title: 'Etap', dataIndex: 'stageName' },
+                { title: 'İş', dataIndex: 'workName' },
+                { title: 'Miqdar', render: (_, line) => `${formatNumber(line.reportedQuantity)} ${line.unit || ''}`.trim() },
+                { title: 'İşçi sayı', render: (_, line) => formatNumber(line.workerCount) },
+                { title: 'Saat', render: (_, line) => formatHours(line.workHours) },
+                { title: 'Qeyd', render: (_, line) => line.note || DASH },
+              ]}
+            />
+          </Space>
+        )}
+      </Drawer>
+
+      <Drawer title="Audit detalları" open={auditDrawerOpen} width={620} onClose={() => setAuditDrawerOpen(false)}>
+        {selectedAudit && (
+          <Descriptions bordered size="small" column={1}>
+            <Descriptions.Item label="Vaxt">{formatDateTime(selectedAudit.timestamp)}</Descriptions.Item>
+            <Descriptions.Item label="Prorab">{selectedAudit.supervisorName || DASH}</Descriptions.Item>
+            <Descriptions.Item label="Obyekt">{selectedAudit.siteName || DASH}</Descriptions.Item>
+            <Descriptions.Item label="Hadisə">{actionLabel(selectedAudit.action ?? selectedAudit.eventType)}</Descriptions.Item>
+            <Descriptions.Item label="Bölmə">{moduleLabel(selectedAudit.entityType)}</Descriptions.Item>
+            <Descriptions.Item label="Əməliyyat">{selectedAudit.action || selectedAudit.eventType || DASH}</Descriptions.Item>
+            <Descriptions.Item label="Nəticə">{selectedAudit.requiresManagerReview ? 'Diqqət tələb edir' : 'Uğurlu'}</Descriptions.Item>
+            <Descriptions.Item label="Related entity ID">{selectedAudit.entityId || DASH}</Descriptions.Item>
+            <Descriptions.Item label="Qeyd">{selectedAudit.message || DASH}</Descriptions.Item>
+          </Descriptions>
+        )}
       </Drawer>
     </div>
   )

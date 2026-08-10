@@ -249,7 +249,7 @@ public static class FieldPortalEndpoints
         }
 
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, tenantId, request.SiteId, userId, "DailyReportCreated", "SupervisorDailyReport", report.Id, false, "Sahə gündəlik hesabatı draft olaraq yaradıldı", ct);
+        await WriteAuditAsync(db, tenantId, request.SiteId, userId, "DailyReportCreated", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yaradıldı.", ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
     }
 
@@ -299,7 +299,7 @@ public static class FieldPortalEndpoints
             return Results.Conflict(new { error = "A daily report already exists for this site and date." });
         }
 
-        await WriteAuditAsync(db, tenantId, report.SiteId, userId, "DailyReportUpdated", "SupervisorDailyReport", report.Id, false, "Sahə gündəlik hesabatı yeniləndi", ct);
+        await WriteAuditAsync(db, tenantId, report.SiteId, userId, "DailyReportUpdated", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat yeniləndi.", ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
     }
 
@@ -389,7 +389,7 @@ public static class FieldPortalEndpoints
         report.Status = FieldDailyReportStatus.Submitted;
         report.SubmittedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, "DailyReportSubmitted", "SupervisorDailyReport", report.Id, false, "Prorab gündəlik hesabatı göndərdi", ct);
+        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, "DailyReportSubmitted", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} tarixli gündəlik hesabat təsdiq üçün göndərildi.", ct);
         return Results.Ok(await LoadReportDtoAsync(db, id, ct));
     }
 
@@ -630,24 +630,38 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> GetManagementFieldReportsAsync(Guid? siteId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
-        var query = db.SupervisorDailyReports.AsNoTracking().Include(x => x.Site).Include(x => x.SupervisorUser).Include(x => x.Lines).ThenInclude(x => x.SmetaItem).AsQueryable();
+        var query = db.SupervisorDailyReports.AsNoTracking()
+            .Include(x => x.Site)
+            .Include(x => x.SupervisorUser)
+            .Include(x => x.Lines).ThenInclude(x => x.SmetaItem)
+            .AsQueryable();
         if (siteId is not null) query = query.Where(x => x.SiteId == siteId.Value);
         var reports = await query.OrderByDescending(x => x.SubmittedAt ?? x.CreatedAt).Take(150).ToListAsync(ct);
-        return Results.Ok(reports.Select(MapReport));
+        var reviewerIds = reports.Select(x => x.ReviewedByUserId).OfType<Guid>().Distinct().ToArray();
+        var reviewerNames = reviewerIds.Length == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Users.AsNoTracking().Where(x => reviewerIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.FullName, ct);
+        return Results.Ok(reports.Select(report => MapReport(report, report.ReviewedByUserId is Guid reviewerId ? reviewerNames.GetValueOrDefault(reviewerId) : null)));
     }
 
     private static async Task<IResult> ReviewManagementFieldReportAsync(Guid id, ReviewFieldDailyReportRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
         if (request.Status is not (FieldDailyReportStatus.Approved or FieldDailyReportStatus.NeedsCorrection or FieldDailyReportStatus.Rejected)) return Results.BadRequest(new { error = "Invalid review status" });
-        var report = await db.SupervisorDailyReports.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (request.Status is FieldDailyReportStatus.NeedsCorrection or FieldDailyReportStatus.Rejected && string.IsNullOrWhiteSpace(request.ReviewNote))
+        {
+            return Results.BadRequest(new { error = "Review note is required" });
+        }
+
+        var tenantId = RequireTenantId(tenantContext);
+        var report = await db.SupervisorDailyReports.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
         if (report is null) return Results.NotFound();
         report.Status = request.Status;
         report.ReviewedAt = DateTimeOffset.UtcNow;
         report.ReviewedByUserId = tenantContext.UserId;
         report.ReviewNote = Clean(request.ReviewNote);
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, $"DailyReport{request.Status}", "SupervisorDailyReport", report.Id, request.Status == FieldDailyReportStatus.Rejected, $"Sahə hesabatı review edildi: {request.Status}", ct);
+        await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, $"DailyReport{request.Status}", "SupervisorDailyReport", report.Id, request.Status == FieldDailyReportStatus.Rejected, BuildDailyReportReviewDescription(report.ReportDate, request.Status), ct);
         return Results.Ok(await LoadReportDtoAsync(db, id, ct));
     }
 
@@ -758,10 +772,15 @@ public static class FieldPortalEndpoints
             .Include(x => x.Lines)
             .ThenInclude(x => x.SmetaItem)
             .FirstAsync(x => x.Id == reportId, ct);
-        return MapReport(report);
+        var reviewedByName = report.ReviewedByUserId is null
+            ? null
+            : await db.Users.AsNoTracking().Where(x => x.Id == report.ReviewedByUserId.Value).Select(x => x.FullName).FirstOrDefaultAsync(ct);
+        return MapReport(report, reviewedByName);
     }
 
-    private static FieldDailyReportDto MapReport(SupervisorDailyReport report) => new(
+    private static FieldDailyReportDto MapReport(SupervisorDailyReport report) => MapReport(report, null);
+
+    private static FieldDailyReportDto MapReport(SupervisorDailyReport report, string? reviewedByName) => new(
         report.Id,
         report.SiteId,
         report.Site?.Name,
@@ -775,6 +794,8 @@ public static class FieldPortalEndpoints
         report.CreatedAt,
         report.SubmittedAt,
         report.ReviewedAt,
+        report.ReviewedByUserId,
+        reviewedByName,
         report.ReviewNote,
         report.Lines
             .OrderBy(x => x.SmetaItem?.StageName)
@@ -877,6 +898,14 @@ public static class FieldPortalEndpoints
         });
         await db.SaveChangesAsync(ct);
     }
+
+    internal static string BuildDailyReportReviewDescription(DateOnly reportDate, FieldDailyReportStatus status) => status switch
+    {
+        FieldDailyReportStatus.Approved => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat təsdiqləndi.",
+        FieldDailyReportStatus.NeedsCorrection => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat üçün düzəliş tələb olundu.",
+        FieldDailyReportStatus.Rejected => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat rədd edildi.",
+        _ => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat review edildi.",
+    };
 
     private static IReadOnlyList<FieldAssignmentDto> MapAssignments(IReadOnlyCollection<SupervisorSiteAssignment> assignments) =>
         assignments

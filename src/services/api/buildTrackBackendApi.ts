@@ -374,6 +374,8 @@ export interface FieldDailyReport {
   generalNote?: string
   submittedAt?: string
   reviewedAt?: string
+  reviewedByUserId?: string
+  reviewedByName?: string
   reviewNote?: string
   createdAt: string
   updatedAt?: string
@@ -655,7 +657,8 @@ export interface SupervisorAuditEventRow {
   siteName?: string
   supervisorUserId?: string
   supervisorName?: string
-  eventType: string
+  action?: string
+  eventType?: string
   entityType?: string
   entityId?: string
   requiresManagerReview: boolean
