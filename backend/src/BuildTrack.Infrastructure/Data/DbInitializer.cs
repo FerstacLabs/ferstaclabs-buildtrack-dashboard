@@ -65,7 +65,6 @@ public static class DbInitializer
         new("MASON-BRICK", "Kərpic", "Кирпич", "Brick", "Hörgü", "Kərpic", "ədəd", SupplyItemType.ConstructionMaterial, "kerpic kərpic brick кирпич"),
         new("MASON-AAC-BLOCK", "Qazbeton blok", "Газобетонный блок", "AAC block / gas block", "Hörgü", "Blok", "m3", SupplyItemType.ConstructionMaterial, "qazbeton gasblock aac block газобетон"),
         new("MASON-CONCRETE-BLOCK", "Beton blok", "Бетонный блок", "Concrete block", "Hörgü", "Blok", "ədəd", SupplyItemType.ConstructionMaterial, "beton blok concrete block"),
-        new("MASON-MORTAR", "Hörgü məhlulu", "Кладочный раствор", "Masonry mortar", "Hörgü", "Məhlul", "kisə", SupplyItemType.ConstructionMaterial, "horgu hörgü masonry mortar"),
         new("MASON-MESH", "Hörgü toru", "Кладочная сетка", "Masonry mesh", "Hörgü", "Tor", "m2", SupplyItemType.Steel, "horgu hörgü tor masonry mesh"),
 
         new("ROOF-BITUMEN-MEMBRANE", "Bitum membran", "Битумная мембрана", "Bitumen membrane", "Dam və izolyasiya", "Membran", "rulon", SupplyItemType.ConstructionMaterial, "bitum membrane membran битум"),
@@ -1137,8 +1136,10 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task SeedSupplyChainDataAsync(BuildTrackDbContext db, CancellationToken cancellationToken)
+    internal static async Task SeedSupplyChainDataAsync(BuildTrackDbContext db, CancellationToken cancellationToken)
     {
+        ValidateSupplyCatalogSeedDefinitions();
+
         var units = new[]
         {
             ("eded", "ədəd", "piece", "штука"),
@@ -1162,18 +1163,34 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
             ("gun", "gün", "day", "день"),
         };
 
+        var unitsByCode = (await db.SupplyUnits.ToListAsync(cancellationToken))
+            .Concat(db.SupplyUnits.Local)
+            .GroupBy(x => NormalizeSeedKey(x.Code))
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
         foreach (var (code, az, en, ru) in units)
         {
-            if (await db.SupplyUnits.AnyAsync(x => x.Code == code, cancellationToken)) continue;
-            db.SupplyUnits.Add(new SupplyUnit { Code = code, NameAz = az, NameEn = en, NameRu = ru });
+            var normalizedCode = NormalizeSeedKey(code);
+            if (unitsByCode.TryGetValue(normalizedCode, out var existingUnit))
+            {
+                existingUnit.NameAz = az;
+                existingUnit.NameEn = en;
+                existingUnit.NameRu = ru;
+                existingUnit.IsActive = true;
+                continue;
+            }
+
+            var unit = new SupplyUnit { Code = code, NameAz = az, NameEn = en, NameRu = ru };
+            db.SupplyUnits.Add(unit);
+            unitsByCode[normalizedCode] = unit;
         }
 
         var tenants = await db.Tenants.AsNoTracking().Select(x => x.Id).ToListAsync(cancellationToken);
         foreach (var tenantId in tenants)
         {
+            var catalogIndex = await LoadCatalogSeedIndexAsync(db, tenantId, cancellationToken);
             foreach (var item in SupplyCatalogSeedItems)
             {
-                await UpsertCatalogAsync(db, tenantId, item.Code, item.NameAz, item.NameRu, item.NameEn, item.Category, item.Subcategory, item.Unit, item.ItemType, item.SearchAliases);
+                UpsertCatalog(db, catalogIndex, tenantId, item);
             }
 
             var warehouse = await db.Warehouses.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.IsDefault, cancellationToken);
@@ -1219,51 +1236,141 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static async Task UpsertCatalogAsync(
-        BuildTrackDbContext db,
-        Guid tenantId,
-        string code,
-        string nameAz,
-        string nameRu,
-        string nameEn,
-        string category,
-        string subcategory,
-        string unit,
-        SupplyItemType itemType,
-        string aliases)
+    private static async Task<CatalogSeedIndex> LoadCatalogSeedIndexAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken cancellationToken)
     {
-        var item = await db.FieldWarehouseCatalogItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == code);
+        var items = await db.FieldWarehouseCatalogItems
+            .Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var index = new CatalogSeedIndex();
+        foreach (var item in items.Concat(db.FieldWarehouseCatalogItems.Local.Where(x => x.TenantId == tenantId)))
+        {
+            index.Track(item);
+        }
+
+        return index;
+    }
+
+    internal static void UpsertCatalog(BuildTrackDbContext db, CatalogSeedIndex index, Guid tenantId, SupplyCatalogSeedItem seed)
+    {
+        var normalizedCode = NormalizeSeedKey(seed.Code);
+        var normalizedName = NormalizeSeedKey(seed.NameAz);
+        var item = !string.IsNullOrWhiteSpace(normalizedCode) && index.ByCode.TryGetValue(normalizedCode, out var byCode)
+            ? byCode
+            : index.ByName.TryGetValue(normalizedName, out var byName)
+                ? byName
+                : null;
+
         if (item is null)
         {
-            db.FieldWarehouseCatalogItems.Add(new FieldWarehouseCatalogItem
+            item = new FieldWarehouseCatalogItem
             {
                 TenantId = tenantId,
-                Code = code,
-                Name = nameAz,
-                NameAz = nameAz,
-                NameRu = nameRu,
-                NameEn = nameEn,
-                Category = category,
-                Subcategory = subcategory,
-                Unit = unit,
-                ItemType = itemType,
-                SearchAliases = aliases,
+                Code = seed.Code,
+                Name = seed.NameAz,
+                NameAz = seed.NameAz,
+                NameRu = seed.NameRu,
+                NameEn = seed.NameEn,
+                Category = seed.Category,
+                Subcategory = seed.Subcategory,
+                Unit = seed.Unit,
+                ItemType = seed.ItemType,
+                SearchAliases = seed.SearchAliases,
                 IsActive = true,
-            });
+            };
+            db.FieldWarehouseCatalogItems.Add(item);
+            index.Track(item);
             return;
         }
 
-        item.Name = nameAz;
-        item.NameAz = nameAz;
-        item.NameRu = nameRu;
-        item.NameEn = nameEn;
-        item.Category = category;
-        item.Subcategory = subcategory;
-        item.Unit = unit;
-        item.ItemType = itemType;
-        item.SearchAliases = aliases;
+        ApplyCatalogSeed(index, item, seed);
+    }
+
+    private static void ApplyCatalogSeed(CatalogSeedIndex index, FieldWarehouseCatalogItem item, SupplyCatalogSeedItem seed)
+    {
+        var seedNameKey = NormalizeSeedKey(seed.NameAz);
+        var canUseSeedName = !index.ByName.TryGetValue(seedNameKey, out var nameOwner) || nameOwner.Id == item.Id;
+        if (canUseSeedName)
+        {
+            item.Name = seed.NameAz;
+            index.ByName[seedNameKey] = item;
+        }
+
+        if (string.IsNullOrWhiteSpace(item.Code))
+        {
+            item.Code = seed.Code;
+            index.ByCode[NormalizeSeedKey(seed.Code)] = item;
+        }
+
+        if (item.IsCustom)
+        {
+            item.NameAz = string.IsNullOrWhiteSpace(item.NameAz) ? seed.NameAz : item.NameAz;
+            item.NameRu = string.IsNullOrWhiteSpace(item.NameRu) ? seed.NameRu : item.NameRu;
+            item.NameEn = string.IsNullOrWhiteSpace(item.NameEn) ? seed.NameEn : item.NameEn;
+            item.Category = string.IsNullOrWhiteSpace(item.Category) ? seed.Category : item.Category;
+            item.Subcategory = string.IsNullOrWhiteSpace(item.Subcategory) ? seed.Subcategory : item.Subcategory;
+            item.Unit = string.IsNullOrWhiteSpace(item.Unit) ? seed.Unit : item.Unit;
+            item.SearchAliases = string.IsNullOrWhiteSpace(item.SearchAliases) ? seed.SearchAliases : item.SearchAliases;
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            return;
+        }
+
+        item.NameAz = seed.NameAz;
+        item.NameRu = seed.NameRu;
+        item.NameEn = seed.NameEn;
+        item.Category = seed.Category;
+        item.Subcategory = seed.Subcategory;
+        item.Unit = seed.Unit;
+        item.ItemType = seed.ItemType;
+        item.SearchAliases = seed.SearchAliases;
         item.IsActive = true;
         item.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    internal static void ValidateSupplyCatalogSeedDefinitions()
+    {
+        var duplicateNames = SupplyCatalogSeedItems
+            .GroupBy(x => NormalizeSeedKey(x.NameAz), StringComparer.OrdinalIgnoreCase)
+            .Where(x => x.Count() > 1)
+            .Select(x => $"{x.First().NameAz}: {string.Join(", ", x.Select(item => item.Code))}")
+            .ToArray();
+        if (duplicateNames.Length > 0)
+        {
+            throw new InvalidOperationException($"Duplicate supply catalog seed names would violate UX_field_warehouse_catalog_items_name: {string.Join("; ", duplicateNames)}");
+        }
+
+        var duplicateCodes = SupplyCatalogSeedItems
+            .GroupBy(x => NormalizeSeedKey(x.Code), StringComparer.OrdinalIgnoreCase)
+            .Where(x => x.Count() > 1)
+            .Select(x => $"{x.Key}: {string.Join(", ", x.Select(item => item.NameAz))}")
+            .ToArray();
+        if (duplicateCodes.Length > 0)
+        {
+            throw new InvalidOperationException($"Duplicate supply catalog seed codes found: {string.Join("; ", duplicateCodes)}");
+        }
+    }
+
+    internal static string NormalizeSeedKey(string? value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : value.Trim().ToUpperInvariant();
+
+    internal sealed class CatalogSeedIndex
+    {
+        public Dictionary<string, FieldWarehouseCatalogItem> ByCode { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, FieldWarehouseCatalogItem> ByName { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Track(FieldWarehouseCatalogItem item)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Code))
+            {
+                ByCode.TryAdd(NormalizeSeedKey(item.Code), item);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Name))
+            {
+                ByName.TryAdd(NormalizeSeedKey(item.Name), item);
+            }
+        }
     }
 
     private static async Task SeedOpeningBalanceAsync(BuildTrackDbContext db, Guid tenantId, Guid warehouseId, string itemCode, decimal quantity, CancellationToken cancellationToken)
