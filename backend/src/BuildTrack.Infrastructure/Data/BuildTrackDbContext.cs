@@ -397,6 +397,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.ReportedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.WorkHours).HasPrecision(18, 2);
             entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
             entity.Property(x => x.Note).HasMaxLength(1000);
             entity.HasIndex(x => x.TenantId);

@@ -132,6 +132,8 @@ public sealed class SupervisorDailyReportLine
     public Guid SmetaItemId { get; set; }
     public FieldSmetaItem? SmetaItem { get; set; }
     public decimal ReportedQuantity { get; set; }
+    public int? WorkerCount { get; set; }
+    public decimal? WorkHours { get; set; }
     public string Unit { get; set; } = string.Empty;
     public string? Note { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

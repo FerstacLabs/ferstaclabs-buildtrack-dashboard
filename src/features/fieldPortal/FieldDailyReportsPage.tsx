@@ -1,4 +1,4 @@
-import { PlusOutlined, SendOutlined } from '@ant-design/icons'
+import { EditOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
@@ -23,13 +23,27 @@ type ReportFormValues = {
   }[]
 }
 
+const isUsableNumber = (value: unknown): value is number => value !== null && value !== undefined && Number.isFinite(Number(value))
+
+const formatNumber = (value: unknown) => (isUsableNumber(value) ? Number(value).toLocaleString('az-AZ') : '—')
+
+const formatHours = (value: unknown) => (isUsableNumber(value) ? `${Number(value).toLocaleString('az-AZ')} saat` : '—')
+
+const getTotalWorkHours = (report: FieldDailyReport) => {
+  const values = report.lines.map((line) => Number(line.workHours)).filter(Number.isFinite)
+  if (!values.length) return undefined
+  return values.reduce((sum, value) => sum + value, 0)
+}
+
 export const FieldDailyReportsPage = () => {
   const selectedSiteId = useFieldPortalStore((state) => state.selectedSiteId)
   const [reports, setReports] = useState<FieldDailyReport[]>([])
   const [smetaItems, setSmetaItems] = useState<FieldSmetaItem[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editingReport, setEditingReport] = useState<FieldDailyReport | null>(null)
   const [form] = Form.useForm<ReportFormValues>()
 
   const load = async () => {
@@ -59,22 +73,60 @@ export const FieldDailyReportsPage = () => {
     [smetaItems],
   )
 
+  const closeDrawer = () => {
+    setDrawerOpen(false)
+    setEditingReport(null)
+    form.resetFields()
+  }
+
+  const openCreateDrawer = () => {
+    setEditingReport(null)
+    form.setFieldsValue({
+      reportDate: dayjs(),
+      weather: undefined,
+      generalNote: undefined,
+      lines: [{ reportedQuantity: 0, workerCount: 1, workHours: 8 }],
+    })
+    setDrawerOpen(true)
+  }
+
+  const openEditDrawer = (report: FieldDailyReport) => {
+    setEditingReport(report)
+    form.setFieldsValue({
+      reportDate: dayjs(report.reportDate),
+      weather: report.weatherCondition ?? report.weather,
+      generalNote: report.generalNote,
+      lines: report.lines.map((line) => ({
+        smetaItemId: line.smetaItemId,
+        reportedQuantity: line.reportedQuantity,
+        workerCount: line.workerCount ?? 1,
+        workHours: line.workHours ?? 8,
+        note: line.note,
+      })),
+    })
+    setDrawerOpen(true)
+  }
+
   const saveReport = async (values: ReportFormValues) => {
     if (!selectedSiteId) return
     if (saving) return
     const body: SaveFieldDailyReportBody = {
       siteId: selectedSiteId,
       reportDate: values.reportDate.format('YYYY-MM-DD'),
-      weather: values.weather,
+      weatherCondition: values.weather,
       generalNote: values.generalNote,
       lines: values.lines,
     }
     setSaving(true)
     try {
-      await buildTrackBackendApi.saveFieldDailyReport(body)
-      message.success('Gündəlik hesabat saxlanıldı')
-      setDrawerOpen(false)
-      form.resetFields()
+      if (editingReport) {
+        await buildTrackBackendApi.updateFieldDailyReport(editingReport.id, body)
+        message.success('Gündəlik hesabat yeniləndi')
+      } else {
+        await buildTrackBackendApi.saveFieldDailyReport(body)
+        message.success('Gündəlik hesabat saxlanıldı')
+      }
+      closeDrawer()
       await load()
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Gündəlik hesabat saxlanmadı'
@@ -88,9 +140,17 @@ export const FieldDailyReportsPage = () => {
   }
 
   const submitReport = async (id: string) => {
-    await buildTrackBackendApi.submitFieldDailyReport(id)
-    message.success('Hesabat rəhbərliyə göndərildi')
-    await load()
+    if (submittingId) return
+    setSubmittingId(id)
+    try {
+      await buildTrackBackendApi.submitFieldDailyReport(id)
+      message.success('Hesabat rəhbərliyə göndərildi')
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Hesabat göndərilmədi')
+    } finally {
+      setSubmittingId(null)
+    }
   }
 
   if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
@@ -102,10 +162,7 @@ export const FieldDailyReportsPage = () => {
           <span className="field-eyebrow">Faktiki iş həcmi</span>
           <h2>Gündəlik hesabat</h2>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-          form.setFieldsValue({ reportDate: dayjs(), lines: [{ reportedQuantity: 0, workerCount: 1, workHours: 8 }] })
-          setDrawerOpen(true)
-        }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDrawer}>
           Yeni hesabat
         </Button>
       </div>
@@ -119,36 +176,64 @@ export const FieldDailyReportsPage = () => {
             { title: 'Tarix', dataIndex: 'reportDate' },
             { title: 'Obyekt', dataIndex: 'siteName' },
             { title: 'Sətir sayı', render: (_, row) => row.lines.length },
-            { title: 'İş saatı', render: (_, row) => row.lines.reduce((sum, line) => sum + line.workHours, 0).toFixed(1) },
+            {
+              title: 'İş saatı',
+              render: (_, row) => {
+                const total = getTotalWorkHours(row)
+                return total === undefined ? '—' : formatHours(total)
+              },
+            },
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
             {
               title: 'Əməliyyat',
               render: (_, row) => row.status === 'Draft'
-                ? <Button icon={<SendOutlined />} onClick={() => submitReport(row.id)}>Göndər</Button>
-                : <span>Read-only</span>,
+                ? (
+                  <Space wrap>
+                    <Button icon={<EditOutlined />} onClick={() => openEditDrawer(row)}>
+                      Düzəliş et
+                    </Button>
+                    <Button icon={<SendOutlined />} loading={submittingId === row.id} onClick={() => submitReport(row.id)}>
+                      Göndər
+                    </Button>
+                  </Space>
+                )
+                : <span>Yalnız baxış</span>,
             },
           ]}
           expandable={{
             expandedRowRender: (row) => (
-              <Table
-                size="small"
-                rowKey="id"
-                dataSource={row.lines}
-                pagination={false}
-                columns={[
-                  { title: 'Etap', dataIndex: 'stageName' },
-                  { title: 'İş', dataIndex: 'workName' },
-                  { title: 'Miqdar', render: (_, line) => `${line.reportedQuantity} ${line.unit}` },
-                  { title: 'İşçi', dataIndex: 'workerCount' },
-                  { title: 'Saat', dataIndex: 'workHours' },
-                  { title: 'Qeyd', dataIndex: 'note' },
-                ]}
-              />
+              <Space direction="vertical" className="full-width" size="middle">
+                <Card size="small">
+                  <Space direction="vertical" className="full-width">
+                    <span><strong>Hava şəraiti:</strong> {row.weatherCondition ?? row.weather ?? '—'}</span>
+                    <span><strong>Ümumi qeyd:</strong> {row.generalNote?.trim() || '—'}</span>
+                  </Space>
+                </Card>
+                <Table
+                  size="small"
+                  rowKey="id"
+                  dataSource={row.lines}
+                  pagination={false}
+                  columns={[
+                    { title: 'Etap', dataIndex: 'stageName' },
+                    { title: 'İş', dataIndex: 'workName' },
+                    { title: 'Miqdar', render: (_, line) => `${formatNumber(line.reportedQuantity)} ${line.unit || ''}`.trim() },
+                    { title: 'İşçi', render: (_, line) => formatNumber(line.workerCount) },
+                    { title: 'Saat', render: (_, line) => formatHours(line.workHours) },
+                    { title: 'Qeyd', render: (_, line) => line.note?.trim() || '—' },
+                  ]}
+                />
+              </Space>
             ),
           }}
         />
       </Card>
-      <Drawer title="Yeni gündəlik hesabat" open={drawerOpen} width={680} onClose={() => setDrawerOpen(false)}>
+      <Drawer
+        title={editingReport ? 'Gündəlik hesabatı redaktə et' : 'Yeni gündəlik hesabat'}
+        open={drawerOpen}
+        width={680}
+        onClose={closeDrawer}
+      >
         <Form layout="vertical" form={form} onFinish={saveReport}>
           <Form.Item name="reportDate" label="Hesabat tarixi" rules={[{ required: true, message: 'Tarix seçin' }]}>
             <DatePicker className="full-width" />
@@ -165,13 +250,13 @@ export const FieldDailyReportsPage = () => {
                       <Select showSearch options={smetaOptions} optionFilterProp="label" />
                     </Form.Item>
                     <Space wrap>
-                      <Form.Item name={[field.name, 'reportedQuantity']} label="Fakt miqdar" rules={[{ required: true }]}>
+                      <Form.Item name={[field.name, 'reportedQuantity']} label="Fakt miqdar" rules={[{ required: true, message: 'Miqdar daxil edin' }]}>
                         <InputNumber min={0} />
                       </Form.Item>
-                      <Form.Item name={[field.name, 'workerCount']} label="İşçi sayı" rules={[{ required: true }]}>
+                      <Form.Item name={[field.name, 'workerCount']} label="İşçi sayı" rules={[{ required: true, message: 'İşçi sayı daxil edin' }]}>
                         <InputNumber min={1} />
                       </Form.Item>
-                      <Form.Item name={[field.name, 'workHours']} label="Saat" rules={[{ required: true }]}>
+                      <Form.Item name={[field.name, 'workHours']} label="Saat" rules={[{ required: true, message: 'Saat daxil edin' }]}>
                         <InputNumber min={0} step={0.5} />
                       </Form.Item>
                     </Space>
@@ -188,7 +273,9 @@ export const FieldDailyReportsPage = () => {
           <Form.Item name="generalNote" label="Ümumi qeyd">
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saving} disabled={saving}>Saxla</Button>
+          <Button type="primary" htmlType="submit" loading={saving} disabled={saving}>
+            {editingReport ? 'Yenilə' : 'Saxla'}
+          </Button>
         </Form>
       </Drawer>
     </div>

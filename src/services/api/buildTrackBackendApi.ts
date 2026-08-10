@@ -356,8 +356,8 @@ export interface FieldDailyReportLine {
   workName: string
   unit: string
   reportedQuantity: number
-  workerCount: number
-  workHours: number
+  workerCount?: number
+  workHours?: number
   note?: string
 }
 
@@ -370,6 +370,7 @@ export interface FieldDailyReport {
   reportDate: string
   status: FieldDailyReportStatus
   weather?: string
+  weatherCondition?: string
   generalNote?: string
   submittedAt?: string
   reviewedAt?: string
@@ -383,7 +384,7 @@ export interface SaveFieldDailyReportBody {
   id?: string
   siteId: string
   reportDate: string
-  weather?: string
+  weatherCondition?: string
   generalNote?: string
   lines: {
     smetaItemId: string
@@ -843,6 +844,7 @@ export const buildTrackBackendApi = {
   getFieldWorkers: async (siteId: string) => unwrapArray<FieldWorker>(await request<unknown>(`/api/field/workers?siteId=${encodeURIComponent(siteId)}`)),
   getFieldDailyReports: async (siteId?: string) => unwrapArray<FieldDailyReport>(await request<unknown>(`/api/field/daily-reports${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   saveFieldDailyReport: (body: SaveFieldDailyReportBody) => request<FieldDailyReport>('/api/field/daily-reports', { method: 'POST', body: JSON.stringify(body) }),
+  updateFieldDailyReport: (id: string, body: SaveFieldDailyReportBody) => request<FieldDailyReport>(`/api/field/daily-reports/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   submitFieldDailyReport: (id: string) => request<FieldDailyReport>(`/api/field/daily-reports/${id}/submit`, { method: 'POST' }),
   getFieldSiteNotes: async (siteId?: string) => unwrapArray<FieldSiteNote>(await request<unknown>(`/api/field/site-notes${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   createFieldSiteNote: (body: { siteId: string; category: FieldSiteNoteCategory; text: string; eventDateTime?: string }) =>

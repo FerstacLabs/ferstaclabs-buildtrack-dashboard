@@ -21,6 +21,7 @@ public static class FieldPortalEndpoints
         app.MapGet("/api/field/daily-reports", GetFieldDailyReportsAsync);
         app.MapGet("/api/field/daily-reports/{id:guid}", GetFieldDailyReportAsync);
         app.MapPost("/api/field/daily-reports", SaveFieldDailyReportAsync);
+        app.MapPut("/api/field/daily-reports/{id:guid}", UpdateFieldDailyReportAsync);
         app.MapPost("/api/field/daily-reports/{id:guid}/submit", SubmitFieldDailyReportAsync);
         app.MapGet("/api/field/site-notes", GetFieldSiteNotesAsync);
         app.MapPost("/api/field/site-notes", CreateFieldSiteNoteAsync);
@@ -240,6 +241,8 @@ public static class FieldPortalEndpoints
                 TenantId = tenantId,
                 SmetaItemId = line.SmetaItemId,
                 ReportedQuantity = line.ReportedQuantity,
+                WorkerCount = line.WorkerCount,
+                WorkHours = line.WorkHours,
                 Unit = items[line.SmetaItemId].Unit,
                 Note = Clean(line.Note),
             });
@@ -247,6 +250,55 @@ public static class FieldPortalEndpoints
 
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync(db, tenantId, request.SiteId, userId, "DailyReportCreated", "SupervisorDailyReport", report.Id, false, "Sahə gündəlik hesabatı draft olaraq yaradıldı", ct);
+        return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
+    }
+
+    private static async Task<IResult> UpdateFieldDailyReportAsync(
+        Guid id,
+        SaveFieldDailyReportRequest request,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IFieldAccessService fieldAccess,
+        CancellationToken ct)
+    {
+        var tenantId = RequireTenantId(tenantContext);
+        var userId = RequireUserId(tenantContext);
+        var report = await db.SupervisorDailyReports
+            .Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+        if (report is null) return Results.NotFound();
+        await fieldAccess.RequireSiteAccessAsync(report.SiteId, ct);
+        if (report.SupervisorUserId != userId) return Results.Forbid();
+        if (report.Status != FieldDailyReportStatus.Draft) return Results.BadRequest(new { error = "Only draft reports can be edited" });
+        if (request.SiteId != report.SiteId) return Results.BadRequest(new { error = "Report site cannot be changed" });
+        if (request.Lines.Count == 0) return Results.BadRequest(new { error = "At least one report line is required" });
+        if (request.Lines.Any(x => x.ReportedQuantity <= 0)) return Results.BadRequest(new { error = "Reported quantity must be greater than zero" });
+
+        var itemIds = request.Lines.Select(x => x.SmetaItemId).Distinct().ToArray();
+        var items = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId && x.SiteId == report.SiteId && itemIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        if (items.Count != itemIds.Length) return Results.BadRequest(new { error = "Smeta item does not belong to the assigned site" });
+
+        report.ReportDate = request.ReportDate;
+        report.Shift = Clean(request.Shift);
+        report.GeneralNote = Clean(request.GeneralNote);
+        report.WeatherCondition = Clean(request.WeatherCondition);
+        report.Lines.Clear();
+        foreach (var line in request.Lines)
+        {
+            report.Lines.Add(new SupervisorDailyReportLine
+            {
+                TenantId = tenantId,
+                SmetaItemId = line.SmetaItemId,
+                ReportedQuantity = line.ReportedQuantity,
+                WorkerCount = line.WorkerCount,
+                WorkHours = line.WorkHours,
+                Unit = items[line.SmetaItemId].Unit,
+                Note = Clean(line.Note),
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+        await WriteAuditAsync(db, tenantId, report.SiteId, userId, "DailyReportUpdated", "SupervisorDailyReport", report.Id, false, "Sahə gündəlik hesabatı yeniləndi", ct);
         return Results.Ok(await LoadReportDtoAsync(db, report.Id, ct));
     }
 
@@ -650,7 +702,7 @@ public static class FieldPortalEndpoints
         report.Lines
             .OrderBy(x => x.SmetaItem?.StageName)
             .ThenBy(x => x.SmetaItem?.WorkName)
-            .Select(x => new FieldDailyReportLineDto(x.Id, x.SmetaItemId, x.SmetaItem?.StageName ?? string.Empty, x.SmetaItem?.WorkName ?? string.Empty, x.ReportedQuantity, x.Unit, x.Note))
+            .Select(x => new FieldDailyReportLineDto(x.Id, x.SmetaItemId, x.SmetaItem?.StageName ?? string.Empty, x.SmetaItem?.WorkName ?? string.Empty, x.ReportedQuantity, x.WorkerCount, x.WorkHours, x.Unit, x.Note))
             .ToArray());
 
     private static async Task<IReadOnlyList<FieldWarehouseRequestDto>> LoadWarehouseRequestsAsync(BuildTrackDbContext db, IReadOnlyCollection<Guid> siteIds, CancellationToken ct)

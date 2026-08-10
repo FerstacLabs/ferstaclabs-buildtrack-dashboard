@@ -602,10 +602,14 @@ CREATE TABLE IF NOT EXISTS supervisor_daily_report_lines (
     "ReportId" uuid NOT NULL REFERENCES supervisor_daily_reports("Id") ON DELETE CASCADE,
     "SmetaItemId" uuid NOT NULL REFERENCES field_smeta_items("Id") ON DELETE RESTRICT,
     "ReportedQuantity" numeric(18,3) NOT NULL,
+    "WorkerCount" integer NULL,
+    "WorkHours" numeric(18,2) NULL,
     "Unit" character varying(40) NOT NULL,
     "Note" character varying(1000) NULL,
     "CreatedAt" timestamp with time zone NOT NULL
 );
+ALTER TABLE supervisor_daily_report_lines ADD COLUMN IF NOT EXISTS "WorkerCount" integer NULL;
+ALTER TABLE supervisor_daily_report_lines ADD COLUMN IF NOT EXISTS "WorkHours" numeric(18,2) NULL;
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_TenantId" ON supervisor_daily_report_lines ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_ReportId" ON supervisor_daily_report_lines ("ReportId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_SmetaItemId" ON supervisor_daily_report_lines ("SmetaItemId");

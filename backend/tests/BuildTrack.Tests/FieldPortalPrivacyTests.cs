@@ -16,7 +16,36 @@ public sealed class FieldPortalPrivacyTests
             .ToArray();
 
         Assert.Contains(nameof(SaveFieldDailyReportLineRequest.ReportedQuantity), lineProperties);
+        Assert.Contains(nameof(SaveFieldDailyReportLineRequest.WorkerCount), lineProperties);
+        Assert.Contains(nameof(SaveFieldDailyReportLineRequest.WorkHours), lineProperties);
         Assert.DoesNotContain(lineProperties, name => name.Equals("CompletedQuantity", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void FieldDailyReportReadContractReturnsWorkerCountAndWorkHours()
+    {
+        var lineProperties = typeof(FieldDailyReportLineDto)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(x => x.Name)
+            .ToArray();
+
+        Assert.Contains(nameof(FieldDailyReportLineDto.ReportedQuantity), lineProperties);
+        Assert.Contains(nameof(FieldDailyReportLineDto.WorkerCount), lineProperties);
+        Assert.Contains(nameof(FieldDailyReportLineDto.WorkHours), lineProperties);
+        Assert.DoesNotContain(lineProperties, name => name.Contains("Cost", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(lineProperties, name => name.Contains("Price", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void SupervisorDailyReportLineStoresWorkerCountAndWorkHours()
+    {
+        var lineProperties = typeof(SupervisorDailyReportLine)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(x => x.Name)
+            .ToArray();
+
+        Assert.Contains(nameof(SupervisorDailyReportLine.WorkerCount), lineProperties);
+        Assert.Contains(nameof(SupervisorDailyReportLine.WorkHours), lineProperties);
     }
 
     [Theory]

@@ -357,6 +357,8 @@ public sealed record FieldDailyReportLineDto(
     string StageName,
     string WorkName,
     decimal ReportedQuantity,
+    int? WorkerCount,
+    decimal? WorkHours,
     string Unit,
     string? Note);
 
@@ -388,6 +390,8 @@ public sealed record SaveFieldDailyReportRequest(
 public sealed record SaveFieldDailyReportLineRequest(
     Guid SmetaItemId,
     decimal ReportedQuantity,
+    int? WorkerCount,
+    decimal? WorkHours,
     string? Note);
 
 public sealed record ReviewFieldDailyReportRequest(FieldDailyReportStatus Status, string? ReviewNote);
