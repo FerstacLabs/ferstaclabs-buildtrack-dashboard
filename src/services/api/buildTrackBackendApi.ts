@@ -355,7 +355,7 @@ export interface FieldDailyReportLine {
   stageName: string
   workName: string
   unit: string
-  completedQuantity: number
+  reportedQuantity: number
   workerCount: number
   workHours: number
   note?: string
@@ -387,7 +387,7 @@ export interface SaveFieldDailyReportBody {
   generalNote?: string
   lines: {
     smetaItemId: string
-    completedQuantity: number
+    reportedQuantity: number
     workerCount: number
     workHours: number
     note?: string

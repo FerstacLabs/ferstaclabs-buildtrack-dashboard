@@ -7,6 +7,18 @@ namespace BuildTrack.Tests;
 
 public sealed class FieldPortalPrivacyTests
 {
+    [Fact]
+    public void FieldDailyReportSubmitContractUsesReportedQuantity()
+    {
+        var lineProperties = typeof(SaveFieldDailyReportLineRequest)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(x => x.Name)
+            .ToArray();
+
+        Assert.Contains(nameof(SaveFieldDailyReportLineRequest.ReportedQuantity), lineProperties);
+        Assert.DoesNotContain(lineProperties, name => name.Equals("CompletedQuantity", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Theory]
     [InlineData(nameof(FieldSmetaItemDto), "planned")]
     [InlineData(nameof(FieldSmetaItemDto), "cost")]

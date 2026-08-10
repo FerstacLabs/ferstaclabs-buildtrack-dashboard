@@ -16,7 +16,7 @@ type ReportFormValues = {
   generalNote?: string
   lines: {
     smetaItemId: string
-    completedQuantity: number
+    reportedQuantity: number
     workerCount: number
     workHours: number
     note?: string
@@ -28,6 +28,7 @@ export const FieldDailyReportsPage = () => {
   const [reports, setReports] = useState<FieldDailyReport[]>([])
   const [smetaItems, setSmetaItems] = useState<FieldSmetaItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [form] = Form.useForm<ReportFormValues>()
 
@@ -60,6 +61,7 @@ export const FieldDailyReportsPage = () => {
 
   const saveReport = async (values: ReportFormValues) => {
     if (!selectedSiteId) return
+    if (saving) return
     const body: SaveFieldDailyReportBody = {
       siteId: selectedSiteId,
       reportDate: values.reportDate.format('YYYY-MM-DD'),
@@ -67,11 +69,22 @@ export const FieldDailyReportsPage = () => {
       generalNote: values.generalNote,
       lines: values.lines,
     }
-    await buildTrackBackendApi.saveFieldDailyReport(body)
-    message.success('Gündəlik hesabat saxlandı')
-    setDrawerOpen(false)
-    form.resetFields()
-    await load()
+    setSaving(true)
+    try {
+      await buildTrackBackendApi.saveFieldDailyReport(body)
+      message.success('Gündəlik hesabat saxlanıldı')
+      setDrawerOpen(false)
+      form.resetFields()
+      await load()
+    } catch (error) {
+      const text = error instanceof Error ? error.message : 'Gündəlik hesabat saxlanmadı'
+      const friendly = text.includes('Reported quantity must be greater than zero')
+        ? 'Fakt miqdar 0-dan böyük olmalıdır.'
+        : text || 'Gündəlik hesabat saxlanmadı'
+      message.error(friendly)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const submitReport = async (id: string) => {
@@ -90,7 +103,7 @@ export const FieldDailyReportsPage = () => {
           <h2>Gündəlik hesabat</h2>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-          form.setFieldsValue({ reportDate: dayjs(), lines: [{ completedQuantity: 0, workerCount: 1, workHours: 8 }] })
+          form.setFieldsValue({ reportDate: dayjs(), lines: [{ reportedQuantity: 0, workerCount: 1, workHours: 8 }] })
           setDrawerOpen(true)
         }}>
           Yeni hesabat
@@ -125,7 +138,7 @@ export const FieldDailyReportsPage = () => {
                 columns={[
                   { title: 'Etap', dataIndex: 'stageName' },
                   { title: 'İş', dataIndex: 'workName' },
-                  { title: 'Miqdar', render: (_, line) => `${line.completedQuantity} ${line.unit}` },
+                  { title: 'Miqdar', render: (_, line) => `${line.reportedQuantity} ${line.unit}` },
                   { title: 'İşçi', dataIndex: 'workerCount' },
                   { title: 'Saat', dataIndex: 'workHours' },
                   { title: 'Qeyd', dataIndex: 'note' },
@@ -152,7 +165,7 @@ export const FieldDailyReportsPage = () => {
                       <Select showSearch options={smetaOptions} optionFilterProp="label" />
                     </Form.Item>
                     <Space wrap>
-                      <Form.Item name={[field.name, 'completedQuantity']} label="Fakt miqdar" rules={[{ required: true }]}>
+                      <Form.Item name={[field.name, 'reportedQuantity']} label="Fakt miqdar" rules={[{ required: true }]}>
                         <InputNumber min={0} />
                       </Form.Item>
                       <Form.Item name={[field.name, 'workerCount']} label="İşçi sayı" rules={[{ required: true }]}>
@@ -168,14 +181,14 @@ export const FieldDailyReportsPage = () => {
                     {fields.length > 1 && <Button danger onClick={() => remove(field.name)}>Sətri sil</Button>}
                   </Card>
                 ))}
-                <Button onClick={() => add({ completedQuantity: 0, workerCount: 1, workHours: 8 })}>İş sətri əlavə et</Button>
+                <Button onClick={() => add({ reportedQuantity: 0, workerCount: 1, workHours: 8 })}>İş sətri əlavə et</Button>
               </Space>
             )}
           </Form.List>
           <Form.Item name="generalNote" label="Ümumi qeyd">
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Button type="primary" htmlType="submit">Saxla</Button>
+          <Button type="primary" htmlType="submit" loading={saving} disabled={saving}>Saxla</Button>
         </Form>
       </Drawer>
     </div>
