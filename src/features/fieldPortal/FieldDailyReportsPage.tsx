@@ -234,7 +234,6 @@ export const FieldDailyReportsPage = () => {
             {
               title: 'Status',
               dataIndex: 'status',
-              shouldCellUpdate: (record, previous) => record.status !== previous.status,
               render: (status) => <FieldStatusTag status={status} />,
             },
             {
