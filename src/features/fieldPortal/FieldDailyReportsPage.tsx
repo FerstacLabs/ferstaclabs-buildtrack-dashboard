@@ -1,5 +1,5 @@
 import { EditOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Drawer, Form, Input, InputNumber, Select, Space, Table, message } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -9,7 +9,8 @@ import {
   type FieldSmetaItem,
   type SaveFieldDailyReportBody,
 } from '../../services/api/buildTrackBackendApi'
-import { fieldStatusColor, fieldStatusLabel, useFieldPortalStore } from './fieldPortalStore'
+import { FieldStatusTag } from './FieldStatusTag'
+import { useFieldPortalStore } from './fieldPortalStore'
 
 type ReportFormValues = {
   reportDate: dayjs.Dayjs
@@ -41,6 +42,9 @@ const canEditReport = (status: FieldDailyReport['status']) => status === 'Draft'
 
 const submitLabel = (status: FieldDailyReport['status']) => status === 'NeedsCorrection' ? 'Yenidən göndər' : 'Göndər'
 
+const replaceReport = (items: FieldDailyReport[], updated: FieldDailyReport) =>
+  items.map((item) => (item.id === updated.id ? updated : item))
+
 export const FieldDailyReportsPage = () => {
   const selectedSiteId = useFieldPortalStore((state) => state.selectedSiteId)
   const [reports, setReports] = useState<FieldDailyReport[]>([])
@@ -53,7 +57,7 @@ export const FieldDailyReportsPage = () => {
   const [form] = Form.useForm<ReportFormValues>()
 
   const load = async () => {
-    if (!selectedSiteId) return
+    if (!selectedSiteId) return []
     setLoading(true)
     try {
       const [nextReports, nextItems] = await Promise.all([
@@ -62,9 +66,21 @@ export const FieldDailyReportsPage = () => {
       ])
       setReports(nextReports)
       setSmetaItems(nextItems)
+      return nextReports
     } finally {
       setLoading(false)
     }
+  }
+
+  const refreshReports = async (selectedReportId?: string) => {
+    if (!selectedSiteId) return []
+    const nextReports = await buildTrackBackendApi.getFieldDailyReports(selectedSiteId)
+    setReports(nextReports)
+    if (selectedReportId && editingReport?.id === selectedReportId) {
+      const freshReport = nextReports.find((report) => report.id === selectedReportId)
+      if (freshReport) setEditingReport(freshReport)
+    }
+    return nextReports
   }
 
   useEffect(() => {
@@ -141,14 +157,17 @@ export const FieldDailyReportsPage = () => {
     setSaving(true)
     try {
       if (editingReport) {
-        await buildTrackBackendApi.updateFieldDailyReport(editingReport.id, body)
+        const updated = await buildTrackBackendApi.updateFieldDailyReport(editingReport.id, body)
+        setReports((items) => replaceReport(items, updated))
+        setEditingReport(updated)
         message.success(editingReport.status === 'NeedsCorrection' ? 'Düzəlişlər saxlanıldı' : 'Gündəlik hesabat yeniləndi')
       } else {
-        await buildTrackBackendApi.saveFieldDailyReport(body)
+        const created = await buildTrackBackendApi.saveFieldDailyReport(body)
+        setReports((items) => [created, ...items.filter((item) => item.id !== created.id)])
         message.success('Gündəlik hesabat saxlanıldı')
       }
       closeDrawer()
-      await load()
+      await refreshReports()
     } catch (error) {
       const text = error instanceof Error ? error.message : 'Gündəlik hesabat saxlanmadı'
       const friendly = error instanceof BackendApiError && error.status === 409 && text.includes('daily report already exists')
@@ -170,9 +189,11 @@ export const FieldDailyReportsPage = () => {
     if (submittingId) return
     setSubmittingId(id)
     try {
-      await buildTrackBackendApi.submitFieldDailyReport(id)
+      const updated = await buildTrackBackendApi.submitFieldDailyReport(id)
+      setReports((items) => replaceReport(items, updated))
+      if (editingReport?.id === updated.id) setEditingReport(updated)
       message.success('Hesabat rəhbərliyə göndərildi')
-      await load()
+      await refreshReports(updated.id)
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Hesabat göndərilmədi')
     } finally {
@@ -210,16 +231,21 @@ export const FieldDailyReportsPage = () => {
                 return total === undefined ? '—' : formatHours(total)
               },
             },
-            { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+            {
+              title: 'Status',
+              dataIndex: 'status',
+              shouldCellUpdate: (record, previous) => record.status !== previous.status,
+              render: (status) => <FieldStatusTag status={status} />,
+            },
             {
               title: 'Əməliyyat',
               render: (_, row) => canEditReport(row.status)
                 ? (
                   <Space wrap>
-                    <Button icon={<EditOutlined />} onClick={() => openEditDrawer(row)}>
+                    <Button icon={<EditOutlined />} disabled={Boolean(submittingId)} onClick={() => openEditDrawer(row)}>
                       Düzəliş et
                     </Button>
-                    <Button icon={<SendOutlined />} loading={submittingId === row.id} onClick={() => submitReport(row.id)}>
+                    <Button icon={<SendOutlined />} loading={submittingId === row.id} disabled={Boolean(submittingId)} onClick={() => submitReport(row.id)}>
                       {submitLabel(row.status)}
                     </Button>
                   </Space>

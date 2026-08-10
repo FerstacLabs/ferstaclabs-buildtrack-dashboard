@@ -12,6 +12,7 @@ import {
   type SupervisorAuditEventRow,
   type SupervisorSummary,
 } from '../../services/api/buildTrackBackendApi'
+import { FieldStatusTag } from '../fieldPortal/FieldStatusTag'
 import { fieldStatusColor, fieldStatusLabel } from '../fieldPortal/fieldPortalStore'
 
 type SupervisorFormValues = {
@@ -79,6 +80,9 @@ const decisionLabel = (status: FieldDailyReportStatus) => {
   return fieldStatusLabel(status)
 }
 
+const replaceReport = (items: FieldDailyReport[], updated: FieldDailyReport) =>
+  items.map((item) => (item.id === updated.id ? updated : item))
+
 export const SupervisorsPage = () => {
   const [rows, setRows] = useState<SupervisorSummary[]>([])
   const [sites, setSites] = useState<BackendSite[]>([])
@@ -92,6 +96,7 @@ export const SupervisorsPage = () => {
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false)
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [reviewingReportId, setReviewingReportId] = useState<string | null>(null)
   const [auditDateRange, setAuditDateRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [auditSiteId, setAuditSiteId] = useState<string>()
   const [auditSupervisorId, setAuditSupervisorId] = useState<string>()
@@ -116,6 +121,16 @@ export const SupervisorsPage = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const refreshManagementReports = async (selectedReportId?: string) => {
+    const nextReports = await buildTrackBackendApi.getManagementFieldReports()
+    setReports(nextReports)
+    if (selectedReportId) {
+      const freshReport = nextReports.find((report) => report.id === selectedReportId)
+      if (freshReport && selectedReport?.id === selectedReportId) setSelectedReport(freshReport)
+    }
+    return nextReports
   }
 
   useEffect(() => {
@@ -210,6 +225,7 @@ export const SupervisorsPage = () => {
   }
 
   const reviewReport = async (row: FieldDailyReport, status: 'Approved' | 'NeedsCorrection' | 'Rejected') => {
+    if (reviewingReportId) return
     const reviewNote = status === 'Approved'
       ? 'Təsdiqləndi'
       : window.prompt(status === 'NeedsCorrection' ? 'Düzəliş səbəbi' : 'Rədd səbəbi')?.trim()
@@ -217,10 +233,18 @@ export const SupervisorsPage = () => {
       message.warning('Rəhbər qeydi daxil edilməlidir')
       return
     }
-    const updated = await buildTrackBackendApi.reviewManagementFieldReport(row.id, { status, reviewNote })
-    message.success('Hesabat statusu yeniləndi')
-    setSelectedReport(updated)
-    await load()
+    setReviewingReportId(row.id)
+    try {
+      const updated = await buildTrackBackendApi.reviewManagementFieldReport(row.id, { status, reviewNote })
+      setReports((items) => replaceReport(items, updated))
+      if (selectedReport?.id === updated.id) setSelectedReport(updated)
+      message.success('Hesabat statusu yeniləndi')
+      await refreshManagementReports(updated.id)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Hesabat statusu yenilənmədi')
+    } finally {
+      setReviewingReportId(null)
+    }
   }
 
   const reviewWarehouse = async (row: FieldWarehouseRequest, status: 'Approved' | 'NeedsJustification' | 'Rejected' | 'Issued') => {
@@ -233,9 +257,9 @@ export const SupervisorsPage = () => {
   const reportActions = (row: FieldDailyReport) => (
     <Space wrap>
       <Button icon={<EyeOutlined />} onClick={() => openReport(row)}>Bax</Button>
-      <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Approved')}>Təsdiq et</Button>
-      <Button disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'NeedsCorrection')}>Düzəliş tələb et</Button>
-      <Button danger disabled={row.status !== 'Submitted'} onClick={() => reviewReport(row, 'Rejected')}>Rədd et</Button>
+      <Button loading={reviewingReportId === row.id} disabled={row.status !== 'Submitted' || Boolean(reviewingReportId)} onClick={() => reviewReport(row, 'Approved')}>Təsdiq et</Button>
+      <Button loading={reviewingReportId === row.id} disabled={row.status !== 'Submitted' || Boolean(reviewingReportId)} onClick={() => reviewReport(row, 'NeedsCorrection')}>Düzəliş tələb et</Button>
+      <Button danger loading={reviewingReportId === row.id} disabled={row.status !== 'Submitted' || Boolean(reviewingReportId)} onClick={() => reviewReport(row, 'Rejected')}>Rədd et</Button>
     </Space>
   )
 
@@ -294,7 +318,12 @@ export const SupervisorsPage = () => {
             { title: 'Obyekt', dataIndex: 'siteName' },
             { title: 'Prorab', dataIndex: 'supervisorName' },
             { title: 'Sətir', render: (_, row) => row.lines.length },
-            { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+            {
+              title: 'Status',
+              dataIndex: 'status',
+              shouldCellUpdate: (record, previous) => record.status !== previous.status,
+              render: (status) => <FieldStatusTag status={status} />,
+            },
             { title: 'Əməliyyat', render: (_, row) => reportActions(row) },
           ]}
         />
@@ -400,7 +429,7 @@ export const SupervisorsPage = () => {
               <Descriptions.Item label="Tarix">{selectedReport.reportDate}</Descriptions.Item>
               <Descriptions.Item label="Obyekt">{selectedReport.siteName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Prorab">{selectedReport.supervisorName || DASH}</Descriptions.Item>
-              <Descriptions.Item label="Status"><Tag color={fieldStatusColor(selectedReport.status)}>{fieldStatusLabel(selectedReport.status)}</Tag></Descriptions.Item>
+              <Descriptions.Item label="Status"><FieldStatusTag status={selectedReport.status} /></Descriptions.Item>
               <Descriptions.Item label="Hava şəraiti">{selectedReport.weatherCondition || selectedReport.weather || DASH}</Descriptions.Item>
               <Descriptions.Item label="Ümumi qeyd">{selectedReport.generalNote || DASH}</Descriptions.Item>
               <Descriptions.Item label="Göndərilmə vaxtı">{formatDateTime(selectedReport.submittedAt)}</Descriptions.Item>
