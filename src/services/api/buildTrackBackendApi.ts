@@ -305,10 +305,15 @@ export type FieldWorkerEventType = 'Late' | 'LeftEarly' | 'Absent' | 'Permission
 export type FieldSiteNoteCategory = 'Weather' | 'MaterialDelay' | 'Equipment' | 'Labor' | 'Safety' | 'Quality' | 'Access' | 'Other'
 
 export interface FieldAssignment {
+  id?: string
   siteId: string
   siteName: string
   address?: string
-  assignedAt: string
+  assignedAt?: string
+  projectId?: string
+  isActive?: boolean
+  validFrom?: string
+  validUntil?: string
 }
 
 export interface FieldMe {
@@ -319,6 +324,35 @@ export interface FieldMe {
   tenantId: string
   tenantName: string
   assignments: FieldAssignment[]
+}
+
+interface FieldAssignmentApiResponse {
+  id: string
+  siteId: string
+  siteName: string
+  siteAddress?: string
+  projectId?: string
+  isActive: boolean
+  validFrom?: string
+  validUntil?: string
+}
+
+interface FieldMeApiResponse {
+  user: {
+    id: string
+    tenantId: string
+    fullName: string
+    email: string
+    role: string
+    status: string
+  }
+  tenant: {
+    id: string
+    companyName: string
+    code?: string
+    status: string
+  }
+  assignments: FieldAssignmentApiResponse[]
 }
 
 export interface FieldDashboard {
@@ -787,6 +821,28 @@ const normalizeAttendanceDaily = (payload: unknown): AttendanceDailySummary => {
   }
 }
 
+const normalizeFieldAssignment = (assignment: FieldAssignmentApiResponse): FieldAssignment => ({
+  id: assignment.id,
+  siteId: assignment.siteId,
+  siteName: assignment.siteName,
+  address: assignment.siteAddress,
+  assignedAt: assignment.validFrom,
+  projectId: assignment.projectId,
+  isActive: assignment.isActive,
+  validFrom: assignment.validFrom,
+  validUntil: assignment.validUntil,
+})
+
+const normalizeFieldMe = (response: FieldMeApiResponse): FieldMe => ({
+  userId: response.user.id,
+  fullName: response.user.fullName,
+  email: response.user.email,
+  role: response.user.role,
+  tenantId: response.tenant.id,
+  tenantName: response.tenant.companyName,
+  assignments: response.assignments.map(normalizeFieldAssignment),
+})
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const url = `${API_BASE}${path}`
   const headers = new Headers(init?.headers)
@@ -841,8 +897,8 @@ export const buildTrackBackendApi = {
   getListenerStatus: () => request<ListenerStatus>('/api/dahua/listener/status'),
   getActiveRegisterStatus: () => request<ActiveRegisterStatus>('/api/dahua/active-register/status'),
   getActiveRegisterRawEvents: async (limit = 100) => unwrapArray<ActiveRegisterRawEventRow>(await request<unknown>(`/api/dahua/active-register/raw-events?limit=${limit}`)),
-  getFieldMe: () => request<FieldMe>('/api/field/me'),
-  getFieldAssignments: async () => unwrapArray<FieldAssignment>(await request<unknown>('/api/field/assignments')),
+  getFieldMe: async () => normalizeFieldMe(await request<FieldMeApiResponse>('/api/field/me')),
+  getFieldAssignments: async () => unwrapArray<FieldAssignmentApiResponse>(await request<unknown>('/api/field/assignments')).map(normalizeFieldAssignment),
   getFieldDashboard: (siteId?: string) => request<FieldDashboard>(`/api/field/dashboard${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`),
   getFieldSmetaItems: async (siteId: string) => unwrapArray<FieldSmetaItem>(await request<unknown>(`/api/field/smeta-items?siteId=${encodeURIComponent(siteId)}`)),
   getFieldWorkers: async (siteId: string) => unwrapArray<FieldWorker>(await request<unknown>(`/api/field/workers?siteId=${encodeURIComponent(siteId)}`)),
