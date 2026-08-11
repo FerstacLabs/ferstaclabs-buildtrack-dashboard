@@ -1,12 +1,14 @@
 import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
-import { Alert, Button, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Table, Tag, Upload, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Slider, Space, Table, Tag, Upload, message } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useCallback, useMemo, useState } from 'react'
+import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ProjectSelect } from '../../components/ProjectSelect'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { useI18n } from '../../i18n'
-import { buildTrackBackendApi } from '../../services/api/buildTrackBackendApi'
-import type { ProjectEstimateSummary } from '../../types/projectProgress'
+import { buildTrackBackendApi, type FieldWarehouseCatalogItem, type WarehouseStockItem } from '../../services/api/buildTrackBackendApi'
+import type { MaterialItem, ProjectEstimateSummary } from '../../types/projectProgress'
 import type { ProjectWorkStatus, WorkItem } from '../../types/projectProgress'
 import { formatCurrency, formatHours, formatNumber } from '../../utils/formatters'
 import { UnitSelect } from './constructionUnits'
@@ -31,26 +33,31 @@ interface WorkItemFormValues {
   unitPrice?: number
   completedQuantity?: number
   laborUnitPrice: number
-  materialName?: string
-  materialUnit?: string
-  materialQuantity: number
-  materialUnitPrice: number
-  materialSupplier?: string
+  materials?: WorkItemMaterialFormValue[]
   plannedHours: number
   actualHours: number
   assignedCrewId?: string
   status: ProjectWorkStatus
   progressPercent: number
-  plannedStartDate?: string
-  plannedEndDate?: string
+  plannedStartDate?: Dayjs
+  plannedEndDate?: Dayjs
   notes?: string
+}
+
+interface WorkItemMaterialFormValue {
+  id?: string
+  catalogItemId?: string
+  materialName?: string
+  materialUnit?: string
+  materialQuantity?: number
+  materialUnitPrice?: number
 }
 
 interface ProjectObjectFormValues {
   name: string
   address?: string
-  plannedStartDate?: string
-  plannedEndDate?: string
+  plannedStartDate?: Dayjs
+  plannedEndDate?: Dayjs
   clientName?: string
   notes?: string
 }
@@ -61,29 +68,19 @@ const normalizeName = (value: string) => value.trim().toLocaleLowerCase('az-AZ')
 
 const sameOptionalCode = (left?: string, right?: string) => normalizeName(left ?? '') === normalizeName(right ?? '')
 
-const SingleValueSelect = ({
-  options,
-  placeholder,
-  value,
-  onChange,
-}: {
-  options: { value: string; label: string }[]
-  placeholder?: string
-  value?: string
-  onChange?: (value: string) => void
-}) => (
-  <Select
-    allowClear
-    showSearch
-    mode="tags"
-    maxCount={1}
-    value={value ? [value] : []}
-    placeholder={placeholder}
-    options={options}
-    onChange={(values) => onChange?.(values[values.length - 1] ?? '')}
-    filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-  />
-)
+const toDayjs = (value?: string) => (value ? dayjs(value) : undefined)
+
+const toDateString = (value?: Dayjs | string) => {
+  if (!value) return undefined
+  return typeof value === 'string' ? value : value.format('YYYY-MM-DD')
+}
+
+const formatDisplayDate = (value?: string) => (value ? dayjs(value).format('DD.MM.YYYY') : '—')
+
+const stockText = (stock?: WarehouseStockItem) => {
+  if (!stock) return 'Anbarda: yoxdur'
+  return `Anbarda: ${formatNumber(stock.availableQuantity)} ${stock.unit}`
+}
 
 export const ProjectEstimatePage = () => {
   const { language, t } = useI18n()
@@ -95,6 +92,7 @@ export const ProjectEstimatePage = () => {
     addStage,
     addWorkItem,
     crews,
+    deleteMaterial,
     deleteStage,
     deleteWorkItem,
     estimateVersions,
@@ -112,7 +110,7 @@ export const ProjectEstimatePage = () => {
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedMaterials = getMaterialsByObject(store, selectedObjectId)
   const [itemForm] = Form.useForm<WorkItemFormValues>()
-  const [stageForm] = Form.useForm<{ name: string; totalCost: number; plannedHours: number; plannedStartDate: string; plannedEndDate: string }>()
+  const [stageForm] = Form.useForm<{ name: string; totalCost: number; plannedHours: number; plannedStartDate?: Dayjs; plannedEndDate?: Dayjs }>()
   const [projectForm] = Form.useForm<ProjectObjectFormValues>()
   const [editingItem, setEditingItem] = useState<WorkItem>()
   const [itemDrawerOpen, setItemDrawerOpen] = useState(false)
@@ -122,10 +120,31 @@ export const ProjectEstimatePage = () => {
   const [previewSheetNames, setPreviewSheetNames] = useState<string[]>([])
   const [previewRows, setPreviewRows] = useState<unknown[][]>([])
   const [importSummary, setImportSummary] = useState<EstimateImportSummary>()
+  const [catalogItems, setCatalogItems] = useState<FieldWarehouseCatalogItem[]>([])
+  const [warehouseStock, setWarehouseStock] = useState<WarehouseStockItem[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
 
   const stageOptions = scopedStages.map((stage) => ({ value: stage.id, label: stage.name }))
   const crewOptions = scopedCrews.map((crew) => ({ value: crew.id, label: crew.name }))
-  const materialOptions = scopedMaterials.map((material) => ({ value: material.name, label: material.name }))
+  const stockByCatalogItemId = useMemo(() => new Map(warehouseStock.map((stock) => [stock.catalogItemId, stock])), [warehouseStock])
+  const catalogById = useMemo(() => new Map(catalogItems.map((item) => [item.id, item])), [catalogItems])
+  const materialOptions = useMemo(() => catalogItems
+    .map((item) => {
+      const stock = stockByCatalogItemId.get(item.id)
+      return {
+        value: item.id,
+        label: (
+          <Space direction="vertical" size={0}>
+            <strong>{item.nameAz || item.name || item.nameEn || item.code}</strong>
+            <span className="muted-text">{[item.code, item.category, stockText(stock)].filter(Boolean).join(' · ')}</span>
+          </Space>
+        ),
+        searchText: [item.name, item.nameAz, item.nameRu, item.nameEn, item.code, item.category, item.subcategory, item.searchAliases].filter(Boolean).join(' ').toLocaleLowerCase('az-AZ'),
+        hasStock: Number(stock?.availableQuantity ?? 0) > 0,
+      }
+    })
+    .sort((left, right) => Number(right.hasStock) - Number(left.hasStock)),
+    [catalogItems, stockByCatalogItemId])
   const stageNameById = useMemo(() => new Map(stages.map((stage) => [stage.id, stage.name])), [stages])
   const crewNameById = useMemo(() => new Map(crews.map((crew) => [crew.id, crew.name])), [crews])
   const statusText = useCallback((status: ProjectWorkStatus) => t(`status.${status}`, statusLabel[status]), [t])
@@ -146,16 +165,71 @@ export const ProjectEstimatePage = () => {
     }
   }, [scopedWorkItems, selectedObjectId, summary.currency, summary.hiddenCostAmount])
 
+  useEffect(() => {
+    let cancelled = false
+    const loadMaterialSources = async () => {
+      setCatalogLoading(true)
+      try {
+        const [items, stock] = await Promise.all([
+          buildTrackBackendApi.searchCatalogItems({ limit: 100 }),
+          buildTrackBackendApi.getWarehouseStock(),
+        ])
+        if (!cancelled) {
+          setCatalogItems(items)
+          setWarehouseStock(stock)
+        }
+      } catch (error) {
+        console.warn('Smeta material catalog/stock load failed', error)
+        if (!cancelled) {
+          setCatalogItems([])
+          setWarehouseStock([])
+        }
+      } finally {
+        if (!cancelled) setCatalogLoading(false)
+      }
+    }
+
+    void loadMaterialSources()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const searchCatalog = async (query: string) => {
+    try {
+      const items = await buildTrackBackendApi.searchCatalogItems({ q: query, limit: 100 })
+      setCatalogItems(items)
+    } catch (error) {
+      console.warn('Smeta material catalog search failed', error)
+    }
+  }
+
   const openItemDrawer = (item?: WorkItem) => {
     setEditingItem(item)
-    const linkedMaterial = item ? scopedMaterials.find((material) => material.linkedWorkItemId === item.id) : undefined
+    const linkedMaterials = item ? scopedMaterials.filter((material) => material.linkedWorkItemId === item.id) : []
+    const materialRows = linkedMaterials.length
+      ? linkedMaterials.map((material) => ({
+          id: material.id,
+          catalogItemId: material.catalogItemId,
+          materialName: material.name,
+          materialUnit: material.unit,
+          materialQuantity: material.quantity,
+          materialUnitPrice: material.unitPrice ?? 0,
+        }))
+      : item && item.materialQuantity > 0
+        ? [{
+            materialName: 'Legacy material',
+            materialUnit: item.materialUnit ?? 'ədəd',
+            materialQuantity: item.materialQuantity,
+            materialUnitPrice: item.materialUnitPrice,
+          }]
+        : []
     itemForm.setFieldsValue(item ? {
       ...item,
-      materialName: linkedMaterial?.name ?? '',
-      materialUnit: linkedMaterial?.unit ?? item.materialUnit ?? 'ədəd',
-      materialQuantity: linkedMaterial?.quantity ?? item.materialQuantity,
-      materialUnitPrice: linkedMaterial?.unitPrice ?? item.materialUnitPrice,
-      materialSupplier: linkedMaterial?.supplier ?? '',
+      plannedStartDate: toDayjs(item.plannedStartDate),
+      plannedEndDate: toDayjs(item.plannedEndDate),
+      materials: materialRows,
     } : {
       stageId: scopedStages[0]?.id,
       name: '',
@@ -165,32 +239,62 @@ export const ProjectEstimatePage = () => {
       unitPrice: 0,
       completedQuantity: 0,
       laborUnitPrice: 0,
-      materialName: '',
-      materialUnit: 'ədəd',
-      materialQuantity: 1,
-      materialUnitPrice: 0,
-      materialSupplier: '',
+      materials: [],
       plannedHours: 0,
       actualHours: 0,
       status: 'NotStarted',
       progressPercent: 0,
+      plannedStartDate: undefined,
+      plannedEndDate: undefined,
     })
     setItemDrawerOpen(true)
   }
 
   const saveWorkItem = (values: WorkItemFormValues) => {
-    const { materialName, materialSupplier, ...workValues } = values
+    const materialRows = (values.materials ?? [])
+      .map((material) => {
+        const catalogItem = material.catalogItemId ? catalogById.get(material.catalogItemId) : undefined
+        const name = (catalogItem?.nameAz || catalogItem?.name || material.materialName || '').trim()
+        const quantity = Number(material.materialQuantity ?? 0)
+        const unitPrice = Number(material.materialUnitPrice ?? 0)
+        return {
+          ...material,
+          catalogItem,
+          name,
+          quantity,
+          unit: catalogItem?.unit || material.materialUnit || 'ədəd',
+          unitPrice,
+        }
+      })
+      .filter((material) => material.name && Number.isFinite(material.quantity) && material.quantity > 0)
     const laborTotal = values.quantity * values.laborUnitPrice
-    const materialTotal = values.materialQuantity * values.materialUnitPrice
+    const materialTotal = Math.round(materialRows.reduce((sum, material) => sum + material.quantity * material.unitPrice, 0) * 100) / 100
     const progressPercent = values.quantity > 0 && typeof values.completedQuantity === 'number'
       ? Math.min(100, Math.round((values.completedQuantity / values.quantity) * 1000) / 10)
       : values.progressPercent
     const selectedStage = stages.find((stage) => stage.id === values.stageId)
     const objectId = editingItem?.objectId ?? selectedStage?.objectId ?? (selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId)
     const payload = {
-      ...workValues,
+      stageId: values.stageId,
+      name: values.name,
+      costCode: values.costCode,
+      unit: values.unit,
+      quantity: values.quantity,
+      unitPrice: values.unitPrice,
+      completedQuantity: values.completedQuantity,
+      laborUnitPrice: values.laborUnitPrice,
+      plannedHours: values.plannedHours,
+      actualHours: values.actualHours,
+      assignedCrewId: values.assignedCrewId,
+      status: values.status,
+      notes: values.notes,
       objectId,
       progressPercent,
+      plannedStartDate: toDateString(values.plannedStartDate),
+      plannedEndDate: toDateString(values.plannedEndDate),
+      materialUnit: materialRows[0]?.unit,
+      materialQuantity: materialRows.reduce((sum, material) => sum + material.quantity, 0),
+      materialUnitPrice: materialRows[0]?.unitPrice ?? 0,
       laborTotal,
       materialTotal,
       totalCost: laborTotal + materialTotal,
@@ -199,31 +303,43 @@ export const ProjectEstimatePage = () => {
     const savedItemId = editingItem?.id ?? addWorkItem(payload)
     if (editingItem) updateWorkItem(editingItem.id, payload)
 
-    const normalizedMaterialName = materialName?.trim()
-    if (normalizedMaterialName && values.materialQuantity > 0) {
-      const materialPayload = {
+    const previousLinkedMaterials = editingItem ? scopedMaterials.filter((material) => material.linkedWorkItemId === savedItemId) : []
+    const retainedMaterialIds = new Set<string>()
+
+    materialRows.forEach((material) => {
+      const materialPayload: Omit<MaterialItem, 'id' | 'remainingQuantity'> = {
         objectId,
-        name: normalizedMaterialName,
-        unit: values.materialUnit || values.unit || 'ədəd',
-        quantity: values.materialQuantity,
-        usedQuantity: Math.min(values.materialQuantity, Math.max(0, values.materialQuantity * (progressPercent / 100))),
-        unitPrice: values.materialUnitPrice,
+        catalogItemId: material.catalogItemId,
+        category: material.catalogItem?.category,
+        name: material.name,
+        unit: material.unit,
+        quantity: material.quantity,
+        usedQuantity: Math.min(material.quantity, Math.max(0, material.quantity * (progressPercent / 100))),
+        unitPrice: material.unitPrice,
         linkedStageId: values.stageId,
         linkedWorkItemId: savedItemId,
-        supplier: materialSupplier?.trim(),
         notes: values.notes,
       }
-      const existingMaterial = scopedMaterials.find((material) =>
-        material.objectId === objectId
-        && material.linkedWorkItemId === savedItemId
-        && material.name.toLocaleLowerCase('az-AZ') === normalizedMaterialName.toLocaleLowerCase('az-AZ'))
+      const existingMaterial = material.id
+        ? previousLinkedMaterials.find((entry) => entry.id === material.id)
+        : previousLinkedMaterials.find((entry) =>
+            entry.catalogItemId === material.catalogItemId
+            || (!entry.catalogItemId && normalizeName(entry.name) === normalizeName(material.name)))
 
-      if (existingMaterial) updateMaterial(existingMaterial.id, materialPayload)
-      else addMaterial(materialPayload)
-    }
+      if (existingMaterial) {
+        updateMaterial(existingMaterial.id, materialPayload)
+        retainedMaterialIds.add(existingMaterial.id)
+      } else {
+        addMaterial(materialPayload)
+      }
+    })
+
+    previousLinkedMaterials
+      .filter((material) => !retainedMaterialIds.has(material.id) && !materialRows.some((row) => row.id === material.id))
+      .forEach((material) => deleteMaterial(material.id))
 
     setItemDrawerOpen(false)
-    void message.success(normalizedMaterialName ? 'Smeta sətri və bağlı material yadda saxlandı' : 'Smeta sətri yadda saxlandı')
+    void message.success(materialRows.length ? 'Smeta sətri və bağlı materiallar yadda saxlandı' : 'Smeta sətri yadda saxlandı')
   }
 
   const createProjectObject = async (values: ProjectObjectFormValues) => {
@@ -250,8 +366,8 @@ export const ProjectEstimatePage = () => {
       name,
       address: values.address?.trim(),
       zone: values.address?.trim() || 'Yeni obyekt',
-      plannedStartDate: values.plannedStartDate,
-      plannedEndDate: values.plannedEndDate,
+      plannedStartDate: toDateString(values.plannedStartDate),
+      plannedEndDate: toDateString(values.plannedEndDate),
       clientName: values.clientName?.trim(),
       notes: values.notes?.trim(),
       status: 'NotStarted',
@@ -264,15 +380,15 @@ export const ProjectEstimatePage = () => {
     useProjectSelectionStore.getState().setSelectedProjectId(objectId)
   }
 
-  const addNewStage = (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate: string; plannedEndDate: string }) => {
+  const addNewStage = (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate?: Dayjs; plannedEndDate?: Dayjs }) => {
     addStage({
       name: values.name,
       objectId: selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId,
       totalCost: values.totalCost,
       laborCost: 0,
       materialCost: values.totalCost,
-      plannedStartDate: values.plannedStartDate || '2026-10-01',
-      plannedEndDate: values.plannedEndDate || '2026-10-15',
+      plannedStartDate: toDateString(values.plannedStartDate) || '2026-10-01',
+      plannedEndDate: toDateString(values.plannedEndDate) || '2026-10-15',
       status: 'NotStarted',
       progressPercent: 0,
       plannedHours: values.plannedHours,
@@ -562,7 +678,7 @@ export const ProjectEstimatePage = () => {
             { title: 'Sıra', dataIndex: 'order', width: 70 },
             { title: 'Etap', dataIndex: 'name' },
             { title: 'Məbləğ', dataIndex: 'totalCost', align: 'right', render: (value) => formatCurrency(Number(value)) },
-            { title: 'Plan tarix', render: (_, row) => `${row.plannedStartDate} - ${row.plannedEndDate}` },
+            { title: 'Plan tarix', render: (_, row) => `${formatDisplayDate(row.plannedStartDate)} - ${formatDisplayDate(row.plannedEndDate)}` },
             { title: 'Status', dataIndex: 'status', render: (value: ProjectWorkStatus) => <Tag color={statusColor[value]}>{statusText(value)}</Tag> },
             { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteStage(row.id) })} /> },
           ]}
@@ -589,28 +705,81 @@ export const ProjectEstimatePage = () => {
           </Space.Compact>
 
           <Divider>Material istifadəsi</Divider>
-          <Form.Item name="materialName" label="Material seç / yeni material yaz">
-            <SingleValueSelect options={materialOptions} placeholder="Məsələn: Beton B25" />
-          </Form.Item>
-          <Space.Compact block>
-            <Form.Item name="materialUnit" label={t('estimate.materialUnit')} extra={t('estimate.materialUnit.help')} className="form-half">
-              <UnitSelect placeholder={t('estimate.materialUnit.placeholder')} />
-            </Form.Item>
-            <Form.Item name="materialQuantity" label="Material miqdarı" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          </Space.Compact>
-          <Space.Compact block>
-            <Form.Item name="materialUnitPrice" label="Material vahid qiyməti" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="materialSupplier" label="Təchizatçı" className="form-half"><Input /></Form.Item>
-          </Space.Compact>
-          <Button type="dashed" block onClick={() => itemForm.submit()}>Materialı əlavə et və yadda saxla</Button>
+          <Form.List name="materials">
+            {(fields, { add, remove }) => (
+              <Space direction="vertical" className="full-width">
+                <Alert
+                  showIcon
+                  type="info"
+                  message="Materiallar mərkəzi kataloqdan seçilir"
+                  description="Bu seçim yalnız smeta planını yeniləyir; anbar qalığı azalmır və satınalma tapşırığı yaradılmır."
+                />
+                {fields.map((field) => {
+                  const catalogItemId = itemForm.getFieldValue(['materials', field.name, 'catalogItemId']) as string | undefined
+                  const catalogItem = catalogItemId ? catalogById.get(catalogItemId) : undefined
+                  const stock = catalogItemId ? stockByCatalogItemId.get(catalogItemId) : undefined
+
+                  return (
+                    <Card size="small" key={field.key} title={`Material ${field.name + 1}`}>
+                      <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
+                      <Form.Item name={[field.name, 'materialName']} hidden><Input /></Form.Item>
+                      <Form.Item name={[field.name, 'catalogItemId']} label="Material" rules={[{ required: true, message: 'Material seçin' }]}>
+                        <Select
+                          allowClear
+                          showSearch
+                          loading={catalogLoading}
+                          placeholder="Kataloqda axtarın: beton, sement, armatur, kaska, kabel"
+                          options={materialOptions}
+                          optionFilterProp="searchText"
+                          filterOption={(input, option) => String(option?.searchText ?? '').includes(input.toLocaleLowerCase('az-AZ'))}
+                          onSearch={(query) => { if (query.trim().length >= 2) void searchCatalog(query.trim()) }}
+                          onChange={(catalogId) => {
+                            const item = catalogId ? catalogById.get(catalogId) : undefined
+                            itemForm.setFieldValue(['materials', field.name, 'materialName'], item?.nameAz || item?.name || '')
+                            itemForm.setFieldValue(['materials', field.name, 'materialUnit'], item?.unit || undefined)
+                          }}
+                        />
+                      </Form.Item>
+                      {catalogItem && (
+                        <Alert
+                          type="success"
+                          showIcon
+                          message={[catalogItem.code, catalogItem.category].filter(Boolean).join(' · ')}
+                          description={stockText(stock)}
+                          style={{ marginBottom: 12 }}
+                        />
+                      )}
+                      <Space.Compact block>
+                        <Form.Item name={[field.name, 'materialUnit']} label="Material ölçü vahidi" className="form-half">
+                          <Input readOnly placeholder="Kataloqdan avtomatik" />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'materialQuantity']} label="Material miqdarı" rules={[{ type: 'number', min: 0.000001, message: 'Miqdar 0-dan böyük olmalıdır' }]} className="form-half">
+                          <InputNumber min={0.000001} step={0.1} style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Space.Compact>
+                      <Space.Compact block>
+                        <Form.Item name={[field.name, 'materialUnitPrice']} label="Plan vahid qiyməti" className="form-half">
+                          <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <div className="form-half" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)}>Sil</Button>
+                        </div>
+                      </Space.Compact>
+                    </Card>
+                  )
+                })}
+                <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ materialQuantity: 1, materialUnitPrice: 0 })}>Material əlavə et</Button>
+              </Space>
+            )}
+          </Form.List>
 
           <Space.Compact block>
             <Form.Item name="actualHours" label="Faktiki saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
             <Form.Item name="assignedCrewId" label="Briqada" className="form-half"><Select allowClear showSearch options={crewOptions} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Bitmə tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = itemForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) itemForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label="Bitmə tarixi" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = itemForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
           <Form.Item name="status" label="Status"><Select options={statusOptions} /></Form.Item>
           <Form.Item name="progressPercent" label="Gedişat %"><Slider min={0} max={100} /></Form.Item>
@@ -624,8 +793,8 @@ export const ProjectEstimatePage = () => {
           <Form.Item name="name" label="Layihə / obyekt adı" rules={[{ required: true, message: 'Obyekt adı yazın' }]}><Input placeholder="Məsələn: Villa B blok" /></Form.Item>
           <Form.Item name="address" label="Ünvan"><Input /></Form.Item>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Plan bitmə tarixi" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = projectForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) projectForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label="Plan bitmə tarixi" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = projectForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
           <Form.Item name="clientName" label="Müştəri / şirkət adı"><Input /></Form.Item>
           <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>
@@ -638,8 +807,8 @@ export const ProjectEstimatePage = () => {
           <Form.Item name="totalCost" label="Ümumi məbləğ"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="plannedHours" label="Plan saat"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Bitmə" className="form-half"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+            <Form.Item name="plannedStartDate" label="Başlama" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = stageForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) stageForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label="Bitmə" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = stageForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
         </Form>
       </Modal>

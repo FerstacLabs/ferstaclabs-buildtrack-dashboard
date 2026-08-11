@@ -135,6 +135,8 @@ export interface WorkerAssignment {
 export interface MaterialItem {
   id: string
   objectId?: string
+  catalogItemId?: string
+  category?: string
   name: string
   unit: string
   quantity: number
