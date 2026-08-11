@@ -147,8 +147,15 @@ public static class SupplyChainEndpoints
     private static async Task<IResult> ApproveWarehouseRequestAsync(Guid id, ApproveProcurementNeedRequest request, ITenantContext tenantContext, ISupplyChainService supplyChain, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
-        var result = await supplyChain.ApproveFieldRequestAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), request.ManagerComment, ct);
-        return Results.Ok(result);
+        try
+        {
+            var result = await supplyChain.ApproveFieldRequestAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), request.ManagerComment, ct);
+            return Results.Ok(result);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> IssueWarehouseRequestAsync(Guid id, IssueWarehouseRequest request, ITenantContext tenantContext, IWarehouseAvailabilityService availability, ISupplyChainService supplyChain, CancellationToken ct)
@@ -158,8 +165,15 @@ public static class SupplyChainEndpoints
         var warehouse = request.WarehouseId is Guid warehouseId
             ? new Warehouse { Id = warehouseId, TenantId = tenantId }
             : await availability.GetOrCreateDefaultWarehouseAsync(tenantId, ct);
-        var issue = await supplyChain.IssueFieldRequestAsync(tenantId, id, warehouse.Id, RequireUserId(tenantContext), request.RecipientName, request.HandoverNote, ct);
-        return Results.Ok(new { issue.Id, issue.Status, issue.IssuedAt });
+        try
+        {
+            var issue = await supplyChain.IssueFieldRequestAsync(tenantId, id, warehouse.Id, RequireUserId(tenantContext), request.RecipientName, request.HandoverNote, ct);
+            return Results.Ok(new { issue.Id, issue.Status, issue.IssuedAt });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> GetProcurementNeedsAsync(BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
@@ -168,7 +182,12 @@ public static class SupplyChainEndpoints
         var tenantId = RequireTenantId(tenantContext);
         var rows = await db.ProcurementNeeds.AsNoTracking()
             .Include(x => x.CatalogItem)
+            .Include(x => x.SourceRequest)
             .Where(x => x.TenantId == tenantId)
+            .Where(x => x.SourceRequest == null
+                || (x.SourceRequest.Status != FieldWarehouseRequestStatus.Rejected
+                    && x.SourceRequest.Status != FieldWarehouseRequestStatus.Cancelled
+                    && x.SourceRequest.Status != FieldWarehouseRequestStatus.Closed))
             .OrderByDescending(x => x.CreatedAt)
             .Take(300)
             .ToListAsync(ct);
@@ -178,8 +197,15 @@ public static class SupplyChainEndpoints
     private static async Task<IResult> CreateProcurementTaskAsync(AssignProcurementTaskRequest request, ITenantContext tenantContext, ISupplyChainService supplyChain, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
-        var task = await supplyChain.CreateProcurementTaskAsync(RequireTenantId(tenantContext), request.NeedIds, request.AssignedProcurementUserId, RequireUserId(tenantContext), request.ManagerInstruction, ct);
-        return Results.Ok(ToTaskDto(task));
+        try
+        {
+            var task = await supplyChain.CreateProcurementTaskAsync(RequireTenantId(tenantContext), request.NeedIds, request.AssignedProcurementUserId, RequireUserId(tenantContext), request.ManagerInstruction, ct);
+            return Results.Ok(ToTaskDto(task));
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> GetProcurementTasksAsync(BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)

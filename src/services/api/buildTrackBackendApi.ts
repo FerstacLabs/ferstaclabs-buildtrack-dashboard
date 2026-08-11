@@ -300,7 +300,7 @@ export interface ActiveRegisterRawEventRow {
 }
 
 export type FieldDailyReportStatus = 'Draft' | 'Submitted' | 'Approved' | 'NeedsCorrection' | 'Rejected'
-export type FieldWarehouseRequestStatus = 'Draft' | 'Submitted' | 'NeedsJustification' | 'PendingApproval' | 'Approved' | 'PartiallyApproved' | 'Rejected' | 'ReadyForPickup' | 'Issued' | 'Closed' | 'Cancelled'
+export type FieldWarehouseRequestStatus = 'Draft' | 'Submitted' | 'UnderReview' | 'NeedsJustification' | 'PendingApproval' | 'Approved' | 'PartiallyApproved' | 'Rejected' | 'InFulfillment' | 'ReadyForPickup' | 'Issued' | 'Closed' | 'Cancelled'
 export type FieldWorkerEventType = 'Late' | 'LeftEarly' | 'Absent' | 'Permission' | 'Medical' | 'SiteTransfer' | 'SafetyWarning' | 'ManualAttendanceCorrectionRequest' | 'Other'
 export type FieldSiteNoteCategory = 'Weather' | 'MaterialDelay' | 'Equipment' | 'Labor' | 'Safety' | 'Quality' | 'Access' | 'Other'
 

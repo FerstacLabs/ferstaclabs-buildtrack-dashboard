@@ -61,6 +61,69 @@ public sealed class SupplyChainServiceTests
     }
 
     [Fact]
+    public async Task RejectedWarehouseRequestCannotBeApprovedOrReserved()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        var seed = await SeedAsync(db, tenantId, "PPE-REJECT-HELMET", "Kaska", 30);
+        var service = CreateService(db);
+
+        var request = await service.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+            tenantId,
+            seed.SiteId,
+            seed.UserId,
+            null,
+            FieldWarehouseUrgency.Critical,
+            "Rejected request must stay terminal",
+            [new SupplyRequestLineInput(seed.ItemId, 10, "Kaska")]), CancellationToken.None);
+
+        var stored = await db.FieldWarehouseRequests.Include(x => x.Lines).SingleAsync(x => x.Id == request.Id);
+        stored.Status = FieldWarehouseRequestStatus.Rejected;
+        foreach (var line in stored.Lines)
+        {
+            line.Status = FieldWarehouseRequestLineStatus.Rejected;
+        }
+        await db.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ApproveFieldRequestAsync(tenantId, request.Id, seed.UserId, null, CancellationToken.None));
+
+        Assert.Equal("Rejected warehouse requests cannot be processed.", ex.Message);
+        Assert.Empty(await db.WarehouseReservations.ToListAsync());
+        Assert.Empty(await db.ProcurementNeeds.ToListAsync());
+    }
+
+    [Fact]
+    public async Task RejectedWarehouseRequestCannotCreateProcurementTaskFromExistingNeed()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        var seed = await SeedAsync(db, tenantId, "TOOL-REJECT-DRILL", "Sverlo", 0);
+        var service = CreateService(db);
+
+        var request = await service.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+            tenantId,
+            seed.SiteId,
+            seed.UserId,
+            null,
+            FieldWarehouseUrgency.Urgent,
+            null,
+            [new SupplyRequestLineInput(seed.ItemId, 5, "Sverlo")]), CancellationToken.None);
+        await service.ApproveFieldRequestAsync(tenantId, request.Id, seed.UserId, null, CancellationToken.None);
+
+        var needId = await db.ProcurementNeeds.Where(x => x.SourceRequestId == request.Id).Select(x => x.Id).SingleAsync();
+        var stored = await db.FieldWarehouseRequests.SingleAsync(x => x.Id == request.Id);
+        stored.Status = FieldWarehouseRequestStatus.Rejected;
+        await db.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CreateProcurementTaskAsync(tenantId, [needId], seed.AgentId, seed.UserId, null, CancellationToken.None));
+
+        Assert.Equal("Rejected warehouse requests cannot be processed.", ex.Message);
+        Assert.Empty(await db.ProcurementTasks.ToListAsync());
+    }
+
+    [Fact]
     public async Task SupplyTaskSubmitRequiresReceiptAndProductPhotoEvidence()
     {
         var tenantId = Guid.NewGuid();

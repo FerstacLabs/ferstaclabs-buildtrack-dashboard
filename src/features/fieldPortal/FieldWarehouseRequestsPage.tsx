@@ -6,6 +6,7 @@ import {
   type FieldWarehouseCatalogItem,
   type FieldWarehouseRequest,
 } from '../../services/api/buildTrackBackendApi'
+import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
 import { fieldStatusColor, fieldStatusLabel, useFieldPortalStore } from './fieldPortalStore'
 
 interface CartLineForm {
@@ -22,6 +23,12 @@ interface CartRequestForm {
 
 const defaultLine = (): CartLineForm => ({ requestedQuantity: 1 })
 
+const urgencyOptions = [
+  { value: 'Normal', label: priorityLabel('Normal') },
+  { value: 'Urgent', label: priorityLabel('Urgent') },
+  { value: 'Critical', label: priorityLabel('Critical') },
+]
+
 export const FieldWarehouseRequestsPage = () => {
   const selectedSiteId = useFieldPortalStore((state) => state.selectedSiteId)
   const [catalog, setCatalog] = useState<FieldWarehouseCatalogItem[]>([])
@@ -29,6 +36,7 @@ export const FieldWarehouseRequestsPage = () => {
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [form] = Form.useForm<CartRequestForm>()
+  const selectedUrgency = Form.useWatch('urgency', form) ?? 'Normal'
 
   const load = async () => {
     if (!selectedSiteId) return
@@ -143,7 +151,7 @@ export const FieldWarehouseRequestsPage = () => {
             { title: 'Sorğu', dataIndex: 'code', render: (value, row) => value || row.id.slice(0, 8) },
             { title: 'Material', render: (_, row) => row.lines?.length ? `${row.lines.length} sətir` : row.materialName },
             { title: 'Miqdar', render: (_, row) => row.lines?.length ? `${row.lines.reduce((sum, line) => sum + line.requestedQuantity, 0)} vahid` : `${row.requestedQuantity} ${row.unit}` },
-            { title: 'Təcillik', dataIndex: 'urgency' },
+            { title: 'Təcillik', dataIndex: 'urgency', render: (value) => priorityLabel(value) },
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
             { title: 'Qeyd', render: (_, row) => row.generalNote || row.reason || '-' },
             { title: 'Tarix', dataIndex: 'createdAt', render: (value) => new Date(value).toLocaleString('az-AZ') },
@@ -155,12 +163,11 @@ export const FieldWarehouseRequestsPage = () => {
           Bir sorğuda bir neçə material əlavə edin. Anbar qalığı gizli qalır; sistem yalnız nəticə statusunu göstərəcək.
         </Typography.Paragraph>
         <Form layout="vertical" form={form} onFinish={createCartRequest} initialValues={{ urgency: 'Normal', lines: [defaultLine()] }}>
-          <Form.Item name="urgency" label="Təcillik">
-            <Select options={[
-              { value: 'Normal', label: 'Normal' },
-              { value: 'Urgent', label: 'Təcili' },
-              { value: 'Critical', label: 'Kritik' },
-            ]} />
+          <Form.Item name="urgency" label="Təcillik" initialValue="Normal">
+            <Select
+              key={`urgency:${selectedUrgency}`}
+              options={urgencyOptions}
+            />
           </Form.Item>
           <Form.Item name="generalNote" label="Ümumi sorğu qeydi">
             <Input.TextArea rows={3} placeholder="Məsələn: 2-ci mərtəbə monolit işləri üçün PPE və sərfiyyat lazımdır" />

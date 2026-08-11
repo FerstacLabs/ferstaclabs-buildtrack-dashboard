@@ -248,6 +248,10 @@ public sealed class SupplyChainService(
             .ThenInclude(x => x.CatalogItem)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == requestId, ct)
             ?? throw new InvalidOperationException("Sorğu tapılmadı");
+        if (!CanProcessFieldRequest(request.Status))
+        {
+            throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
+        }
 
         if (request.Lines.Count == 0)
         {
@@ -340,9 +344,12 @@ public sealed class SupplyChainService(
         if (distinctNeedIds.Length == 0) throw new InvalidOperationException("Satınalma ehtiyacı seçilməyib");
         var needs = await db.ProcurementNeeds
             .Include(x => x.CatalogItem)
+            .Include(x => x.SourceRequest)
             .Where(x => x.TenantId == tenantId && distinctNeedIds.Contains(x.Id))
             .ToListAsync(ct);
         if (needs.Count != distinctNeedIds.Length) throw new InvalidOperationException("Ehtiyaclardan biri tapılmadı");
+        if (needs.Any(x => x.SourceRequest?.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Cancelled or FieldWarehouseRequestStatus.Closed))
+            throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
         if (needs.Any(x => x.Status is ProcurementNeedStatus.Assigned or ProcurementNeedStatus.InPurchase or ProcurementNeedStatus.Purchased or ProcurementNeedStatus.Received))
             throw new InvalidOperationException("Seçilmiş ehtiyaclardan biri artıq task-a bağlanıb");
 
@@ -547,6 +554,10 @@ public sealed class SupplyChainService(
             .Include(x => x.Lines)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == fieldRequestId, ct)
             ?? throw new InvalidOperationException("Sorğu tapılmadı");
+        if (request.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Cancelled or FieldWarehouseRequestStatus.Closed)
+        {
+            throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
+        }
 
         var existingIssue = await db.WarehouseIssues.Include(x => x.Lines)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.FieldRequestId == fieldRequestId && x.Status == WarehouseIssueStatus.Issued, ct);
@@ -618,6 +629,10 @@ public sealed class SupplyChainService(
         {
             var request = await db.FieldWarehouseRequests.Include(x => x.Lines).FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == requestId, ct);
             if (request is null) continue;
+            if (request.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Cancelled or FieldWarehouseRequestStatus.Closed or FieldWarehouseRequestStatus.Issued)
+            {
+                continue;
+            }
             if (request.Lines.All(x => x.ReservedQuantity >= x.RequestedQuantity))
             {
                 request.Status = FieldWarehouseRequestStatus.ReadyForPickup;
@@ -662,4 +677,12 @@ public sealed class SupplyChainService(
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool CanProcessFieldRequest(FieldWarehouseRequestStatus status) =>
+        status is FieldWarehouseRequestStatus.Draft
+            or FieldWarehouseRequestStatus.Submitted
+            or FieldWarehouseRequestStatus.UnderReview
+            or FieldWarehouseRequestStatus.NeedsJustification
+            or FieldWarehouseRequestStatus.PendingApproval
+            or FieldWarehouseRequestStatus.Approved;
 }

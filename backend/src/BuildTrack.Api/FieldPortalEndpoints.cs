@@ -711,7 +711,7 @@ public static class FieldPortalEndpoints
         if (row is null) return Results.NotFound();
         if (!IsValidWarehouseReviewTransition(row.Status, request.Status))
         {
-            return Results.BadRequest(new { error = $"Invalid warehouse request transition: {row.Status} -> {request.Status}" });
+            return Results.Conflict(new { error = $"Invalid warehouse request transition: {row.Status} -> {request.Status}" });
         }
 
         row.Status = request.Status;
@@ -719,17 +719,37 @@ public static class FieldPortalEndpoints
         row.ReviewedAt = DateTimeOffset.UtcNow;
         row.ReviewedByUserId = tenantContext.UserId;
         row.UpdatedAt = DateTimeOffset.UtcNow;
+        WarehouseRejectionCascadeResult? rejectionCascade = null;
         if (request.Status == FieldWarehouseRequestStatus.Rejected)
         {
+            try
+            {
+                rejectionCascade = await CascadeRejectedWarehouseRequestAsync(db, row, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
+            }
             foreach (var line in row.Lines)
             {
                 line.Status = FieldWarehouseRequestLineStatus.Rejected;
+                line.ReservedQuantity = 0;
                 line.UpdatedAt = row.UpdatedAt;
             }
         }
 
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, $"WarehouseRequest{request.Status}", "FieldWarehouseRequest", row.Id, row.Status == FieldWarehouseRequestStatus.NeedsJustification, $"Anbar sorğusu yeniləndi: {BuildWarehouseAuditMaterialSummary(row)}", ct);
+        if (rejectionCascade?.ReleasedReservations > 0)
+        {
+            await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, "WarehouseRequestReservationReleased", "FieldWarehouseRequest", row.Id, false, "Rədd edilmiş sorğu üzrə rezerv ləğv edildi.", ct);
+        }
+
+        if (rejectionCascade?.CancelledNeeds > 0 || rejectionCascade?.CancelledTasks > 0)
+        {
+            await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, "WarehouseRequestProcurementCancelled", "FieldWarehouseRequest", row.Id, false, "Rədd edilmiş sorğu üzrə başlanmamış satınalma ehtiyacı ləğv edildi.", ct);
+        }
+
         return Results.Ok((await LoadWarehouseRequestsAsync(db, [row.SiteId], ct)).First(x => x.Id == row.Id));
     }
 
@@ -975,6 +995,82 @@ public static class FieldPortalEndpoints
                 or FieldWarehouseRequestStatus.ReadyForPickup,
             _ => false,
         };
+    }
+
+    private sealed record WarehouseRejectionCascadeResult(int ReleasedReservations, int CancelledNeeds, int CancelledTasks);
+
+    private static async Task<WarehouseRejectionCascadeResult> CascadeRejectedWarehouseRequestAsync(BuildTrackDbContext db, FieldWarehouseRequest request, CancellationToken ct)
+    {
+        var lineIds = request.Lines.Select(x => x.Id).ToArray();
+        if (lineIds.Length == 0) return new WarehouseRejectionCascadeResult(0, 0, 0);
+
+        var reservations = await db.WarehouseReservations
+            .Where(x => x.TenantId == request.TenantId && lineIds.Contains(x.RequestLineId) && x.Status == WarehouseReservationStatus.Active)
+            .ToListAsync(ct);
+
+        foreach (var reservation in reservations)
+        {
+            reservation.Status = WarehouseReservationStatus.Released;
+            reservation.ReleasedAt = DateTimeOffset.UtcNow;
+        }
+
+        var needs = await db.ProcurementNeeds
+            .Where(x => x.TenantId == request.TenantId && x.SourceRequestId == request.Id && x.Status != ProcurementNeedStatus.Cancelled)
+            .ToListAsync(ct);
+
+        if (needs.Any(x => x.Status is ProcurementNeedStatus.InPurchase
+                or ProcurementNeedStatus.PartiallyPurchased
+                or ProcurementNeedStatus.Purchased
+                or ProcurementNeedStatus.AwaitingReceipt
+                or ProcurementNeedStatus.Received))
+        {
+            throw new InvalidOperationException("Warehouse request cannot be rejected because downstream purchase has already started.");
+        }
+
+        var needIds = needs.Select(x => x.Id).ToArray();
+        var taskLines = needIds.Length == 0
+            ? new List<ProcurementTaskLine>()
+            : await db.ProcurementTaskLines
+                .Include(x => x.Task)
+                .Where(x => x.TenantId == request.TenantId && needIds.Contains(x.ProcurementNeedId))
+                .ToListAsync(ct);
+
+        var tasks = taskLines
+            .Select(x => x.Task)
+            .Where(x => x is not null)
+            .DistinctBy(x => x!.Id)
+            .Cast<ProcurementTask>()
+            .ToList();
+
+        if (tasks.Any(x => x.Status is not (ProcurementTaskStatus.Draft or ProcurementTaskStatus.Assigned or ProcurementTaskStatus.Accepted or ProcurementTaskStatus.Cancelled)))
+        {
+            throw new InvalidOperationException("Warehouse request cannot be rejected because a procurement task is already in progress.");
+        }
+
+        var cancelledTasks = 0;
+        foreach (var task in tasks.Where(x => x.Status != ProcurementTaskStatus.Cancelled))
+        {
+            var allTaskLines = await db.ProcurementTaskLines.Where(x => x.TenantId == request.TenantId && x.TaskId == task.Id).ToListAsync(ct);
+            if (allTaskLines.Any(x => !needIds.Contains(x.ProcurementNeedId))) continue;
+            task.Status = ProcurementTaskStatus.Cancelled;
+            foreach (var line in allTaskLines)
+            {
+                line.Status = ProcurementTaskLineStatus.Rejected;
+                line.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            cancelledTasks += 1;
+        }
+
+        var cancellableNeeds = needs
+            .Where(x => x.Status is ProcurementNeedStatus.PendingApproval or ProcurementNeedStatus.Approved or ProcurementNeedStatus.Assigned)
+            .ToList();
+        foreach (var need in cancellableNeeds)
+        {
+            need.Status = ProcurementNeedStatus.Cancelled;
+            need.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        return new WarehouseRejectionCascadeResult(reservations.Count, cancellableNeeds.Count, cancelledTasks);
     }
 
     private static string BuildWarehouseAuditMaterialSummary(FieldWarehouseRequest request)

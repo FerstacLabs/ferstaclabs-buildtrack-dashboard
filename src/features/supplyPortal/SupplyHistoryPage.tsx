@@ -20,7 +20,7 @@ export const SupplyHistoryPage = () => {
           dataSource={rows}
           pagination={{ pageSize: 10 }}
           columns={[
-            { title: 'Task', dataIndex: 'code' },
+            { title: 'Tapşırıq', dataIndex: 'code' },
             { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
             { title: 'Təsdiq', dataIndex: 'verifiedAt', render: (value) => value ? new Date(value).toLocaleString('az-AZ') : '-' },
             { title: 'Qeyd', dataIndex: 'verificationNote', render: (value) => value || '-' },

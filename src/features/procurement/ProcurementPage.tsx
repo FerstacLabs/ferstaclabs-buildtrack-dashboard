@@ -13,7 +13,17 @@ import {
   type WarehouseStockItem,
 } from '../../services/api/buildTrackBackendApi'
 import { formatNumber } from '../../utils/formatters'
-import { supplyStatusColor, supplyStatusLabel } from '../supplyPortal/supplyPortalStore'
+import {
+  isTerminalWarehouseRequestStatus,
+  priorityLabel,
+  procurementAgentStatusLabel,
+  procurementNeedStatusLabel,
+  procurementTaskStatusLabel,
+  supplierStatusLabel,
+  warehouseLineStatusLabel,
+  warehouseRequestStatusLabel,
+} from '../../utils/warehouseWorkflowLabels'
+import { supplyStatusColor } from '../supplyPortal/supplyPortalStore'
 
 export const ProcurementPage = () => {
   const [stock, setStock] = useState<WarehouseStockItem[]>([])
@@ -56,6 +66,11 @@ export const ProcurementPage = () => {
   }, [])
 
   const agentOptions = useMemo(() => agents.map((agent) => ({ value: agent.id, label: agent.fullName })), [agents])
+  const activeNeeds = useMemo(() => needs.filter((need) => !['Received', 'Cancelled'].includes(need.status)), [needs])
+  const activeTasks = useMemo(() => tasks.filter((task) => !['Completed', 'Verified', 'Cancelled'].includes(task.status)), [tasks])
+  const canCheckAndReserve = (row: ManagementWarehouseRequest) =>
+    !isTerminalWarehouseRequestStatus(row.status)
+    && ['Draft', 'Submitted', 'UnderReview', 'NeedsJustification', 'PendingApproval', 'Approved'].includes(row.status)
 
   const approveRequest = async (id: string) => {
     await buildTrackBackendApi.approveProcurementWarehouseRequest(id, 'Stok yoxlanıldı və rezerv/procurement axını yaradıldı.')
@@ -78,13 +93,13 @@ export const ProcurementPage = () => {
   }
 
   const createTask = async (values: { assignedProcurementUserId?: string; managerInstruction?: string }) => {
-    const needIds = selectedNeedIds.length ? selectedNeedIds : needs.filter((need) => need.status === 'PendingApproval' || need.status === 'Approved').map((need) => need.id)
+    const needIds = selectedNeedIds.length ? selectedNeedIds : activeNeeds.filter((need) => need.status === 'PendingApproval' || need.status === 'Approved').map((need) => need.id)
     if (!needIds.length) {
-      void message.warning('Task üçün ehtiyac seçin')
+      void message.warning('Tapşırıq üçün ehtiyac seçin')
       return
     }
     await buildTrackBackendApi.createProcurementTask({ needIds, assignedProcurementUserId: values.assignedProcurementUserId, managerInstruction: values.managerInstruction })
-    void message.success('Satınalma taskı yaradıldı')
+    void message.success('Satınalma tapşırığı yaradıldı')
     setTaskModalOpen(false)
     setSelectedNeedIds([])
     taskForm.resetFields()
@@ -93,7 +108,7 @@ export const ProcurementPage = () => {
 
   const verifyTask = async (id: string) => {
     await buildTrackBackendApi.verifyProcurementTask(id, 'Sübutlar yoxlandı və təsdiqləndi.')
-    void message.success('Task təsdiqləndi')
+    void message.success('Tapşırıq təsdiqləndi')
     await load()
   }
 
@@ -107,15 +122,15 @@ export const ProcurementPage = () => {
     <div className="page-stack">
       <PageTitle
         title="Təchizat / Satınalma"
-        subtitle="Sahə material sorğularından anbar rezervasiyası, çatışmazlıq, satınalma taskı, sübut və mal qəbulu axını."
-        extra={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => void load()}>Yenilə</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>Task yarat</Button></Space>}
+        subtitle="Sahə material sorğularından anbar rezervasiyası, çatışmazlıq, satınalma tapşırığı, sübut və mal qəbulu axını."
+        extra={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => void load()}>Yenilə</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => setTaskModalOpen(true)}>Tapşırıq yarat</Button></Space>}
       />
 
       <section className="kpi-grid four">
-        <KpiCard icon={<ShoppingCartOutlined />} title="Procurement ehtiyacı" value={formatNumber(needs.filter((need) => !['Received', 'Cancelled'].includes(need.status)).length)} trend="çatışmazlıqdan yaranıb" tone="orange" />
+        <KpiCard icon={<ShoppingCartOutlined />} title="Satınalma ehtiyacı" value={formatNumber(activeNeeds.length)} trend="çatışmazlıqdan yaranıb" tone="orange" />
         <KpiCard icon={<CheckCircleOutlined />} title="Hazır sorğu" value={formatNumber(requests.filter((row) => row.status === 'ReadyForPickup').length)} trend="sahəyə verilməlidir" tone="green" />
-        <KpiCard icon={<ShoppingCartOutlined />} title="Aktiv task" value={formatNumber(tasks.filter((task) => !['Completed', 'Verified', 'Cancelled'].includes(task.status)).length)} trend="supply portalda" tone="blue" />
-        <KpiCard icon={<PlusOutlined />} title="Supplier" value={formatNumber(suppliers.length)} trend="qiymət tarixçəsi üçün" tone="purple" />
+        <KpiCard icon={<ShoppingCartOutlined />} title="Aktiv tapşırıq" value={formatNumber(activeTasks.length)} trend="təchizat portalında" tone="blue" />
+        <KpiCard icon={<PlusOutlined />} title="Tədarükçü" value={formatNumber(suppliers.length)} trend="qiymət tarixçəsi üçün" tone="purple" />
       </section>
 
       <Tabs
@@ -137,16 +152,18 @@ export const ProcurementPage = () => {
                       { title: 'Anbarda', render: (_, line) => `${formatNumber(line.onHandQuantity)} ${line.unit}` },
                       { title: 'Rezerv', render: (_, line) => `${formatNumber(line.reservedQuantity)} ${line.unit}` },
                       { title: 'Çatışmazlıq', render: (_, line) => line.shortfallQuantity > 0 ? <Tag color="red">{formatNumber(line.shortfallQuantity)} {line.unit}</Tag> : <Tag color="green">Yoxdur</Tag> },
+                      { title: 'Sətir statusu', render: (_, line) => <Tag color={supplyStatusColor(line.status)}>{warehouseLineStatusLabel(line.status)}</Tag> },
                     ]} />
                   ) }}
                   columns={[
                     { title: 'Kod', dataIndex: 'code' },
                     { title: 'Obyekt', dataIndex: 'siteName' },
                     { title: 'Prorab', dataIndex: 'supervisorName' },
-                    { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={value === 'ReadyForPickup' ? 'green' : value === 'InFulfillment' ? 'orange' : 'blue'}>{value}</Tag> },
+                    { title: 'Təcillik', dataIndex: 'urgency', render: (value) => priorityLabel(value) },
+                    { title: 'Status', dataIndex: 'status', render: (_, row) => <Tag key={`${row.id}:${row.status}`} color={row.status === 'ReadyForPickup' ? 'green' : row.status === 'InFulfillment' ? 'orange' : isTerminalWarehouseRequestStatus(row.status) ? 'red' : 'blue'}>{warehouseRequestStatusLabel(row.status)}</Tag> },
                     { title: 'Toplam', render: (_, row) => `${formatNumber(row.totalRequested)} vahid` },
                     { title: 'Çatışmazlıq', render: (_, row) => row.totalShortfall > 0 ? <Tag color="red">{formatNumber(row.totalShortfall)}</Tag> : <Tag color="green">Yoxdur</Tag> },
-                    { title: 'Əməliyyat', render: (_, row) => <Space><Button onClick={() => approveRequest(row.id)}>Yoxla/rezerv et</Button><Button onClick={() => issueRequest(row.id)} disabled={row.totalReserved <= 0}>Ver</Button></Space> },
+                    { title: 'Əməliyyat', render: (_, row) => <Space>{canCheckAndReserve(row) && <Button onClick={() => approveRequest(row.id)}>Yoxla/rezerv et</Button>}<Button onClick={() => issueRequest(row.id)} disabled={!['Approved', 'PartiallyApproved', 'ReadyForPickup'].includes(row.status) || row.totalReserved <= 0}>Ver</Button>{isTerminalWarehouseRequestStatus(row.status) && <Tag color="default">Arxiv</Tag>}</Space> },
                   ]}
                 />
               </Card>
@@ -177,12 +194,13 @@ export const ProcurementPage = () => {
                   rowKey="id"
                   loading={loading}
                   rowSelection={{ selectedRowKeys: selectedNeedIds, onChange: (keys) => setSelectedNeedIds(keys.map(String)) }}
-                  dataSource={needs}
+                  dataSource={activeNeeds}
                   pagination={{ pageSize: 8 }}
                   columns={[
                     { title: 'Material', dataIndex: 'itemName' },
                     { title: 'Çatışmazlıq', render: (_, row) => `${formatNumber(row.shortfallQuantity)} ${row.unit}` },
-                    { title: 'Status', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
+                    { title: 'Prioritet', dataIndex: 'priority', render: (value) => priorityLabel(value) },
+                    { title: 'Status', dataIndex: 'status', render: (value) => <Tag>{procurementNeedStatusLabel(value)}</Tag> },
                     { title: 'Səbəb', dataIndex: 'reason' },
                   ]}
                 />
@@ -191,13 +209,13 @@ export const ProcurementPage = () => {
           },
           {
             key: 'tasks',
-            label: 'Tasklar',
+            label: 'Tapşırıqlar',
             children: (
               <Card className="soft-card">
                 <Table rowKey="id" loading={loading} dataSource={tasks} pagination={{ pageSize: 8 }} columns={[
-                  { title: 'Task', dataIndex: 'code' },
+                  { title: 'Tapşırıq', dataIndex: 'code' },
                   { title: 'Agent', dataIndex: 'assignedProcurementUserName', render: (value) => value || '-' },
-                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
+                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{procurementTaskStatusLabel(value)}</Tag> },
                   { title: 'Sətir', render: (_, row) => row.lines.length },
                   { title: 'Əməliyyat', render: (_, row) => <Space><Button onClick={() => verifyTask(row.id)} disabled={row.status !== 'SubmittedForVerification'}>Təsdiqlə</Button><Button onClick={() => receiveTask(row.id)} disabled={row.status !== 'Verified'}>Anbara qəbul</Button></Space> },
                 ]} />
@@ -209,26 +227,26 @@ export const ProcurementPage = () => {
             label: 'Təchizatçılar',
             children: (
               <Card className="soft-card">
-                <Button className="field-action" type="primary" onClick={() => setAgentModalOpen(true)}>Agent yarat</Button>
+                <Button className="field-action" type="primary" onClick={() => setAgentModalOpen(true)}>Satınalma əməkdaşı yarat</Button>
                 <Table rowKey="id" dataSource={agents} pagination={{ pageSize: 8 }} columns={[
                   { title: 'Ad', dataIndex: 'fullName' },
                   { title: 'Email', dataIndex: 'email' },
-                  { title: 'Açıq task', dataIndex: 'openTasks' },
-                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={value === 'Active' ? 'green' : 'red'}>{value}</Tag> },
+                  { title: 'Açıq tapşırıq', dataIndex: 'openTasks' },
+                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={value === 'Active' ? 'green' : 'red'}>{procurementAgentStatusLabel(value)}</Tag> },
                 ]} />
               </Card>
             ),
           },
           {
             key: 'suppliers',
-            label: 'Supplier bazası',
+            label: 'Tədarükçü bazası',
             children: (
               <Card className="soft-card">
                 <Table rowKey="id" dataSource={suppliers} pagination={{ pageSize: 8 }} columns={[
-                  { title: 'Supplier', dataIndex: 'name' },
+                  { title: 'Tədarükçü', dataIndex: 'name' },
                   { title: 'Kateqoriya', dataIndex: 'categories' },
                   { title: 'Telefon', dataIndex: 'phone' },
-                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={value === 'Active' ? 'green' : 'orange'}>{value}</Tag> },
+                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={value === 'Active' ? 'green' : 'orange'}>{supplierStatusLabel(value)}</Tag> },
                 ]} />
               </Card>
             ),
@@ -236,7 +254,7 @@ export const ProcurementPage = () => {
         ]}
       />
 
-      <Modal title="Təchizatçı agent yarat" open={agentModalOpen} onCancel={() => setAgentModalOpen(false)} footer={null}>
+      <Modal title="Satınalma əməkdaşı yarat" open={agentModalOpen} onCancel={() => setAgentModalOpen(false)} footer={null}>
         <Form form={agentForm} layout="vertical" onFinish={createAgent}>
           <Form.Item name="fullName" label="Ad soyad" rules={[{ required: true }]}>
             <Input />
@@ -254,15 +272,15 @@ export const ProcurementPage = () => {
         </Form>
       </Modal>
 
-      <Modal title="Satınalma taskı yarat" open={taskModalOpen} onCancel={() => setTaskModalOpen(false)} footer={null}>
+      <Modal title="Satınalma tapşırığı yarat" open={taskModalOpen} onCancel={() => setTaskModalOpen(false)} footer={null}>
         <Form form={taskForm} layout="vertical" onFinish={createTask}>
-          <Form.Item name="assignedProcurementUserId" label="Təyin ediləcək agent">
+          <Form.Item name="assignedProcurementUserId" label="Təyin ediləcək satınalma əməkdaşı">
             <Select allowClear options={agentOptions} />
           </Form.Item>
           <Form.Item name="managerInstruction" label="Rəhbər tapşırığı">
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Button type="primary" htmlType="submit">Task yarat</Button>
+          <Button type="primary" htmlType="submit">Tapşırıq yarat</Button>
         </Form>
       </Modal>
     </div>

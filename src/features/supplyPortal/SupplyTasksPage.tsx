@@ -2,6 +2,7 @@ import { ReloadOutlined } from '@ant-design/icons'
 import { Button, Card, Space, Table, Tag } from 'antd'
 import { Link } from 'react-router-dom'
 import { formatNumber } from '../../utils/formatters'
+import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
 import { supplyStatusColor, supplyStatusLabel, useSupplyPortalStore } from './supplyPortalStore'
 
 export const SupplyTasksPage = () => {
@@ -12,7 +13,7 @@ export const SupplyTasksPage = () => {
       <div className="field-toolbar">
         <div>
           <span className="field-eyebrow">Satınalma icrası</span>
-          <h2>Mənim tasklarım</h2>
+          <h2>Mənim tapşırıqlarım</h2>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void loadTasks()}>Yenilə</Button>
       </div>
@@ -23,9 +24,9 @@ export const SupplyTasksPage = () => {
           dataSource={tasks}
           pagination={{ pageSize: 10 }}
           columns={[
-            { title: 'Task', dataIndex: 'code', render: (value, row) => <Link to={`/tasks/${row.id}`}><strong>{value}</strong></Link> },
+            { title: 'Tapşırıq', dataIndex: 'code', render: (value, row) => <Link to={`/tasks/${row.id}`}><strong>{value}</strong></Link> },
             { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
-            { title: 'Prioritet', dataIndex: 'priority' },
+            { title: 'Prioritet', dataIndex: 'priority', render: (value) => priorityLabel(value) },
             { title: 'Materiallar', render: (_, row) => (
               <Space direction="vertical" size={2}>
                 {row.lines.slice(0, 3).map((line) => <span key={line.id}>{line.itemName}: {formatNumber(line.requestedQuantity)} {line.unit}</span>)}

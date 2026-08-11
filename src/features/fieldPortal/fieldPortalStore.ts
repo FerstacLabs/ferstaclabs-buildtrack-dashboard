@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { buildTrackBackendApi, type FieldAssignment, type FieldMe } from '../../services/api/buildTrackBackendApi'
+import { warehouseLineStatusLabel, warehouseRequestStatusLabel } from '../../utils/warehouseWorkflowLabels'
 
 interface FieldPortalState {
   me?: FieldMe
@@ -40,10 +41,17 @@ export const fieldStatusColor = (status?: string) => {
     case 'Submitted':
     case 'PendingApproval':
     case 'ReadyForPickup':
+    case 'UnderReview':
+    case 'StockAvailable':
+    case 'Reserved':
+    case 'ReadyForIssue':
       return 'blue'
     case 'NeedsCorrection':
     case 'NeedsJustification':
     case 'PartiallyApproved':
+    case 'InFulfillment':
+    case 'NeedsProcurement':
+    case 'ProcurementInProgress':
       return 'orange'
     case 'Rejected':
     case 'Cancelled':
@@ -68,6 +76,6 @@ export const fieldStatusLabel = (status?: string) => {
     case 'Closed': return 'Bağlanıb'
     case 'Cancelled': return 'Ləğv edilib'
     case 'Open': return 'Açıq'
-    default: return status ?? 'Naməlum'
+    default: return warehouseLineStatusLabel(status) || warehouseRequestStatusLabel(status)
   }
 }

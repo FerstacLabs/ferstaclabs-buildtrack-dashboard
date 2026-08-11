@@ -13,6 +13,7 @@ import {
   type SupervisorAuditEventRow,
   type SupervisorSummary,
 } from '../../services/api/buildTrackBackendApi'
+import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
 import { FieldStatusTag } from '../fieldPortal/FieldStatusTag'
 import { fieldStatusLabel } from '../fieldPortal/fieldPortalStore'
 
@@ -579,7 +580,7 @@ export const SupervisorsPage = () => {
               <Descriptions.Item label="Obyekt">{selectedWarehouseRequest.siteName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Prorab">{selectedWarehouseRequest.supervisorName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Tarix">{formatDateTime(selectedWarehouseRequest.createdAt)}</Descriptions.Item>
-              <Descriptions.Item label="Təcillik">{selectedWarehouseRequest.urgency}</Descriptions.Item>
+              <Descriptions.Item label="Təcillik">{priorityLabel(selectedWarehouseRequest.urgency)}</Descriptions.Item>
               <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedWarehouseRequest.id}:${selectedWarehouseRequest.status}`} status={selectedWarehouseRequest.status} /></Descriptions.Item>
               <Descriptions.Item label="Ümumi qeyd">{selectedWarehouseRequest.generalNote || DASH}</Descriptions.Item>
               <Descriptions.Item label="Əsaslandırma">{selectedWarehouseRequest.justification || DASH}</Descriptions.Item>

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { buildTrackBackendApi, type ProcurementTask, type SupplierRow } from '../../services/api/buildTrackBackendApi'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
+import { procurementTaskLineStatusLabel } from '../../utils/warehouseWorkflowLabels'
 import { supplyStatusColor, supplyStatusLabel } from './supplyPortalStore'
 
 export const SupplyTaskDetailPage = () => {
@@ -40,7 +41,7 @@ export const SupplyTaskDetailPage = () => {
   const accept = async () => {
     if (!id) return
     setTask(await buildTrackBackendApi.acceptSupplyTask(id))
-    void message.success('Task qəbul edildi')
+    void message.success('Tapşırıq qəbul edildi')
   }
 
   const start = async () => {
@@ -80,17 +81,17 @@ export const SupplyTaskDetailPage = () => {
   const submit = async () => {
     if (!id) return
     setTask(await buildTrackBackendApi.submitSupplyTask(id))
-    void message.success('Task rəhbər təsdiqinə göndərildi')
+    void message.success('Tapşırıq rəhbər təsdiqinə göndərildi')
   }
 
-  if (!task && loading) return <Card className="soft-card">Task yüklənir...</Card>
-  if (!task) return <Alert type="warning" showIcon message="Task tapılmadı" />
+  if (!task && loading) return <Card className="soft-card">Tapşırıq yüklənir...</Card>
+  if (!task) return <Alert type="warning" showIcon message="Tapşırıq tapılmadı" />
 
   return (
     <div className="field-page supply-page">
       <div className="field-toolbar">
         <div>
-          <Link to="/tasks" className="muted-text"><ArrowLeftOutlined /> Tasklara qayıt</Link>
+          <Link to="/tasks" className="muted-text"><ArrowLeftOutlined /> Tapşırıqlara qayıt</Link>
           <h2>{task.code}</h2>
           <span className="field-eyebrow">Sübutlu satınalma icrası</span>
         </div>
@@ -106,7 +107,7 @@ export const SupplyTaskDetailPage = () => {
         showIcon
         className="field-alert"
         message="Satınalma sübutları tələb olunur"
-        description="Task təsdiqə göndərilməzdən əvvəl məhsul şəkli və çek yüklənməlidir. Qiymət məlumatı yalnız supply/management tərəfdə görünür."
+        description="Tapşırıq təsdiqə göndərilməzdən əvvəl məhsul şəkli və çek yüklənməlidir. Qiymət məlumatı yalnız supply/management tərəfdə görünür."
       />
 
       <Card className="soft-card">
@@ -120,7 +121,7 @@ export const SupplyTaskDetailPage = () => {
             { title: 'Lazım olan', render: (_, row) => `${formatNumber(row.requestedQuantity)} ${row.unit}` },
             { title: 'Alınıb', render: (_, row) => `${formatNumber(row.purchasedQuantity)} ${row.unit}` },
             { title: 'Məbləğ', render: (_, row) => row.unitPrice ? formatCurrency(row.unitPrice * row.purchasedQuantity) : '-' },
-            { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
+            { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{procurementTaskLineStatusLabel(value)}</Tag> },
             { title: 'Alış yenilə', width: 420, render: (_, row) => (
               <Form
                 layout="inline"
@@ -134,7 +135,7 @@ export const SupplyTaskDetailPage = () => {
                   <InputNumber min={0} placeholder="Qiymət" />
                 </Form.Item>
                 <Form.Item name="supplierId">
-                  <Select allowClear showSearch placeholder="Supplier" options={supplierOptions} style={{ width: 140 }} />
+                  <Select allowClear showSearch placeholder="Tədarükçü" options={supplierOptions} style={{ width: 140 }} />
                 </Form.Item>
                 <Form.Item name="note">
                   <Input placeholder="Qeyd" style={{ width: 120 }} />

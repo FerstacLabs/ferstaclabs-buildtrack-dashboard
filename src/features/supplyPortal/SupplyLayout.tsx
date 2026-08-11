@@ -16,7 +16,7 @@ import { useSupplyPortalStore } from './supplyPortalStore'
 
 const navItems = [
   { path: '/', label: 'İcmal', icon: <HomeOutlined />, end: true },
-  { path: '/tasks', label: 'Satınalma taskları', icon: <ShoppingCartOutlined /> },
+  { path: '/tasks', label: 'Satınalma tapşırıqları', icon: <ShoppingCartOutlined /> },
   { path: '/history', label: 'Tarixçə', icon: <HistoryOutlined /> },
   { path: '/notifications', label: 'Bildirişlər', icon: <BellOutlined /> },
   { path: '/settings', label: 'Ayarlar', icon: <SettingOutlined /> },

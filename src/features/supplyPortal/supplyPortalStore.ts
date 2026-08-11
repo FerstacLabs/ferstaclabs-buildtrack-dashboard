@@ -6,6 +6,7 @@ import {
   type SupplyDashboard,
   type SupplyNotification,
 } from '../../services/api/buildTrackBackendApi'
+import { procurementTaskStatusLabel } from '../../utils/warehouseWorkflowLabels'
 
 interface SupplyPortalState {
   dashboard?: SupplyDashboard
@@ -75,14 +76,14 @@ export const supplyStatusColor = (status?: string) => {
 }
 
 export const supplyStatusLabel = (status?: string) => ({
-  Draft: 'Draft',
+  Draft: 'Qaralama',
   Assigned: 'Təyin edilib',
   Accepted: 'Qəbul edilib',
-  Shopping: 'Alışdadır',
-  PartiallyCompleted: 'Qismən alınıb',
+  Shopping: 'Alış prosesində',
+  PartiallyCompleted: 'Qismən tamamlanıb',
   Completed: 'Tamamlanıb',
-  SubmittedForVerification: 'Təsdiqə göndərilib',
+  SubmittedForVerification: 'Yoxlamaya göndərilib',
   Verified: 'Təsdiqlənib',
-  RejectedForCorrection: 'Düzəliş lazımdır',
+  RejectedForCorrection: 'Geri qaytarılıb',
   Cancelled: 'Ləğv edilib',
-}[status ?? ''] ?? status ?? '-')
+}[status ?? ''] ?? procurementTaskStatusLabel(status))
