@@ -8,12 +8,13 @@ import {
   type FieldDailyReport,
   type FieldDailyReportLine,
   type FieldDailyReportStatus,
-  type FieldWarehouseRequest,
+  type FieldWarehouseRequestStatus,
+  type ManagementWarehouseRequest,
   type SupervisorAuditEventRow,
   type SupervisorSummary,
 } from '../../services/api/buildTrackBackendApi'
 import { FieldStatusTag } from '../fieldPortal/FieldStatusTag'
-import { fieldStatusColor, fieldStatusLabel } from '../fieldPortal/fieldPortalStore'
+import { fieldStatusLabel } from '../fieldPortal/fieldPortalStore'
 
 type SupervisorFormValues = {
   fullName: string
@@ -83,20 +84,53 @@ const decisionLabel = (status: FieldDailyReportStatus) => {
 const replaceReport = (items: FieldDailyReport[], updated: FieldDailyReport) =>
   items.map((item) => (item.id === updated.id ? updated : item))
 
+type WarehouseReviewAction = 'Approved' | 'NeedsJustification' | 'Rejected' | 'Issued'
+
+const warehouseTerminalStatuses = new Set<FieldWarehouseRequestStatus>(['Rejected', 'Issued', 'Closed', 'Cancelled'])
+
+const canApproveWarehouse = (row: ManagementWarehouseRequest) =>
+  ['Draft', 'Submitted', 'UnderReview', 'NeedsJustification', 'PendingApproval', 'Approved'].includes(row.status)
+
+const canRequestWarehouseJustification = (row: ManagementWarehouseRequest) =>
+  ['Draft', 'Submitted', 'UnderReview', 'PendingApproval'].includes(row.status)
+
+const canRejectWarehouse = (row: ManagementWarehouseRequest) =>
+  !warehouseTerminalStatuses.has(row.status)
+
+const canIssueWarehouse = (row: ManagementWarehouseRequest) =>
+  ['Approved', 'PartiallyApproved', 'ReadyForPickup'].includes(row.status) && row.totalReserved > 0
+
+const warehouseMaterialSummary = (row: ManagementWarehouseRequest) => {
+  const linesWithName = row.lines.filter((line) => line.itemName?.trim())
+  if (!linesWithName.length) return 'Məlumat mövcud deyil'
+  if (linesWithName.length === 1) return linesWithName[0].itemName
+  return `${linesWithName[0].itemName} +${linesWithName.length - 1}`
+}
+
+const warehouseActionMessage: Record<WarehouseReviewAction, string> = {
+  Approved: 'Anbar sorğusu təsdiqləndi və stok yoxlanıldı',
+  NeedsJustification: 'Əsaslandırma tələbi göndərildi',
+  Rejected: 'Anbar sorğusu rədd edildi',
+  Issued: 'Material verildi',
+}
+
 export const SupervisorsPage = () => {
   const [rows, setRows] = useState<SupervisorSummary[]>([])
   const [sites, setSites] = useState<BackendSite[]>([])
   const [reports, setReports] = useState<FieldDailyReport[]>([])
-  const [warehouseRequests, setWarehouseRequests] = useState<FieldWarehouseRequest[]>([])
+  const [warehouseRequests, setWarehouseRequests] = useState<ManagementWarehouseRequest[]>([])
   const [auditEvents, setAuditEvents] = useState<SupervisorAuditEventRow[]>([])
   const [editing, setEditing] = useState<SupervisorSummary>()
   const [selectedReport, setSelectedReport] = useState<FieldDailyReport | null>(null)
+  const [selectedWarehouseRequest, setSelectedWarehouseRequest] = useState<ManagementWarehouseRequest | null>(null)
   const [selectedAudit, setSelectedAudit] = useState<SupervisorAuditEventRow | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false)
+  const [warehouseDrawerOpen, setWarehouseDrawerOpen] = useState(false)
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [reviewingReportId, setReviewingReportId] = useState<string | null>(null)
+  const [reviewingWarehouseId, setReviewingWarehouseId] = useState<string | null>(null)
   const [auditDateRange, setAuditDateRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [auditSiteId, setAuditSiteId] = useState<string>()
   const [auditSupervisorId, setAuditSupervisorId] = useState<string>()
@@ -110,7 +144,7 @@ export const SupervisorsPage = () => {
         buildTrackBackendApi.getSupervisors(),
         buildTrackBackendApi.getSites(),
         buildTrackBackendApi.getManagementFieldReports(),
-        buildTrackBackendApi.getManagementWarehouseRequests(),
+        buildTrackBackendApi.getProcurementWarehouseRequests(),
         buildTrackBackendApi.getSupervisorAuditEvents(),
       ])
       setRows(nextRows)
@@ -131,6 +165,16 @@ export const SupervisorsPage = () => {
       if (freshReport && selectedReport?.id === selectedReportId) setSelectedReport(freshReport)
     }
     return nextReports
+  }
+
+  const refreshManagementWarehouseRequests = async (selectedRequestId?: string) => {
+    const nextRequests = await buildTrackBackendApi.getProcurementWarehouseRequests()
+    setWarehouseRequests(nextRequests)
+    if (selectedRequestId) {
+      const freshRequest = nextRequests.find((request) => request.id === selectedRequestId)
+      if (freshRequest && selectedWarehouseRequest?.id === selectedRequestId) setSelectedWarehouseRequest(freshRequest)
+    }
+    return nextRequests
   }
 
   useEffect(() => {
@@ -183,6 +227,11 @@ export const SupervisorsPage = () => {
   const openReport = (row: FieldDailyReport) => {
     setSelectedReport(row)
     setReportDrawerOpen(true)
+  }
+
+  const openWarehouseRequest = (row: ManagementWarehouseRequest) => {
+    setSelectedWarehouseRequest(row)
+    setWarehouseDrawerOpen(true)
   }
 
   const openAudit = (row: SupervisorAuditEventRow) => {
@@ -247,11 +296,35 @@ export const SupervisorsPage = () => {
     }
   }
 
-  const reviewWarehouse = async (row: FieldWarehouseRequest, status: 'Approved' | 'NeedsJustification' | 'Rejected' | 'Issued') => {
-    const managerNote = status === 'Approved' ? 'Təsdiqləndi' : window.prompt('Rəhbər qeydi') || undefined
-    await buildTrackBackendApi.reviewManagementWarehouseRequest(row.id, { status, managerNote })
-    message.success('Anbar sorğusu yeniləndi')
-    await load()
+  const reviewWarehouse = async (row: ManagementWarehouseRequest, status: WarehouseReviewAction) => {
+    if (reviewingWarehouseId) return
+    const managerNote = status === 'Approved'
+      ? 'Stok yoxlanıldı və rezerv/procurement axını yaradıldı.'
+      : status === 'Issued'
+        ? 'Management paneldən verildi'
+        : window.prompt(status === 'Rejected' ? 'Rədd səbəbi' : 'Əsaslandırma qeydi')?.trim()
+
+    if ((status === 'Rejected' || status === 'NeedsJustification') && !managerNote) {
+      message.warning('Rəhbər qeydi daxil edilməlidir')
+      return
+    }
+
+    setReviewingWarehouseId(row.id)
+    try {
+      if (status === 'Approved') {
+        await buildTrackBackendApi.approveProcurementWarehouseRequest(row.id, managerNote)
+      } else if (status === 'Issued') {
+        await buildTrackBackendApi.issueProcurementWarehouseRequest(row.id, { recipientName: row.supervisorName ?? 'Prorab', handoverNote: managerNote })
+      } else {
+        await buildTrackBackendApi.reviewManagementWarehouseRequest(row.id, { status, managerNote })
+      }
+      message.success(warehouseActionMessage[status])
+      await refreshManagementWarehouseRequests(row.id)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Anbar sorğusu yenilənmədi')
+    } finally {
+      setReviewingWarehouseId(null)
+    }
   }
 
   const reportActions = (row: FieldDailyReport) => (
@@ -263,8 +336,32 @@ export const SupervisorsPage = () => {
     </Space>
   )
 
+  const warehouseActions = (row: ManagementWarehouseRequest) => (
+    <Space wrap>
+      <Button icon={<EyeOutlined />} onClick={() => openWarehouseRequest(row)}>Bax</Button>
+      {canApproveWarehouse(row) && (
+        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Approved')}>Təsdiq</Button>
+      )}
+      {canRequestWarehouseJustification(row) && (
+        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'NeedsJustification')}>Əsaslandır</Button>
+      )}
+      {canIssueWarehouse(row) && (
+        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Issued')}>Verildi</Button>
+      )}
+      {canRejectWarehouse(row) && (
+        <Button danger loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Rejected')}>Rədd</Button>
+      )}
+    </Space>
+  )
+
   const selectedReportTotalHours = selectedReport ? totalLineValue(selectedReport.lines, 'workHours') : undefined
   const selectedReportTotalWorkers = selectedReport ? totalLineValue(selectedReport.lines, 'workerCount') : undefined
+  const selectedWarehouseSummary = selectedWarehouseRequest ? {
+    lineCount: selectedWarehouseRequest.lines.length,
+    materialCount: new Set(selectedWarehouseRequest.lines.map((line) => line.catalogItemId)).size,
+    fullyAvailable: selectedWarehouseRequest.lines.filter((line) => line.shortfallQuantity <= 0).length,
+    withShortfall: selectedWarehouseRequest.lines.filter((line) => line.shortfallQuantity > 0).length,
+  } : undefined
 
   return (
     <div className="page-stack">
@@ -334,21 +431,20 @@ export const SupervisorsPage = () => {
           dataSource={warehouseRequests}
           pagination={{ pageSize: 5 }}
           columns={[
-            { title: 'Material', dataIndex: 'materialName' },
-            { title: 'Miqdar', render: (_, row) => `${row.requestedQuantity} ${row.unit}` },
+            { title: 'Sorğu', dataIndex: 'code', render: (value, row) => value || row.id.slice(0, 8) },
+            { title: 'Material', render: (_, row) => warehouseMaterialSummary(row) },
+            { title: 'Miqdar', render: (_, row) => `${formatNumber(row.totalRequested)} vahid` },
             { title: 'Obyekt', dataIndex: 'siteName' },
             { title: 'Prorab', dataIndex: 'supervisorName' },
-            { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+            {
+              title: 'Status',
+              dataIndex: 'status',
+              render: (_, row) => <FieldStatusTag key={`${row.id}:${row.status}`} status={row.status} />,
+            },
+            { title: 'Çatışmazlıq', render: (_, row) => row.totalShortfall > 0 ? <Tag color="red">{formatNumber(row.totalShortfall)}</Tag> : <Tag color="green">Yoxdur</Tag> },
             {
               title: 'Əməliyyat',
-              render: (_, row) => (
-                <Space wrap>
-                  <Button onClick={() => reviewWarehouse(row, 'Approved')}>Təsdiq</Button>
-                  <Button onClick={() => reviewWarehouse(row, 'NeedsJustification')}>Əsaslandır</Button>
-                  <Button onClick={() => reviewWarehouse(row, 'Issued')}>Verildi</Button>
-                  <Button danger onClick={() => reviewWarehouse(row, 'Rejected')}>Rədd</Button>
-                </Space>
-              ),
+              render: (_, row) => warehouseActions(row),
             },
           ]}
         />
@@ -453,6 +549,57 @@ export const SupervisorsPage = () => {
                 { title: 'İşçi sayı', render: (_, line) => formatNumber(line.workerCount) },
                 { title: 'Saat', render: (_, line) => formatHours(line.workHours) },
                 { title: 'Qeyd', render: (_, line) => line.note || DASH },
+              ]}
+            />
+          </Space>
+        )}
+      </Drawer>
+
+      <Drawer
+        title="Anbar sorğusu"
+        open={warehouseDrawerOpen}
+        width={920}
+        onClose={() => setWarehouseDrawerOpen(false)}
+        footer={selectedWarehouseRequest ? warehouseActions(selectedWarehouseRequest) : null}
+      >
+        {selectedWarehouseRequest && (
+          <Space direction="vertical" className="full-width" size="middle">
+            {selectedWarehouseSummary && (
+              <Card size="small">
+                <Space wrap size="large">
+                  <div><strong>Material sayı:</strong> {formatNumber(selectedWarehouseSummary.materialCount)}</div>
+                  <div><strong>Ümumi sətir sayı:</strong> {formatNumber(selectedWarehouseSummary.lineCount)}</div>
+                  <div><strong>Tam təmin edilə bilən:</strong> {formatNumber(selectedWarehouseSummary.fullyAvailable)}</div>
+                  <div><strong>Çatışmazlıq olan:</strong> {formatNumber(selectedWarehouseSummary.withShortfall)}</div>
+                </Space>
+              </Card>
+            )}
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="Sorğu nömrəsi">{selectedWarehouseRequest.code || selectedWarehouseRequest.id.slice(0, 8)}</Descriptions.Item>
+              <Descriptions.Item label="Obyekt">{selectedWarehouseRequest.siteName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Prorab">{selectedWarehouseRequest.supervisorName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Tarix">{formatDateTime(selectedWarehouseRequest.createdAt)}</Descriptions.Item>
+              <Descriptions.Item label="Təcillik">{selectedWarehouseRequest.urgency}</Descriptions.Item>
+              <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedWarehouseRequest.id}:${selectedWarehouseRequest.status}`} status={selectedWarehouseRequest.status} /></Descriptions.Item>
+              <Descriptions.Item label="Ümumi qeyd">{selectedWarehouseRequest.generalNote || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Əsaslandırma">{selectedWarehouseRequest.justification || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Rəhbər qeydi">{selectedWarehouseRequest.managerComment || DASH}</Descriptions.Item>
+            </Descriptions>
+            <Table
+              size="small"
+              rowKey="id"
+              dataSource={selectedWarehouseRequest.lines}
+              pagination={false}
+              columns={[
+                { title: 'Material', render: (_, line) => line.itemName || 'Məlumat mövcud deyil' },
+                { title: 'Kod', render: (_, line) => line.code || DASH },
+                { title: 'Miqdar', render: (_, line) => formatNumber(line.requestedQuantity) },
+                { title: 'Vahid', dataIndex: 'unit' },
+                { title: 'Səbəb', render: (_, line) => line.reason || DASH },
+                { title: 'Anbarda', render: (_, line) => `${formatNumber(line.onHandQuantity)} ${line.unit}` },
+                { title: 'Rezerv', render: (_, line) => `${formatNumber(line.reservedQuantity)} ${line.unit}` },
+                { title: 'Çatışmır', render: (_, line) => line.shortfallQuantity > 0 ? <Tag color="red">{formatNumber(line.shortfallQuantity)} {line.unit}</Tag> : <Tag color="green">Yoxdur</Tag> },
+                { title: 'Sətir statusu', render: (_, line) => <FieldStatusTag key={`${line.id}:${line.status}`} status={line.status} /> },
               ]}
             />
           </Space>

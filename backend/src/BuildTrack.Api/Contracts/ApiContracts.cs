@@ -538,6 +538,7 @@ public sealed record ManagementWarehouseLineDto(
     Guid Id,
     Guid CatalogItemId,
     string ItemName,
+    string? Code,
     string Category,
     decimal RequestedQuantity,
     decimal ApprovedQuantity,

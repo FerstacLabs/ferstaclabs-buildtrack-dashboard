@@ -692,8 +692,9 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> GetManagementWarehouseRequestsAsync(Guid? siteId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
+        var tenantId = RequireTenantId(tenantContext);
         var siteIds = siteId is null
-            ? await db.Sites.AsNoTracking().Select(x => x.Id).ToArrayAsync(ct)
+            ? await db.Sites.AsNoTracking().Where(x => x.TenantId == tenantId).Select(x => x.Id).ToArrayAsync(ct)
             : [siteId.Value];
         return Results.Ok(await LoadWarehouseRequestsAsync(db, siteIds, ct));
     }
@@ -701,15 +702,34 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> ReviewManagementWarehouseRequestAsync(Guid id, ReviewFieldWarehouseRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
-        var row = await db.FieldWarehouseRequests.Include(x => x.CatalogItem).FirstOrDefaultAsync(x => x.Id == id, ct);
+        var tenantId = RequireTenantId(tenantContext);
+        var row = await db.FieldWarehouseRequests
+            .Include(x => x.CatalogItem)
+            .Include(x => x.Lines)
+            .ThenInclude(x => x.CatalogItem)
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
         if (row is null) return Results.NotFound();
+        if (!IsValidWarehouseReviewTransition(row.Status, request.Status))
+        {
+            return Results.BadRequest(new { error = $"Invalid warehouse request transition: {row.Status} -> {request.Status}" });
+        }
+
         row.Status = request.Status;
         row.ManagerComment = Clean(request.ManagerComment);
         row.ReviewedAt = DateTimeOffset.UtcNow;
         row.ReviewedByUserId = tenantContext.UserId;
         row.UpdatedAt = DateTimeOffset.UtcNow;
+        if (request.Status == FieldWarehouseRequestStatus.Rejected)
+        {
+            foreach (var line in row.Lines)
+            {
+                line.Status = FieldWarehouseRequestLineStatus.Rejected;
+                line.UpdatedAt = row.UpdatedAt;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, $"WarehouseRequest{request.Status}", "FieldWarehouseRequest", row.Id, row.Status == FieldWarehouseRequestStatus.NeedsJustification, $"Anbar sorğusu yeniləndi: {row.CatalogItem?.Name}", ct);
+        await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, $"WarehouseRequest{request.Status}", "FieldWarehouseRequest", row.Id, row.Status == FieldWarehouseRequestStatus.NeedsJustification, $"Anbar sorğusu yeniləndi: {BuildWarehouseAuditMaterialSummary(row)}", ct);
         return Results.Ok((await LoadWarehouseRequestsAsync(db, [row.SiteId], ct)).First(x => x.Id == row.Id));
     }
 
@@ -930,6 +950,43 @@ public static class FieldPortalEndpoints
         FieldDailyReportStatus.Rejected => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat rədd edildi.",
         _ => $"{reportDate:yyyy-MM-dd} tarixli gündəlik hesabat review edildi.",
     };
+
+    internal static bool IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus current, FieldWarehouseRequestStatus next)
+    {
+        if (current is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Issued or FieldWarehouseRequestStatus.Closed or FieldWarehouseRequestStatus.Cancelled)
+        {
+            return false;
+        }
+
+        return next switch
+        {
+            FieldWarehouseRequestStatus.NeedsJustification => current is FieldWarehouseRequestStatus.Draft
+                or FieldWarehouseRequestStatus.Submitted
+                or FieldWarehouseRequestStatus.UnderReview
+                or FieldWarehouseRequestStatus.PendingApproval,
+            FieldWarehouseRequestStatus.Rejected => true,
+            FieldWarehouseRequestStatus.Approved => current is FieldWarehouseRequestStatus.Draft
+                or FieldWarehouseRequestStatus.Submitted
+                or FieldWarehouseRequestStatus.UnderReview
+                or FieldWarehouseRequestStatus.NeedsJustification
+                or FieldWarehouseRequestStatus.PendingApproval,
+            FieldWarehouseRequestStatus.Issued => current is FieldWarehouseRequestStatus.Approved
+                or FieldWarehouseRequestStatus.PartiallyApproved
+                or FieldWarehouseRequestStatus.ReadyForPickup,
+            _ => false,
+        };
+    }
+
+    private static string BuildWarehouseAuditMaterialSummary(FieldWarehouseRequest request)
+    {
+        var names = request.Lines
+            .Select(x => x.CatalogItem?.Name)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToArray();
+        if (names.Length == 0) return request.CatalogItem?.Name ?? "Məlumat mövcud deyil";
+        return names.Length == 1 ? names[0]! : $"{names[0]} +{names.Length - 1}";
+    }
 
     private static IReadOnlyList<FieldAssignmentDto> MapAssignments(IReadOnlyCollection<SupervisorSiteAssignment> assignments) =>
         assignments

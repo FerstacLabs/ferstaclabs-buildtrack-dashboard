@@ -527,6 +527,7 @@ export interface ManagementWarehouseLine {
   id: string
   catalogItemId: string
   itemName: string
+  code?: string
   category: string
   requestedQuantity: number
   approvedQuantity: number
@@ -985,8 +986,8 @@ export const buildTrackBackendApi = {
   reviewManagementFieldReport: (id: string, body: { status: FieldDailyReportStatus; reviewNote?: string }) =>
     request<FieldDailyReport>(`/api/management/field-reports/${id}/review`, { method: 'POST', body: JSON.stringify(body) }),
   getManagementWarehouseRequests: async (siteId?: string) => unwrapArray<FieldWarehouseRequest>(await request<unknown>(`/api/management/field-warehouse-requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
-  reviewManagementWarehouseRequest: (id: string, body: { status: FieldWarehouseRequestStatus; managerNote?: string; approvedQuantity?: number }) =>
-    request<FieldWarehouseRequest>(`/api/management/field-warehouse-requests/${id}/review`, { method: 'POST', body: JSON.stringify(body) }),
+  reviewManagementWarehouseRequest: (id: string, body: { status: FieldWarehouseRequestStatus; managerNote?: string; managerComment?: string; approvedQuantity?: number }) =>
+    request<FieldWarehouseRequest>(`/api/management/field-warehouse-requests/${id}/review`, { method: 'POST', body: JSON.stringify({ ...body, managerComment: body.managerComment ?? body.managerNote }) }),
   getSupervisorAuditEvents: async (siteId?: string) => unwrapArray<SupervisorAuditEventRow>(await request<unknown>(`/api/supervisor-audit/events${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   getAdminLicenses: async () => unwrapArray<AdminTenantLicenseRow>(await request<unknown>('/api/admin/licenses')),
   createAdminLicense: (body: { tenantId: string; plan: LicensePlan; expiresAt?: string; maxProjects?: number; maxUsers?: number; maxCameras?: number }) =>

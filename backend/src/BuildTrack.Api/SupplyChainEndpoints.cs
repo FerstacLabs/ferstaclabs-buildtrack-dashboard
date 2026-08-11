@@ -492,6 +492,7 @@ public static class SupplyChainEndpoints
                 line.Id,
                 line.CatalogItemId,
                 line.CatalogItem?.Name ?? string.Empty,
+                line.CatalogItem?.Code,
                 line.CatalogItem?.Category ?? string.Empty,
                 line.RequestedQuantity,
                 line.ApprovedQuantity,
