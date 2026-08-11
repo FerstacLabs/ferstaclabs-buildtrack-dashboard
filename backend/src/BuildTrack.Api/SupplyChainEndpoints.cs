@@ -25,6 +25,7 @@ public static class SupplyChainEndpoints
         app.MapGet("/api/procurement/tasks", GetProcurementTasksAsync);
         app.MapGet("/api/procurement/tasks/{id:guid}", GetProcurementTaskAsync);
         app.MapPost("/api/procurement/tasks/{id:guid}/verify", VerifyProcurementTaskAsync);
+        app.MapPost("/api/procurement/tasks/{id:guid}/return-correction", ReturnProcurementTaskForCorrectionAsync);
         app.MapPost("/api/procurement/goods-receipts", CreateGoodsReceiptAsync);
         app.MapGet("/api/procurement/suppliers", GetSuppliersAsync);
         app.MapPost("/api/procurement/suppliers", SaveSupplierAsync);
@@ -42,6 +43,7 @@ public static class SupplyChainEndpoints
         app.MapPost("/api/supply/tasks/{id:guid}/start", StartSupplyTaskAsync);
         app.MapPost("/api/supply/tasks/{taskId:guid}/lines/{lineId:guid}/purchase", UpdateSupplyTaskLinePurchaseAsync);
         app.MapPost("/api/supply/tasks/{id:guid}/attachments", UploadSupplyAttachmentAsync);
+        app.MapGet("/api/procurement/tasks/{taskId:guid}/attachments/{attachmentId:guid}", DownloadProcurementAttachmentAsync);
         app.MapPost("/api/supply/tasks/{id:guid}/submit", SubmitSupplyTaskAsync);
         app.MapGet("/api/supply/notifications", GetSupplyNotificationsAsync);
         app.MapGet("/api/supply/settings", GetSupplySettings);
@@ -97,15 +99,24 @@ public static class SupplyChainEndpoints
     {
         await fieldAccess.RequireSiteAccessAsync(request.SiteId, ct);
         if (request.Lines.Count == 0) return Results.BadRequest(new { error = "Ən azı bir material sətri lazımdır" });
-        var created = await supplyChain.CreateFieldRequestAsync(new CreateSupplyRequestInput(
-            RequireTenantId(tenantContext),
-            request.SiteId,
-            RequireUserId(tenantContext),
-            request.NeededBy,
-            request.Urgency,
-            request.GeneralNote,
-            request.Lines.Select(x => new SupplyRequestLineInput(x.CatalogItemId, x.RequestedQuantity, x.Reason, x.SpecificationJson)).ToArray()), ct);
-        return Results.Ok(ToFieldWarehouseRequestDto(created));
+        if (request.NeededBy is null) return Results.BadRequest(new { error = "Tələb olunan tarix seçilməlidir" });
+        if (request.NeededBy.Value < DateOnly.FromDateTime(DateTime.UtcNow)) return Results.BadRequest(new { error = "Tələb olunan tarix keçmişdə ola bilməz" });
+        try
+        {
+            var created = await supplyChain.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+                RequireTenantId(tenantContext),
+                request.SiteId,
+                RequireUserId(tenantContext),
+                request.NeededBy,
+                request.Urgency,
+                request.GeneralNote,
+                request.Lines.Select(x => new SupplyRequestLineInput(x.CatalogItemId, x.RequestedQuantity, x.Reason, x.SpecificationJson)).ToArray()), ct);
+            return Results.Ok(ToFieldWarehouseRequestDto(created));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> GetWarehouseStockAsync(BuildTrackDbContext db, ITenantContext tenantContext, IWarehouseAvailabilityService availability, CancellationToken ct)
@@ -240,6 +251,20 @@ public static class SupplyChainEndpoints
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
         var task = await supplyChain.VerifyTaskAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), request.VerificationNote, ct);
         return Results.Ok(ToTaskDto(task));
+    }
+
+    private static async Task<IResult> ReturnProcurementTaskForCorrectionAsync(Guid id, ReturnProcurementTaskForCorrectionRequest request, ITenantContext tenantContext, ISupplyChainService supplyChain, CancellationToken ct)
+    {
+        if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
+        try
+        {
+            var task = await supplyChain.ReturnTaskForCorrectionAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), request.Note, ct);
+            return Results.Ok(ToTaskDto(task));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> CreateGoodsReceiptAsync(CreateGoodsReceiptRequest request, ITenantContext tenantContext, IWarehouseAvailabilityService availability, ISupplyChainService supplyChain, CancellationToken ct)
@@ -426,18 +451,61 @@ public static class SupplyChainEndpoints
             ? parsed
             : ProcurementAttachmentType.Other;
         var lineId = Guid.TryParse(form["taskLineId"].FirstOrDefault(), out var parsedLineId) ? parsedLineId : (Guid?)null;
-        await using var stream = file.OpenReadStream();
-        var attachment = await storage.SaveAsync(tenantId, id, lineId, userId, type, stream, file.FileName, file.ContentType, file.Length, ct);
-        db.ProcurementAttachments.Add(attachment);
-        await db.SaveChangesAsync(ct);
-        return Results.Ok(new { attachment.Id, attachment.AttachmentType, attachment.OriginalFileName, attachment.Size, attachment.CreatedAt });
+        if (type == ProcurementAttachmentType.ProductPhoto && lineId is null)
+        {
+            return Results.BadRequest(new { error = "Məhsul şəkli material sətrinə bağlanmalıdır" });
+        }
+        if (lineId is Guid taskLineId && !await db.ProcurementTaskLines.AnyAsync(x => x.TenantId == tenantId && x.TaskId == id && x.Id == taskLineId, ct))
+        {
+            return Results.BadRequest(new { error = "Material sətri bu task-a aid deyil" });
+        }
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            var attachment = await storage.SaveAsync(tenantId, id, lineId, userId, type, stream, file.FileName, file.ContentType, file.Length, ct);
+            db.ProcurementAttachments.Add(attachment);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(ToAttachmentDto(attachment));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private static async Task<IResult> DownloadProcurementAttachmentAsync(Guid taskId, Guid attachmentId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
+    {
+        var tenantId = RequireTenantId(tenantContext);
+        var userId = RequireUserId(tenantContext);
+        var query = db.ProcurementAttachments.AsNoTracking()
+            .Include(x => x.Task)
+            .Where(x => x.TenantId == tenantId && x.TaskId == taskId && x.Id == attachmentId);
+        if (IsProcurementAgentRole(tenantContext.Role))
+        {
+            query = query.Where(x => x.Task != null && x.Task.AssignedProcurementUserId == userId);
+        }
+        else if (!IsManagementRole(tenantContext.Role))
+        {
+            return Results.Forbid();
+        }
+
+        var attachment = await query.FirstOrDefaultAsync(ct);
+        if (attachment is null || !System.IO.File.Exists(attachment.StoragePath)) return Results.NotFound();
+        return Results.File(attachment.StoragePath, attachment.MimeType, attachment.OriginalFileName);
     }
 
     private static async Task<IResult> SubmitSupplyTaskAsync(Guid id, ITenantContext tenantContext, ISupplyChainService supplyChain, CancellationToken ct)
     {
         if (!IsSupplyPortalRole(tenantContext.Role)) return Results.Forbid();
-        var task = await supplyChain.SubmitTaskForVerificationAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), ct);
-        return Results.Ok(ToTaskDto(task));
+        try
+        {
+            var task = await supplyChain.SubmitTaskForVerificationAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), ct);
+            return Results.Ok(ToTaskDto(task));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
     }
 
     private static async Task<IResult> GetSupplyNotificationsAsync(BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
@@ -457,7 +525,7 @@ public static class SupplyChainEndpoints
     private static IResult GetSupplySettings(ITenantContext tenantContext)
     {
         if (!IsSupplyPortalRole(tenantContext.Role)) return Results.Forbid();
-        return Results.Ok(new { evidenceRequired = true, requiredAttachments = new[] { "ProductPhoto", "Receipt" }, currency = "AZN" });
+        return Results.Ok(new { evidenceRequired = true, productPhotoPerPurchasedLineRequired = true, taskReceiptRequired = true, requiredAttachments = new[] { "ProductPhoto", "Receipt" }, currency = "AZN" });
     }
 
     private static async Task<IResult> GetTraceAsync(Guid fieldRequestId, BuildTrackDbContext db, ITenantContext tenantContext, IWarehouseAvailabilityService availability, CancellationToken ct)
@@ -491,6 +559,7 @@ public static class SupplyChainEndpoints
             .ThenInclude(x => x.CatalogItem)
             .Include(x => x.Lines)
             .ThenInclude(x => x.Supplier)
+            .Include(x => x.Attachments)
             .Where(x => x.TenantId == tenantId);
 
     private static FieldWarehouseRequestDto ToFieldWarehouseRequestDto(FieldWarehouseRequest request) =>
@@ -585,7 +654,20 @@ public static class SupplyChainEndpoints
             task.SubmittedAt,
             task.VerifiedAt,
             task.VerificationNote,
-            task.Lines.OrderBy(x => x.CatalogItem?.Name).Select(line => new ProcurementTaskLineDto(line.Id, line.ProcurementNeedId, line.CatalogItemId, line.CatalogItem?.Name ?? string.Empty, line.CatalogItem?.Category ?? string.Empty, line.RequestedQuantity, line.PurchasedQuantity, line.AcceptedQuantity, line.Unit, line.Status, line.Note, line.UnitPrice, line.SupplierId, line.Supplier?.Name)).ToArray());
+            task.Lines.OrderBy(x => x.CatalogItem?.Name).Select(line => new ProcurementTaskLineDto(line.Id, line.ProcurementNeedId, line.CatalogItemId, line.CatalogItem?.Name ?? string.Empty, line.CatalogItem?.Category ?? string.Empty, line.RequestedQuantity, line.PurchasedQuantity, line.AcceptedQuantity, line.Unit, line.Status, line.Note, line.UnitPrice, line.SupplierId, line.Supplier?.Name)).ToArray(),
+            task.Attachments.OrderByDescending(x => x.CreatedAt).Select(ToAttachmentDto).ToArray());
+
+    private static ProcurementAttachmentDto ToAttachmentDto(ProcurementAttachment attachment) =>
+        new(
+            attachment.Id,
+            attachment.TaskId,
+            attachment.TaskLineId,
+            attachment.AttachmentType,
+            attachment.OriginalFileName,
+            attachment.MimeType,
+            attachment.Size,
+            attachment.CreatedAt,
+            $"/api/procurement/tasks/{attachment.TaskId}/attachments/{attachment.Id}");
 
     private static string ResolveStockStatus(decimal available, decimal minimum)
     {

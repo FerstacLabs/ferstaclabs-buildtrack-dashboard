@@ -1,10 +1,11 @@
 import { CheckCircleOutlined, PlusOutlined, ReloadOutlined, ShoppingCartOutlined } from '@ant-design/icons'
-import { Button, Card, Form, Input, Modal, Select, Space, Table, Tabs, Tag, message } from 'antd'
+import { Button, Card, Descriptions, Drawer, Form, Image, Input, Modal, Select, Space, Table, Tabs, Tag, message } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import {
   ProcurementNeedStatusTag,
+  ProcurementTaskLineStatusTag,
   ProcurementTaskStatusTag,
   WarehouseLineStatusTag,
   WarehouseRequestStatusTag,
@@ -37,11 +38,14 @@ export const ProcurementPage = () => {
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [handoverRequest, setHandoverRequest] = useState<ManagementWarehouseRequest | null>(null)
+  const [detailTask, setDetailTask] = useState<ProcurementTask | null>(null)
+  const [returnModalOpen, setReturnModalOpen] = useState(false)
   const [tableRevision, setTableRevision] = useState(0)
   const [selectedNeedIds, setSelectedNeedIds] = useState<string[]>([])
   const [agentForm] = Form.useForm()
   const [taskForm] = Form.useForm()
   const [handoverForm] = Form.useForm<{ recipientName?: string; handoverNote?: string }>()
+  const [returnForm] = Form.useForm<{ note?: string }>()
 
   const load = async () => {
     setLoading(true)
@@ -130,7 +134,8 @@ export const ProcurementPage = () => {
   }
 
   const verifyTask = async (id: string) => {
-    await buildTrackBackendApi.verifyProcurementTask(id, 'Sübutlar yoxlandı və təsdiqləndi.')
+    const updated = await buildTrackBackendApi.verifyProcurementTask(id, 'Sübutlar yoxlandı və təsdiqləndi.')
+    setDetailTask(updated)
     void message.success('Tapşırıq təsdiqləndi')
     await load()
   }
@@ -138,6 +143,22 @@ export const ProcurementPage = () => {
   const receiveTask = async (taskId: string) => {
     await buildTrackBackendApi.createGoodsReceipt({ taskId, note: 'Management paneldən anbara qəbul edildi' })
     void message.success('Mal anbara qəbul edildi')
+    setDetailTask(null)
+    await load()
+  }
+
+  const openTaskDetails = async (taskId: string) => {
+    const task = await buildTrackBackendApi.getProcurementTask(taskId)
+    setDetailTask(task)
+  }
+
+  const returnForCorrection = async (values: { note?: string }) => {
+    if (!detailTask) return
+    const updated = await buildTrackBackendApi.returnProcurementTaskForCorrection(detailTask.id, values.note || 'Sübutlar üzrə düzəliş tələb olunur.')
+    setDetailTask(updated)
+    setReturnModalOpen(false)
+    returnForm.resetFields()
+    void message.success('Task düzəliş üçün geri qaytarıldı')
     await load()
   }
 
@@ -240,8 +261,9 @@ export const ProcurementPage = () => {
                   { title: 'Tapşırıq', dataIndex: 'code' },
                   { title: 'Agent', dataIndex: 'assignedProcurementUserName', render: (value) => value || '-' },
                   { title: 'Status', render: (_, row) => <ProcurementTaskStatusTag status={row.status} /> },
+                  { title: 'Tələb olunan tarix', dataIndex: 'requiredBy', render: (value) => value ? new Date(`${value}T00:00:00`).toLocaleDateString('az-AZ') : '—' },
                   { title: 'Sətir', render: (_, row) => row.lines.length },
-                  { title: 'Əməliyyat', render: (_, row) => <Space><Button onClick={() => verifyTask(row.id)} disabled={row.status !== 'SubmittedForVerification'}>Təsdiqlə</Button><Button onClick={() => receiveTask(row.id)} disabled={row.status !== 'Verified'}>Anbara qəbul</Button></Space> },
+                  { title: 'Əməliyyat', render: (_, row) => <Space><Button onClick={() => openTaskDetails(row.id)}>Bax</Button><Button onClick={() => verifyTask(row.id)} disabled={row.status !== 'SubmittedForVerification'}>Təsdiqlə</Button><Button onClick={() => receiveTask(row.id)} disabled={row.status !== 'Verified'}>Anbara qəbul et</Button></Space> },
                 ]} />
               </Card>
             ),
@@ -305,6 +327,87 @@ export const ProcurementPage = () => {
             <Input.TextArea rows={3} />
           </Form.Item>
           <Button type="primary" htmlType="submit">Tapşırıq yarat</Button>
+        </Form>
+      </Modal>
+
+      <Drawer
+        title={detailTask ? `Satınalma taskı: ${detailTask.code}` : 'Satınalma taskı'}
+        open={Boolean(detailTask)}
+        width={920}
+        onClose={() => setDetailTask(null)}
+      >
+        {detailTask && (
+          <Space direction="vertical" size="middle" className="full-width">
+            <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
+              <Descriptions.Item label="Status"><ProcurementTaskStatusTag status={detailTask.status} /></Descriptions.Item>
+              <Descriptions.Item label="Prioritet">{priorityLabel(detailTask.priority)}</Descriptions.Item>
+              <Descriptions.Item label="Tələb olunan tarix">{detailTask.requiredBy ? new Date(`${detailTask.requiredBy}T00:00:00`).toLocaleDateString('az-AZ') : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Təchizatçı">{detailTask.assignedProcurementUserName || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Başlayıb">{detailTask.startedAt ? new Date(detailTask.startedAt).toLocaleString('az-AZ') : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Yoxlamaya göndərilib">{detailTask.submittedAt ? new Date(detailTask.submittedAt).toLocaleString('az-AZ') : '—'}</Descriptions.Item>
+              <Descriptions.Item label="Rəhbər tapşırığı" span={2}>{detailTask.managerInstruction || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Yoxlama qeydi" span={2}>{detailTask.verificationNote || '—'}</Descriptions.Item>
+            </Descriptions>
+
+            <Card className="soft-card" size="small">
+              <Table
+                rowKey="id"
+                pagination={false}
+                dataSource={detailTask.lines}
+                expandable={{
+                  expandedRowRender: (line) => {
+                    const photos = (detailTask.attachments ?? []).filter((item) => item.taskLineId === line.id && item.attachmentType === 'ProductPhoto')
+                    return photos.length ? (
+                      <Image.PreviewGroup>
+                        <Space wrap>
+                          {photos.map((photo) => <Image key={photo.id} src={buildTrackBackendApi.supplyAttachmentUrl(photo.downloadUrl)} width={96} height={72} style={{ objectFit: 'cover', borderRadius: 6 }} />)}
+                        </Space>
+                      </Image.PreviewGroup>
+                    ) : <span className="muted-text">Məhsul şəkli yoxdur</span>
+                  },
+                }}
+                columns={[
+                  { title: 'Material', dataIndex: 'itemName' },
+                  { title: 'İstənilən', render: (_, line) => `${formatNumber(line.requestedQuantity)} ${line.unit}` },
+                  { title: 'Alınıb', render: (_, line) => `${formatNumber(line.purchasedQuantity)} ${line.unit}` },
+                  { title: 'Vahid qiymət', render: (_, line) => line.unitPrice ? formatNumber(line.unitPrice) : '—' },
+                  { title: 'Toplam', render: (_, line) => line.unitPrice ? `${formatNumber(line.unitPrice * line.purchasedQuantity)} AZN` : '—' },
+                  { title: 'Tədarükçü', dataIndex: 'supplierName', render: (value) => value || '—' },
+                  { title: 'Status', render: (_, line) => <ProcurementTaskLineStatusTag status={line.status} /> },
+                ]}
+              />
+            </Card>
+
+            <Card className="soft-card" size="small">
+              <div className="card-heading">
+                <h2>Qəbz / faktura</h2>
+                <Tag color={(detailTask.attachments ?? []).some((item) => item.attachmentType === 'Receipt' || item.attachmentType === 'Invoice') ? 'green' : 'orange'}>Task səviyyəsi</Tag>
+              </div>
+              <Space wrap>
+                {(detailTask.attachments ?? []).filter((item) => item.attachmentType === 'Receipt' || item.attachmentType === 'Invoice').map((item) => (
+                  <Button key={item.id} href={buildTrackBackendApi.supplyAttachmentUrl(item.downloadUrl)} target="_blank">
+                    {item.originalFileName}
+                  </Button>
+                ))}
+                {!(detailTask.attachments ?? []).some((item) => item.attachmentType === 'Receipt' || item.attachmentType === 'Invoice') && <span className="muted-text">Qəbz/faktura yüklənməyib</span>}
+              </Space>
+            </Card>
+
+            <Space wrap>
+              <Button type="primary" onClick={() => verifyTask(detailTask.id)} disabled={detailTask.status !== 'SubmittedForVerification'}>Təsdiqlə</Button>
+              <Button danger onClick={() => setReturnModalOpen(true)} disabled={detailTask.status !== 'SubmittedForVerification'}>Geri qaytar</Button>
+              <Button onClick={() => receiveTask(detailTask.id)} disabled={detailTask.status !== 'Verified'}>Anbara qəbul et</Button>
+            </Space>
+          </Space>
+        )}
+      </Drawer>
+
+      <Modal title="Düzəliş üçün geri qaytar" open={returnModalOpen} onCancel={() => setReturnModalOpen(false)} footer={null} destroyOnHidden>
+        <Form form={returnForm} layout="vertical" onFinish={returnForCorrection}>
+          <Form.Item name="note" label="Qeyd" rules={[{ required: true, message: 'Düzəliş səbəbini yazın' }]}>
+            <Input.TextArea rows={3} placeholder="Məsələn: 2-ci material üçün məhsul şəkli daha aydın yüklənməlidir." />
+          </Form.Item>
+          <Button type="primary" htmlType="submit">Geri qaytar</Button>
         </Form>
       </Modal>
 

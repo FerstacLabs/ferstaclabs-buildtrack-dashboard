@@ -1,5 +1,7 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
+import { Alert, Button, Card, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
+import type { Dayjs } from 'dayjs'
+import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import {
   buildTrackBackendApi,
@@ -18,6 +20,7 @@ interface CartLineForm {
 
 interface CartRequestForm {
   urgency: 'Normal' | 'Urgent' | 'Critical'
+  neededBy?: Dayjs
   generalNote?: string
   lines: CartLineForm[]
 }
@@ -75,7 +78,7 @@ export const FieldWarehouseRequestsPage = () => {
   })), [catalog])
 
   const openCart = () => {
-    form.setFieldsValue({ urgency: 'Normal', lines: [defaultLine()] })
+    form.setFieldsValue({ urgency: 'Normal', neededBy: dayjs(), lines: [defaultLine()] })
     setDrawerOpen(true)
   }
 
@@ -96,6 +99,7 @@ export const FieldWarehouseRequestsPage = () => {
 
     await buildTrackBackendApi.createFieldWarehouseCartRequest({
       siteId: selectedSiteId,
+      neededBy: values.neededBy?.format('YYYY-MM-DD'),
       urgency: values.urgency,
       generalNote: values.generalNote,
       lines,
@@ -199,7 +203,18 @@ export const FieldWarehouseRequestsPage = () => {
         <Typography.Paragraph type="secondary">
           Bir sorğuda bir neçə material əlavə edin. Anbar qalığı gizli qalır; sistem yalnız nəticə statusunu göstərəcək.
         </Typography.Paragraph>
-        <Form layout="vertical" form={form} onFinish={createCartRequest} initialValues={{ urgency: 'Normal', lines: [defaultLine()] }}>
+        <Form layout="vertical" form={form} onFinish={createCartRequest} initialValues={{ urgency: 'Normal', neededBy: dayjs(), lines: [defaultLine()] }}>
+          <Form.Item
+            name="neededBy"
+            label="Tələb olunan tarix"
+            rules={[{ required: true, message: 'Tələb olunan tarixi seçin' }]}
+          >
+            <DatePicker
+              className="full-width"
+              format="DD.MM.YYYY"
+              disabledDate={(current) => Boolean(current && current.startOf('day').isBefore(dayjs().startOf('day')))}
+            />
+          </Form.Item>
           <Form.Item name="urgency" label="Təcillik" initialValue="Normal">
             <Select
               key={`urgency:${selectedUrgency}`}

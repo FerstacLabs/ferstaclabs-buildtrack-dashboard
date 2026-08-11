@@ -640,7 +640,19 @@ public sealed record ProcurementTaskDto(
     DateTimeOffset? SubmittedAt,
     DateTimeOffset? VerifiedAt,
     string? VerificationNote,
-    IReadOnlyList<ProcurementTaskLineDto> Lines);
+    IReadOnlyList<ProcurementTaskLineDto> Lines,
+    IReadOnlyList<ProcurementAttachmentDto> Attachments);
+
+public sealed record ProcurementAttachmentDto(
+    Guid Id,
+    Guid TaskId,
+    Guid? TaskLineId,
+    ProcurementAttachmentType AttachmentType,
+    string OriginalFileName,
+    string MimeType,
+    long Size,
+    DateTimeOffset CreatedAt,
+    string DownloadUrl);
 
 public sealed record SupplierDto(
     Guid Id,
@@ -674,6 +686,8 @@ public sealed record UpdateProcurementTaskLinePurchaseRequest(decimal PurchasedQ
 public sealed record SubmitProcurementTaskRequest(string? Note);
 
 public sealed record VerifyProcurementTaskRequest(string? VerificationNote);
+
+public sealed record ReturnProcurementTaskForCorrectionRequest(string? Note);
 
 public sealed record CreateGoodsReceiptRequest(Guid TaskId, Guid? WarehouseId, string? Note);
 

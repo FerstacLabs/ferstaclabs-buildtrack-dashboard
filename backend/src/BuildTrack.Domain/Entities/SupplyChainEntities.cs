@@ -288,6 +288,7 @@ public sealed class ProcurementTask
     public Guid? VerifiedByUserId { get; set; }
     public string? VerificationNote { get; set; }
     public ICollection<ProcurementTaskLine> Lines { get; set; } = new List<ProcurementTaskLine>();
+    public ICollection<ProcurementAttachment> Attachments { get; set; } = new List<ProcurementAttachment>();
 }
 
 public sealed class ProcurementTaskLine

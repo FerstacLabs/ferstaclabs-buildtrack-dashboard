@@ -617,6 +617,18 @@ export interface ProcurementTaskLine {
   supplierName?: string
 }
 
+export interface ProcurementAttachment {
+  id: string
+  taskId: string
+  taskLineId?: string
+  attachmentType: 'ProductPhoto' | 'Receipt' | 'Invoice' | 'DeliveryNote' | 'Other'
+  originalFileName: string
+  mimeType: string
+  size: number
+  createdAt: string
+  downloadUrl: string
+}
+
 export interface ProcurementTask {
   id: string
   code: string
@@ -633,6 +645,7 @@ export interface ProcurementTask {
   verifiedAt?: string
   verificationNote?: string
   lines: ProcurementTaskLine[]
+  attachments: ProcurementAttachment[]
 }
 
 export interface SupplierRow {
@@ -927,7 +940,7 @@ export const buildTrackBackendApi = {
     return unwrapArray<FieldWarehouseCatalogItem>(await request<unknown>(`/api/catalog/items/search${query.toString() ? `?${query}` : ''}`))
   },
   getFieldWarehouseRequests: async (siteId?: string) => unwrapArray<FieldWarehouseRequest>(await request<unknown>(`/api/field/warehouse/requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
-  createFieldWarehouseRequest: (body: { siteId: string; catalogItemId: string; requestedQuantity: number; reason: string; justification?: string; urgency: 'Normal' | 'Urgent' | 'Critical' }) =>
+  createFieldWarehouseRequest: (body: { siteId: string; catalogItemId: string; requestedQuantity: number; neededBy?: string; reason: string; justification?: string; urgency: 'Normal' | 'Urgent' | 'Critical' }) =>
     request<FieldWarehouseRequest>('/api/field/warehouse/requests', { method: 'POST', body: JSON.stringify(body) }),
   createFieldWarehouseCartRequest: (body: { siteId: string; neededBy?: string; urgency: 'Normal' | 'Urgent' | 'Critical'; generalNote?: string; lines: { catalogItemId: string; requestedQuantity: number; reason?: string; specificationJson?: string }[] }) =>
     request<FieldWarehouseRequest>('/api/field/warehouse/cart-requests', { method: 'POST', body: JSON.stringify(body) }),
@@ -946,6 +959,8 @@ export const buildTrackBackendApi = {
     request<ProcurementTask>('/api/procurement/tasks', { method: 'POST', body: JSON.stringify(body) }),
   verifyProcurementTask: (id: string, verificationNote?: string) =>
     request<ProcurementTask>(`/api/procurement/tasks/${id}/verify`, { method: 'POST', body: JSON.stringify({ verificationNote }) }),
+  returnProcurementTaskForCorrection: (id: string, note?: string) =>
+    request<ProcurementTask>(`/api/procurement/tasks/${id}/return-correction`, { method: 'POST', body: JSON.stringify({ note }) }),
   createGoodsReceipt: (body: { taskId: string; warehouseId?: string; note?: string }) =>
     request(`/api/procurement/goods-receipts`, { method: 'POST', body: JSON.stringify(body) }),
   getSuppliers: async () => unwrapArray<SupplierRow>(await request<unknown>('/api/procurement/suppliers')),
@@ -966,7 +981,8 @@ export const buildTrackBackendApi = {
   startSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}/start`, { method: 'POST' }),
   updateSupplyTaskLinePurchase: (taskId: string, lineId: string, body: { purchasedQuantity: number; unitPrice?: number; supplierId?: string; note?: string }) =>
     request(`/api/supply/tasks/${taskId}/lines/${lineId}/purchase`, { method: 'POST', body: JSON.stringify(body) }),
-  uploadSupplyTaskAttachment: (taskId: string, formData: FormData) => uploadRequest(`/api/supply/tasks/${taskId}/attachments`, formData),
+  uploadSupplyTaskAttachment: (taskId: string, formData: FormData) => uploadRequest<ProcurementAttachment>(`/api/supply/tasks/${taskId}/attachments`, formData),
+  supplyAttachmentUrl: (downloadUrl?: string) => withApiBase(downloadUrl),
   submitSupplyTask: (id: string) => request<ProcurementTask>(`/api/supply/tasks/${id}/submit`, { method: 'POST' }),
   getSupplyNotifications: async () => unwrapArray<SupplyNotification>(await request<unknown>('/api/supply/notifications')),
   getSupplySettings: () => request('/api/supply/settings'),

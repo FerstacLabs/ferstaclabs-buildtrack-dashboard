@@ -697,7 +697,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => x.TaskId);
             entity.HasIndex(x => x.TaskLineId);
-            entity.HasOne(x => x.Task).WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Task).WithMany(x => x.Attachments).HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.TaskLine).WithMany().HasForeignKey(x => x.TaskLineId).OnDelete(DeleteBehavior.Cascade);
         });
 

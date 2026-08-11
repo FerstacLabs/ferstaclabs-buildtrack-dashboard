@@ -53,6 +53,7 @@ public interface ISupplyChainService
     Task<ProcurementTaskLine> UpdateTaskLinePurchaseAsync(Guid tenantId, Guid procurementUserId, SupplyTaskLinePurchaseInput input, CancellationToken ct);
     Task<ProcurementTask> SubmitTaskForVerificationAsync(Guid tenantId, Guid taskId, Guid procurementUserId, CancellationToken ct);
     Task<ProcurementTask> VerifyTaskAsync(Guid tenantId, Guid taskId, Guid verifierUserId, string? verificationNote, CancellationToken ct);
+    Task<ProcurementTask> ReturnTaskForCorrectionAsync(Guid tenantId, Guid taskId, Guid managerUserId, string? note, CancellationToken ct);
     Task<WarehouseGoodsReceipt> ReceiveGoodsAsync(Guid tenantId, Guid taskId, Guid warehouseId, Guid receivedByUserId, string? note, CancellationToken ct);
     Task<WarehouseIssue> IssueFieldRequestAsync(Guid tenantId, Guid fieldRequestId, Guid warehouseId, Guid issuedByUserId, string? recipientName, string? handoverNote, CancellationToken ct);
 }
@@ -144,11 +145,17 @@ public sealed class WarehouseUsagePolicyService(BuildTrackDbContext db) : IWareh
 public sealed class SupplyAttachmentStorage(IConfiguration configuration) : ISupplyAttachmentStorage
 {
     private readonly string rootPath = configuration["SUPPLY_ATTACHMENT_STORAGE_PATH"] ?? "/app/data/supply-attachments";
+    private const long MaxAttachmentBytes = 10 * 1024 * 1024;
 
     public async Task<ProcurementAttachment> SaveAsync(Guid tenantId, Guid taskId, Guid? taskLineId, Guid uploadedByUserId, ProcurementAttachmentType type, Stream content, string fileName, string? contentType, long size, CancellationToken ct)
     {
         if (size <= 0) throw new InvalidOperationException("Fayl boşdur");
-        if (size > 15 * 1024 * 1024) throw new InvalidOperationException("Fayl limiti 15 MB-dır");
+        if (size > MaxAttachmentBytes) throw new InvalidOperationException("Fayl limiti 10 MB-dır");
+
+        var normalizedContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType.Trim().ToLowerInvariant();
+        var header = await ReadHeaderAsync(content, ct);
+        ValidateAttachment(type, normalizedContentType, header);
+        if (content.CanSeek) content.Position = 0;
 
         var tenantFolder = Path.Combine(rootPath, tenantId.ToString("N"), taskId.ToString("N"));
         Directory.CreateDirectory(tenantFolder);
@@ -169,10 +176,43 @@ public sealed class SupplyAttachmentStorage(IConfiguration configuration) : ISup
             AttachmentType = type,
             StoragePath = storagePath,
             OriginalFileName = Path.GetFileName(fileName),
-            MimeType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
+            MimeType = normalizedContentType,
             Size = size,
         };
     }
+
+    private static async Task<byte[]> ReadHeaderAsync(Stream content, CancellationToken ct)
+    {
+        var header = new byte[16];
+        var read = await content.ReadAsync(header.AsMemory(0, header.Length), ct);
+        return header[..read];
+    }
+
+    private static void ValidateAttachment(ProcurementAttachmentType type, string contentType, byte[] header)
+    {
+        var isImage = IsJpeg(header) || IsPng(header) || IsWebp(header);
+        var isPdf = IsPdf(header);
+
+        if (type == ProcurementAttachmentType.ProductPhoto)
+        {
+            if (!isImage || !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Məhsul şəkli üçün yalnız JPG, PNG və ya WEBP faylı yükləyin");
+            }
+            return;
+        }
+
+        if (type is ProcurementAttachmentType.Receipt or ProcurementAttachmentType.Invoice)
+        {
+            if (isImage || isPdf) return;
+            throw new InvalidOperationException("Qəbz/faktura üçün JPG, PNG, WEBP və ya PDF faylı yükləyin");
+        }
+    }
+
+    private static bool IsJpeg(byte[] header) => header.Length >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF;
+    private static bool IsPng(byte[] header) => header.Length >= 8 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47;
+    private static bool IsPdf(byte[] header) => header.Length >= 4 && header[0] == 0x25 && header[1] == 0x50 && header[2] == 0x44 && header[3] == 0x46;
+    private static bool IsWebp(byte[] header) => header.Length >= 12 && header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 && header[8] == 0x57 && header[9] == 0x45 && header[10] == 0x42 && header[11] == 0x50;
 }
 
 public sealed class SupplyChainService(
@@ -184,7 +224,6 @@ public sealed class SupplyChainService(
     {
         if (input.Lines.Count == 0) throw new InvalidOperationException("Ən azı bir material sətri lazımdır");
         if (input.Lines.Any(x => x.Quantity <= 0)) throw new InvalidOperationException("Miqdar sıfırdan böyük olmalıdır");
-
         var itemIds = input.Lines.Select(x => x.CatalogItemId).Distinct().ToArray();
         var items = await db.FieldWarehouseCatalogItems
             .Where(x => x.TenantId == input.TenantId && x.IsActive && itemIds.Contains(x.Id))
@@ -418,6 +457,11 @@ public sealed class SupplyChainService(
             ?? throw new InvalidOperationException("Task sətri tapılmadı");
         if (line.Task?.AssignedProcurementUserId != procurementUserId) throw new UnauthorizedAccessException("Bu task sizə təyin edilməyib");
         if (input.PurchasedQuantity < 0) throw new InvalidOperationException("Alınan miqdar mənfi ola bilməz");
+        if (input.PurchasedQuantity > line.RequestedQuantity) throw new InvalidOperationException("Alınan miqdar tələb olunan miqdarı keçə bilməz");
+        if (line.Task.Status is ProcurementTaskStatus.SubmittedForVerification or ProcurementTaskStatus.Verified or ProcurementTaskStatus.Completed or ProcurementTaskStatus.Cancelled)
+        {
+            throw new InvalidOperationException("Bu statusda alış sətri dəyişdirilə bilməz");
+        }
         line.PurchasedQuantity = input.PurchasedQuantity;
         line.UnitPrice = input.UnitPrice;
         line.SupplierId = input.SupplierId;
@@ -437,9 +481,32 @@ public sealed class SupplyChainService(
     public async Task<ProcurementTask> SubmitTaskForVerificationAsync(Guid tenantId, Guid taskId, Guid procurementUserId, CancellationToken ct)
     {
         var task = await RequireTaskForAgentAsync(tenantId, taskId, procurementUserId, ct);
-        var hasReceipt = await db.ProcurementAttachments.AnyAsync(x => x.TenantId == tenantId && x.TaskId == taskId && x.AttachmentType == ProcurementAttachmentType.Receipt, ct);
-        var hasProductPhoto = await db.ProcurementAttachments.AnyAsync(x => x.TenantId == tenantId && x.TaskId == taskId && x.AttachmentType == ProcurementAttachmentType.ProductPhoto, ct);
-        if (!hasReceipt || !hasProductPhoto) throw new InvalidOperationException("Təhvil üçün çek və məhsul şəkli yüklənməlidir");
+        if (task.Status == ProcurementTaskStatus.SubmittedForVerification) return await LoadTaskAsync(tenantId, task.Id, ct);
+        if (task.Status is ProcurementTaskStatus.Verified or ProcurementTaskStatus.Completed or ProcurementTaskStatus.Cancelled)
+        {
+            throw new InvalidOperationException("Bu statusda task yoxlamaya göndərilə bilməz");
+        }
+
+        var attachments = await db.ProcurementAttachments.AsNoTracking().Where(x => x.TenantId == tenantId && x.TaskId == taskId).ToListAsync(ct);
+        var hasReceipt = attachments.Any(x => x.AttachmentType is ProcurementAttachmentType.Receipt or ProcurementAttachmentType.Invoice);
+        if (!hasReceipt) throw new InvalidOperationException("Yoxlamaya göndərmək üçün ən azı bir qəbz və ya faktura yükləyin");
+
+        foreach (var line in task.Lines)
+        {
+            if (line.PurchasedQuantity <= 0)
+            {
+                throw new InvalidOperationException($"{line.CatalogItem?.Name ?? "Material"} üzrə alış miqdarı daxil edilməyib");
+            }
+            if (line.PurchasedQuantity < line.RequestedQuantity)
+            {
+                throw new InvalidOperationException($"{line.CatalogItem?.Name ?? "Material"} üzrə alış tam deyil: {line.PurchasedQuantity:0.###}/{line.RequestedQuantity:0.###} {line.Unit}");
+            }
+            if (!attachments.Any(x => x.TaskLineId == line.Id && x.AttachmentType == ProcurementAttachmentType.ProductPhoto))
+            {
+                throw new InvalidOperationException($"{line.CatalogItem?.Name ?? "Material"} üçün məhsul şəkli yükləyin");
+            }
+        }
+
         task.Status = ProcurementTaskStatus.SubmittedForVerification;
         task.SubmittedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -464,6 +531,26 @@ public sealed class SupplyChainService(
                 need.Status = line.PurchasedQuantity >= need.ShortfallQuantity ? ProcurementNeedStatus.Purchased : ProcurementNeedStatus.PartiallyPurchased;
                 need.UpdatedAt = DateTimeOffset.UtcNow;
             }
+        }
+        await db.SaveChangesAsync(ct);
+        return await LoadTaskAsync(tenantId, task.Id, ct);
+    }
+
+    public async Task<ProcurementTask> ReturnTaskForCorrectionAsync(Guid tenantId, Guid taskId, Guid managerUserId, string? note, CancellationToken ct)
+    {
+        var task = await db.ProcurementTasks.Include(x => x.Lines).FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == taskId, ct)
+            ?? throw new InvalidOperationException("Task tapılmadı");
+        if (task.Status != ProcurementTaskStatus.SubmittedForVerification)
+        {
+            throw new InvalidOperationException("Yalnız yoxlamada olan task geri qaytarıla bilər");
+        }
+
+        task.Status = ProcurementTaskStatus.RejectedForCorrection;
+        task.VerifiedByUserId = managerUserId;
+        task.VerificationNote = Clean(note);
+        foreach (var line in task.Lines.Where(x => x.PurchasedQuantity < x.RequestedQuantity))
+        {
+            line.Status = line.PurchasedQuantity > 0 ? ProcurementTaskLineStatus.PartiallyPurchased : ProcurementTaskLineStatus.Searching;
         }
         await db.SaveChangesAsync(ct);
         return await LoadTaskAsync(tenantId, task.Id, ct);
@@ -685,11 +772,15 @@ public sealed class SupplyChainService(
             .Include(x => x.AssignedProcurementUser)
             .Include(x => x.Lines)
             .ThenInclude(x => x.CatalogItem)
+            .Include(x => x.Lines)
+            .ThenInclude(x => x.Supplier)
+            .Include(x => x.Attachments)
             .FirstAsync(x => x.TenantId == tenantId && x.Id == taskId, ct);
 
     private async Task<ProcurementTask> RequireTaskForAgentAsync(Guid tenantId, Guid taskId, Guid procurementUserId, CancellationToken ct) =>
         await db.ProcurementTasks
             .Include(x => x.Lines)
+            .ThenInclude(x => x.CatalogItem)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == taskId && x.AssignedProcurementUserId == procurementUserId, ct)
         ?? throw new UnauthorizedAccessException("Bu satınalma task-ı sizə təyin edilməyib");
 
