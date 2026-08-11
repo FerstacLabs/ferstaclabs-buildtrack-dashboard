@@ -123,6 +123,9 @@ export const ProjectEstimatePage = () => {
   const [catalogItems, setCatalogItems] = useState<FieldWarehouseCatalogItem[]>([])
   const [warehouseStock, setWarehouseStock] = useState<WarehouseStockItem[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [estimateTableRevision, setEstimateTableRevision] = useState(0)
+  const [estimateTablePage, setEstimateTablePage] = useState(1)
+  const [stageTablePage, setStageTablePage] = useState(1)
 
   const stageOptions = scopedStages.map((stage) => ({ value: stage.id, label: stage.name }))
   const crewOptions = scopedCrews.map((crew) => ({ value: crew.id, label: crew.name }))
@@ -164,6 +167,15 @@ export const ProjectEstimatePage = () => {
       currency: summary.currency,
     }
   }, [scopedWorkItems, selectedObjectId, summary.currency, summary.hiddenCostAmount])
+
+  const refreshEstimateTables = useCallback(() => {
+    setEstimateTableRevision((revision) => revision + 1)
+  }, [])
+
+  useEffect(() => {
+    setEstimateTablePage(1)
+    setStageTablePage(1)
+  }, [selectedObjectId])
 
   useEffect(() => {
     let cancelled = false
@@ -339,6 +351,8 @@ export const ProjectEstimatePage = () => {
       .forEach((material) => deleteMaterial(material.id))
 
     setItemDrawerOpen(false)
+    setEditingItem(undefined)
+    refreshEstimateTables()
     void message.success(materialRows.length ? 'Smeta sətri və bağlı materiallar yadda saxlandı' : 'Smeta sətri yadda saxlandı')
   }
 
@@ -396,6 +410,7 @@ export const ProjectEstimatePage = () => {
     })
     setStageModalOpen(false)
     stageForm.resetFields()
+    refreshEstimateTables()
     void message.success('Yeni etap əlavə edildi')
   }
 
@@ -575,6 +590,7 @@ export const ProjectEstimatePage = () => {
       setPreviewRows(result.previewRows)
       setImportSummary(nextSummary)
       setPreviewOpen(true)
+      refreshEstimateTables()
       void message.success(t('estimate.importSuccess'))
     } catch (error) {
       console.error('Smeta import failed', error)
@@ -616,8 +632,8 @@ export const ProjectEstimatePage = () => {
     { title: 'Plan saat', dataIndex: 'plannedHours', width: 120, align: 'right', render: (value) => formatHours(Number(value), 0) },
     { title: 'Faktiki saat', dataIndex: 'actualHours', width: 120, align: 'right', render: (value) => formatHours(Number(value), 0) },
     { title: 'Briqada', dataIndex: 'assignedCrewId', width: 170, render: (value) => crewNameById.get(String(value)) ?? 'Təyin edilməyib' },
-    { title: 'Status', dataIndex: 'status', width: 130, render: (value: ProjectWorkStatus) => <Tag color={statusColor[value]}>{statusText(value)}</Tag> },
-    { title: 'Gedişat %', dataIndex: 'progressPercent', width: 160, render: (value, row) => <Slider min={0} max={100} value={Number(value)} onChange={(progressPercent) => updateWorkItem(row.id, { progressPercent })} /> },
+    { title: 'Status', dataIndex: 'status', width: 130, render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
+    { title: 'Gedişat %', dataIndex: 'progressPercent', width: 160, render: (value, row) => <Slider min={0} max={100} value={Number(value)} onChange={(progressPercent) => updateWorkItem(row.id, { progressPercent })} onChangeComplete={refreshEstimateTables} /> },
     {
       title: 'Əməliyyat',
       fixed: 'right',
@@ -628,7 +644,7 @@ export const ProjectEstimatePage = () => {
           <Button
             danger
             icon={<DeleteOutlined />}
-            onClick={() => Modal.confirm({ title: 'Sətri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteWorkItem(row.id) })}
+            onClick={() => Modal.confirm({ title: 'Sətri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => { deleteWorkItem(row.id); refreshEstimateTables() } })}
           />
         </Space>
       ),
@@ -663,7 +679,14 @@ export const ProjectEstimatePage = () => {
             <Button size="small" onClick={() => void message.success('Yeni smeta versiyası üçün hazır struktur yaradılıb')}>Yeni versiya yarat</Button>
           </Space>
         </div>
-        <Table rowKey="id" columns={columns} dataSource={scopedWorkItems} pagination={{ pageSize: 8 }} scroll={{ x: 1640 }} />
+        <Table
+          key={`estimate:${selectedObjectId}:${estimateTableRevision}`}
+          rowKey="id"
+          columns={columns}
+          dataSource={scopedWorkItems}
+          pagination={{ pageSize: 8, current: estimateTablePage, onChange: setEstimateTablePage }}
+          scroll={{ x: 1640 }}
+        />
       </section>
 
       <section className="table-card">
@@ -671,16 +694,17 @@ export const ProjectEstimatePage = () => {
           <h2>Etaplar</h2>
         </div>
         <Table
+          key={`stages:${selectedObjectId}:${estimateTableRevision}`}
           rowKey="id"
           dataSource={scopedStages}
-          pagination={{ pageSize: 6 }}
+          pagination={{ pageSize: 6, current: stageTablePage, onChange: setStageTablePage }}
           columns={[
             { title: 'Sıra', dataIndex: 'order', width: 70 },
             { title: 'Etap', dataIndex: 'name' },
             { title: 'Məbləğ', dataIndex: 'totalCost', align: 'right', render: (value) => formatCurrency(Number(value)) },
             { title: 'Plan tarix', render: (_, row) => `${formatDisplayDate(row.plannedStartDate)} - ${formatDisplayDate(row.plannedEndDate)}` },
-            { title: 'Status', dataIndex: 'status', render: (value: ProjectWorkStatus) => <Tag color={statusColor[value]}>{statusText(value)}</Tag> },
-            { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteStage(row.id) })} /> },
+            { title: 'Status', dataIndex: 'status', render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
+            { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => { deleteStage(row.id); refreshEstimateTables() } })} /> },
           ]}
         />
       </section>
