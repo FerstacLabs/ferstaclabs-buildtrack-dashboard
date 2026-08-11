@@ -195,6 +195,7 @@ public sealed class FieldWarehouseCatalogItem
     public string? Description { get; set; }
     public string? SearchAliases { get; set; }
     public string? SpecificationSchemaJson { get; set; }
+    public decimal? MinimumStockLevel { get; set; }
     public bool IsCustom { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

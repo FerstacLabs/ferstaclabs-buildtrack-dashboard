@@ -13,6 +13,7 @@ import {
   type SupervisorAuditEventRow,
   type SupervisorSummary,
 } from '../../services/api/buildTrackBackendApi'
+import { WarehouseLineStatusTag, WarehouseRequestStatusTag } from '../../components/ui/WarehouseWorkflowStatusTags'
 import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
 import { FieldStatusTag } from '../fieldPortal/FieldStatusTag'
 import { fieldStatusLabel } from '../fieldPortal/fieldPortalStore'
@@ -103,7 +104,10 @@ const canRejectWarehouse = (row: ManagementWarehouseRequest) =>
   !warehouseTerminalStatuses.has(row.status)
 
 const canIssueWarehouse = (row: ManagementWarehouseRequest) =>
-  row.status === 'ReadyForPickup' && row.lines.every((line) => line.reservedQuantity >= line.requestedQuantity)
+  row.status === 'ReadyForPickup' && row.lines.every((line) => {
+    const remainingToIssue = Math.max(0, line.requestedQuantity - line.issuedQuantity)
+    return remainingToIssue > 0 && line.reservedQuantity >= remainingToIssue && line.shortfallQuantity <= 0
+  })
 
 const warehouseMaterialSummary = (row: ManagementWarehouseRequest) => {
   const linesWithName = row.lines.filter((line) => line.itemName?.trim())
@@ -116,7 +120,7 @@ const warehouseActionMessage: Record<WarehouseReviewAction, string> = {
   Approved: 'Anbar sorğusu təsdiqləndi və stok yoxlanıldı',
   NeedsJustification: 'Əsaslandırma tələbi göndərildi',
   Rejected: 'Anbar sorğusu rədd edildi',
-  Issued: 'Material verildi',
+  Issued: 'Material təhvil verildi',
 }
 
 export const SupervisorsPage = () => {
@@ -137,6 +141,7 @@ export const SupervisorsPage = () => {
   const [loading, setLoading] = useState(false)
   const [reviewingReportId, setReviewingReportId] = useState<string | null>(null)
   const [reviewingWarehouseId, setReviewingWarehouseId] = useState<string | null>(null)
+  const [warehouseTableRevision, setWarehouseTableRevision] = useState(0)
   const [auditDateRange, setAuditDateRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [auditSiteId, setAuditSiteId] = useState<string>()
   const [auditSupervisorId, setAuditSupervisorId] = useState<string>()
@@ -177,6 +182,7 @@ export const SupervisorsPage = () => {
   const refreshManagementWarehouseRequests = async (selectedRequestId?: string) => {
     const nextRequests = await buildTrackBackendApi.getProcurementWarehouseRequests()
     setWarehouseRequests(nextRequests)
+    setWarehouseTableRevision((revision) => revision + 1)
     if (selectedRequestId) {
       const freshRequest = nextRequests.find((request) => request.id === selectedRequestId)
       if (freshRequest && selectedWarehouseRequest?.id === selectedRequestId) setSelectedWarehouseRequest(freshRequest)
@@ -308,7 +314,7 @@ export const SupervisorsPage = () => {
     const managerNote = status === 'Approved'
       ? 'Anbar sorğusu təsdiqləndi. Sistem stok yoxlaması və rezerv prosesini avtomatik icra etdi.'
       : status === 'Issued'
-        ? 'Management paneldən verildi'
+        ? 'Management paneldən təhvil verildi'
         : undefined
 
     setReviewingWarehouseId(row.id)
@@ -379,7 +385,7 @@ export const SupervisorsPage = () => {
         <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => openWarehouseDecision(row, 'NeedsJustification')}>Əsaslandırma tələb et</Button>
       )}
       {canIssueWarehouse(row) && (
-        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Issued')}>Verildi</Button>
+        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Issued')}>Təhvil ver</Button>
       )}
       {canRejectWarehouse(row) && (
         <Button danger loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => openWarehouseDecision(row, 'Rejected')}>Rədd</Button>
@@ -410,6 +416,7 @@ export const SupervisorsPage = () => {
       </div>
       <Card className="soft-card">
         <Table
+          key={`supervisor-warehouse:${warehouseTableRevision}`}
           rowKey="id"
           loading={loading}
           dataSource={rows}
@@ -450,8 +457,7 @@ export const SupervisorsPage = () => {
             { title: 'Sətir', render: (_, row) => row.lines.length },
             {
               title: 'Status',
-              dataIndex: 'status',
-              render: (_, row) => <FieldStatusTag key={`${row.id}:${row.status}`} status={row.status} />,
+              render: (_, row) => <WarehouseRequestStatusTag status={row.status} />,
             },
             { title: 'Əməliyyat', render: (_, row) => reportActions(row) },
           ]}
@@ -613,7 +619,7 @@ export const SupervisorsPage = () => {
               <Descriptions.Item label="Prorab">{selectedWarehouseRequest.supervisorName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Tarix">{formatDateTime(selectedWarehouseRequest.createdAt)}</Descriptions.Item>
               <Descriptions.Item label="Təcillik">{priorityLabel(selectedWarehouseRequest.urgency)}</Descriptions.Item>
-              <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedWarehouseRequest.id}:${selectedWarehouseRequest.status}`} status={selectedWarehouseRequest.status} /></Descriptions.Item>
+              <Descriptions.Item label="Status"><WarehouseRequestStatusTag status={selectedWarehouseRequest.status} /></Descriptions.Item>
               <Descriptions.Item label="Ümumi qeyd">{selectedWarehouseRequest.generalNote || DASH}</Descriptions.Item>
               <Descriptions.Item label="Rəhbərin əsaslandırma tələbi">{selectedWarehouseRequest.justificationRequestNote || (selectedWarehouseRequest.status === 'NeedsJustification' ? 'Sistem yoxlamasına görə bu sorğu üçün əlavə əsaslandırma tələb olunur.' : DASH)}</Descriptions.Item>
               <Descriptions.Item label="Prorabın əsaslandırması">{selectedWarehouseRequest.justification || DASH}</Descriptions.Item>
@@ -633,7 +639,7 @@ export const SupervisorsPage = () => {
                 { title: 'Anbarda', render: (_, line) => `${formatNumber(line.onHandQuantity)} ${line.unit}` },
                 { title: 'Rezerv', render: (_, line) => `${formatNumber(line.reservedQuantity)} ${line.unit}` },
                 { title: 'Çatışmır', render: (_, line) => line.shortfallQuantity > 0 ? <Tag color="red">{formatNumber(line.shortfallQuantity)} {line.unit}</Tag> : <Tag color="green">Yoxdur</Tag> },
-                { title: 'Sətir statusu', render: (_, line) => <FieldStatusTag key={`${line.id}:${line.status}`} status={line.status} /> },
+                { title: 'Sətir statusu', render: (_, line) => <WarehouseLineStatusTag status={line.status} /> },
               ]}
             />
           </Space>

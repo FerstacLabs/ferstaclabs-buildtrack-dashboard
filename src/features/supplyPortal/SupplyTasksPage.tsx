@@ -1,9 +1,10 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Button, Card, Space, Table, Tag } from 'antd'
+import { Button, Card, Space, Table } from 'antd'
 import { Link } from 'react-router-dom'
+import { ProcurementTaskStatusTag } from '../../components/ui/WarehouseWorkflowStatusTags'
 import { formatNumber } from '../../utils/formatters'
 import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
-import { supplyStatusColor, supplyStatusLabel, useSupplyPortalStore } from './supplyPortalStore'
+import { useSupplyPortalStore } from './supplyPortalStore'
 
 export const SupplyTasksPage = () => {
   const { tasks, loading, loadTasks } = useSupplyPortalStore()
@@ -25,7 +26,7 @@ export const SupplyTasksPage = () => {
           pagination={{ pageSize: 10 }}
           columns={[
             { title: 'Tapşırıq', dataIndex: 'code', render: (value, row) => <Link to={`/tasks/${row.id}`}><strong>{value}</strong></Link> },
-            { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
+            { title: 'Status', render: (_, row) => <ProcurementTaskStatusTag status={row.status} /> },
             { title: 'Prioritet', dataIndex: 'priority', render: (value) => priorityLabel(value) },
             { title: 'Materiallar', render: (_, row) => (
               <Space direction="vertical" size={2}>

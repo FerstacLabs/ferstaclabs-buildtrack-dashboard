@@ -586,6 +586,8 @@ public sealed record WarehouseStockItemDto(
     decimal OnHandQuantity,
     decimal ReservedQuantity,
     decimal AvailableQuantity,
+    decimal IssuedQuantity,
+    decimal MinimumQuantity,
     string StockStatus);
 
 public sealed record ProcurementNeedDto(

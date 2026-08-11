@@ -227,6 +227,35 @@ public sealed class SupplyChainServiceTests
         Assert.Equal(20, (await new WarehouseAvailabilityService(db).GetAvailabilityAsync(tenantId, seed.WarehouseId, seed.ItemId, CancellationToken.None)).OnHand);
     }
 
+    [Fact]
+    public async Task IssueFieldRequestRejectsWhenIssueWouldMakeStockNegative()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        var seed = await SeedAsync(db, tenantId, "PPE-NEGATIVE-GLOVE", "İş əlcəyi", 5);
+        var service = CreateService(db);
+        var request = await service.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+            tenantId,
+            seed.SiteId,
+            seed.UserId,
+            null,
+            FieldWarehouseUrgency.Normal,
+            null,
+            [new SupplyRequestLineInput(seed.ItemId, 5, "Əlcək")]), CancellationToken.None);
+        await service.ApproveFieldRequestAsync(tenantId, request.Id, seed.UserId, null, CancellationToken.None);
+
+        var movement = await db.WarehouseStockMovements.SingleAsync(x => x.CatalogItemId == seed.ItemId && x.MovementType == WarehouseStockMovementType.OpeningBalance);
+        movement.Quantity = 2;
+        await db.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.IssueFieldRequestAsync(tenantId, request.Id, seed.WarehouseId, seed.UserId, "Prorab", null, CancellationToken.None));
+
+        Assert.Equal("Warehouse issue would make stock negative.", ex.Message);
+        Assert.Empty(await db.WarehouseIssues.ToListAsync());
+        Assert.Equal(2, (await new WarehouseAvailabilityService(db).GetAvailabilityAsync(tenantId, seed.WarehouseId, seed.ItemId, CancellationToken.None)).OnHand);
+    }
+
     private static BuildTrackDbContext CreateDb(Guid tenantId)
     {
         var options = new DbContextOptionsBuilder<BuildTrackDbContext>()

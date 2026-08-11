@@ -1,13 +1,14 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   buildTrackBackendApi,
   type FieldWarehouseCatalogItem,
   type FieldWarehouseRequest,
 } from '../../services/api/buildTrackBackendApi'
+import { WarehouseLineStatusTag, WarehouseRequestStatusTag } from '../../components/ui/WarehouseWorkflowStatusTags'
 import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
-import { fieldStatusColor, fieldStatusLabel, useFieldPortalStore } from './fieldPortalStore'
+import { useFieldPortalStore } from './fieldPortalStore'
 
 interface CartLineForm {
   catalogItemId?: string
@@ -40,6 +41,7 @@ export const FieldWarehouseRequestsPage = () => {
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [justificationRequest, setJustificationRequest] = useState<FieldWarehouseRequest | null>(null)
+  const [tableRevision, setTableRevision] = useState(0)
   const [form] = Form.useForm<CartRequestForm>()
   const [justificationForm] = Form.useForm<JustificationForm>()
   const selectedUrgency = Form.useWatch('urgency', form) ?? 'Normal'
@@ -54,6 +56,7 @@ export const FieldWarehouseRequestsPage = () => {
       ])
       setCatalog(nextCatalog)
       setRequests(nextRequests)
+      setTableRevision((revision) => revision + 1)
     } finally {
       setLoading(false)
     }
@@ -146,6 +149,7 @@ export const FieldWarehouseRequestsPage = () => {
       />
       <Card className="soft-card">
         <Table
+          key={`field-warehouse:${selectedSiteId}:${tableRevision}`}
           rowKey="id"
           loading={loading}
           dataSource={requests}
@@ -168,7 +172,7 @@ export const FieldWarehouseRequestsPage = () => {
                 columns={[
                   { title: 'Material', dataIndex: 'itemName' },
                   { title: 'Miqdar', render: (_, line) => `${line.requestedQuantity} ${line.unit}` },
-                  { title: 'Sətir statusu', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+                  { title: 'Sətir statusu', render: (_, line) => <WarehouseLineStatusTag status={line.status} /> },
                   { title: 'Səbəb', dataIndex: 'reason', render: (value) => value || '-' },
                 ]}
               />
@@ -179,7 +183,7 @@ export const FieldWarehouseRequestsPage = () => {
             { title: 'Material', render: (_, row) => row.lines?.length ? `${row.lines.length} sətir` : row.materialName },
             { title: 'Miqdar', render: (_, row) => row.lines?.length ? `${row.lines.reduce((sum, line) => sum + line.requestedQuantity, 0)} vahid` : `${row.requestedQuantity} ${row.unit}` },
             { title: 'Təcillik', dataIndex: 'urgency', render: (value) => priorityLabel(value) },
-            { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
+            { title: 'Status', render: (_, row) => <WarehouseRequestStatusTag status={row.status} /> },
             { title: 'Qeyd', render: (_, row) => row.generalNote || row.reason || '-' },
             { title: 'Tarix', dataIndex: 'createdAt', render: (value) => new Date(value).toLocaleString('az-AZ') },
             {

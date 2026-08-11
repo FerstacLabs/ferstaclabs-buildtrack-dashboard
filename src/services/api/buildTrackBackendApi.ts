@@ -575,6 +575,8 @@ export interface WarehouseStockItem {
   onHandQuantity: number
   reservedQuantity: number
   availableQuantity: number
+  issuedQuantity: number
+  minimumQuantity: number
   stockStatus: string
 }
 

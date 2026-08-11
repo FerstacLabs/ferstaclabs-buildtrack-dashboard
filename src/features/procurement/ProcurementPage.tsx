@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import {
+  ProcurementNeedStatusTag,
+  ProcurementTaskStatusTag,
+  WarehouseLineStatusTag,
+  WarehouseRequestStatusTag,
+} from '../../components/ui/WarehouseWorkflowStatusTags'
+import {
   buildTrackBackendApi,
   type ManagementWarehouseRequest,
   type ProcurementAgent,
@@ -17,13 +23,8 @@ import {
   isTerminalWarehouseRequestStatus,
   priorityLabel,
   procurementAgentStatusLabel,
-  procurementNeedStatusLabel,
-  procurementTaskStatusLabel,
   supplierStatusLabel,
-  warehouseLineStatusLabel,
-  warehouseRequestStatusLabel,
 } from '../../utils/warehouseWorkflowLabels'
-import { supplyStatusColor } from '../supplyPortal/supplyPortalStore'
 
 export const ProcurementPage = () => {
   const [stock, setStock] = useState<WarehouseStockItem[]>([])
@@ -35,9 +36,12 @@ export const ProcurementPage = () => {
   const [loading, setLoading] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [handoverRequest, setHandoverRequest] = useState<ManagementWarehouseRequest | null>(null)
+  const [tableRevision, setTableRevision] = useState(0)
   const [selectedNeedIds, setSelectedNeedIds] = useState<string[]>([])
   const [agentForm] = Form.useForm()
   const [taskForm] = Form.useForm()
+  const [handoverForm] = Form.useForm<{ recipientName?: string; handoverNote?: string }>()
 
   const load = async () => {
     setLoading(true)
@@ -56,6 +60,7 @@ export const ProcurementPage = () => {
       setTasks(nextTasks)
       setAgents(nextAgents)
       setSuppliers(nextSuppliers)
+      setTableRevision((revision) => revision + 1)
     } finally {
       setLoading(false)
     }
@@ -74,7 +79,10 @@ export const ProcurementPage = () => {
     && row.lines.every((line) => line.reservedQuantity === 0 && line.approvedQuantity === 0)
   const canIssueRequest = (row: ManagementWarehouseRequest) =>
     row.status === 'ReadyForPickup'
-    && row.lines.every((line) => line.reservedQuantity >= line.requestedQuantity)
+    && row.lines.every((line) => {
+      const remainingToIssue = Math.max(0, line.requestedQuantity - line.issuedQuantity)
+      return remainingToIssue > 0 && line.reservedQuantity >= remainingToIssue && line.shortfallQuantity <= 0
+    })
 
   const approveRequest = async (id: string) => {
     await buildTrackBackendApi.approveProcurementWarehouseRequest(id, 'Köhnə təsdiqli sorğu üçün stok yoxlanıldı və rezerv axını yaradıldı.')
@@ -82,9 +90,20 @@ export const ProcurementPage = () => {
     await load()
   }
 
-  const issueRequest = async (id: string) => {
-    await buildTrackBackendApi.issueProcurementWarehouseRequest(id, { recipientName: 'Prorab', handoverNote: 'Management paneldən verildi' })
+  const openHandover = (row: ManagementWarehouseRequest) => {
+    handoverForm.setFieldsValue({ recipientName: row.supervisorName ?? 'Prorab', handoverNote: '' })
+    setHandoverRequest(row)
+  }
+
+  const issueRequest = async (values: { recipientName?: string; handoverNote?: string }) => {
+    if (!handoverRequest) return
+    await buildTrackBackendApi.issueProcurementWarehouseRequest(handoverRequest.id, {
+      recipientName: values.recipientName,
+      handoverNote: values.handoverNote || 'Management paneldən təhvil verildi',
+    })
     void message.success('Material sahəyə verildi')
+    setHandoverRequest(null)
+    handoverForm.resetFields()
     await load()
   }
 
@@ -145,6 +164,7 @@ export const ProcurementPage = () => {
             children: (
               <Card className="soft-card">
                 <Table
+                  key={`procurement-requests:${tableRevision}`}
                   rowKey="id"
                   loading={loading}
                   dataSource={requests}
@@ -156,7 +176,7 @@ export const ProcurementPage = () => {
                       { title: 'Anbarda', render: (_, line) => `${formatNumber(line.onHandQuantity)} ${line.unit}` },
                       { title: 'Rezerv', render: (_, line) => `${formatNumber(line.reservedQuantity)} ${line.unit}` },
                       { title: 'Çatışmazlıq', render: (_, line) => line.shortfallQuantity > 0 ? <Tag color="red">{formatNumber(line.shortfallQuantity)} {line.unit}</Tag> : <Tag color="green">Yoxdur</Tag> },
-                      { title: 'Sətir statusu', render: (_, line) => <Tag color={supplyStatusColor(line.status)}>{warehouseLineStatusLabel(line.status)}</Tag> },
+                      { title: 'Sətir statusu', render: (_, line) => <WarehouseLineStatusTag status={line.status} /> },
                     ]} />
                   ) }}
                   columns={[
@@ -164,10 +184,10 @@ export const ProcurementPage = () => {
                     { title: 'Obyekt', dataIndex: 'siteName' },
                     { title: 'Prorab', dataIndex: 'supervisorName' },
                     { title: 'Təcillik', dataIndex: 'urgency', render: (value) => priorityLabel(value) },
-                    { title: 'Status', dataIndex: 'status', render: (_, row) => <Tag key={`${row.id}:${row.status}`} color={row.status === 'ReadyForPickup' ? 'green' : row.status === 'InFulfillment' ? 'orange' : isTerminalWarehouseRequestStatus(row.status) ? 'red' : 'blue'}>{warehouseRequestStatusLabel(row.status)}</Tag> },
+                    { title: 'Status', render: (_, row) => <WarehouseRequestStatusTag status={row.status} /> },
                     { title: 'Toplam', render: (_, row) => `${formatNumber(row.totalRequested)} vahid` },
                     { title: 'Çatışmazlıq', render: (_, row) => row.totalShortfall > 0 ? <Tag color="red">{formatNumber(row.totalShortfall)}</Tag> : <Tag color="green">Yoxdur</Tag> },
-                    { title: 'Əməliyyat', render: (_, row) => <Space>{canCheckAndReserve(row) && <Button onClick={() => approveRequest(row.id)}>Stoku yoxla və rezerv et</Button>}<Button onClick={() => issueRequest(row.id)} disabled={!canIssueRequest(row)}>Ver</Button>{isTerminalWarehouseRequestStatus(row.status) && <Tag color="default">Arxiv</Tag>}</Space> },
+                    { title: 'Əməliyyat', render: (_, row) => <Space>{canCheckAndReserve(row) && <Button onClick={() => approveRequest(row.id)}>Stoku yoxla və rezerv et</Button>}<Button onClick={() => openHandover(row)} disabled={!canIssueRequest(row)}>Təhvil ver</Button>{isTerminalWarehouseRequestStatus(row.status) && <Tag color="default">Arxiv</Tag>}</Space> },
                   ]}
                 />
               </Card>
@@ -204,7 +224,7 @@ export const ProcurementPage = () => {
                     { title: 'Material', dataIndex: 'itemName' },
                     { title: 'Çatışmazlıq', render: (_, row) => `${formatNumber(row.shortfallQuantity)} ${row.unit}` },
                     { title: 'Prioritet', dataIndex: 'priority', render: (value) => priorityLabel(value) },
-                    { title: 'Status', dataIndex: 'status', render: (value) => <Tag>{procurementNeedStatusLabel(value)}</Tag> },
+                    { title: 'Status', render: (_, row) => <ProcurementNeedStatusTag status={row.status} /> },
                     { title: 'Səbəb', dataIndex: 'reason' },
                   ]}
                 />
@@ -219,7 +239,7 @@ export const ProcurementPage = () => {
                 <Table rowKey="id" loading={loading} dataSource={tasks} pagination={{ pageSize: 8 }} columns={[
                   { title: 'Tapşırıq', dataIndex: 'code' },
                   { title: 'Agent', dataIndex: 'assignedProcurementUserName', render: (value) => value || '-' },
-                  { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{procurementTaskStatusLabel(value)}</Tag> },
+                  { title: 'Status', render: (_, row) => <ProcurementTaskStatusTag status={row.status} /> },
                   { title: 'Sətir', render: (_, row) => row.lines.length },
                   { title: 'Əməliyyat', render: (_, row) => <Space><Button onClick={() => verifyTask(row.id)} disabled={row.status !== 'SubmittedForVerification'}>Təsdiqlə</Button><Button onClick={() => receiveTask(row.id)} disabled={row.status !== 'Verified'}>Anbara qəbul</Button></Space> },
                 ]} />
@@ -286,6 +306,50 @@ export const ProcurementPage = () => {
           </Form.Item>
           <Button type="primary" htmlType="submit">Tapşırıq yarat</Button>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Materialları təhvil ver"
+        open={Boolean(handoverRequest)}
+        onCancel={() => setHandoverRequest(null)}
+        footer={null}
+        width={720}
+        destroyOnHidden
+      >
+        {handoverRequest && (
+          <Space direction="vertical" size="middle" className="full-width">
+            <div>
+              <strong>{handoverRequest.code}</strong>
+              <div className="muted-text">{handoverRequest.siteName || 'Obyekt'} / {handoverRequest.supervisorName || 'Prorab'}</div>
+            </div>
+            <Table
+              size="small"
+              rowKey="id"
+              pagination={false}
+              dataSource={handoverRequest.lines}
+              columns={[
+                { title: 'Material', dataIndex: 'itemName' },
+                { title: 'İstənilən', render: (_, line) => `${formatNumber(line.requestedQuantity)} ${line.unit}` },
+                { title: 'Rezerv', render: (_, line) => `${formatNumber(line.reservedQuantity)} ${line.unit}` },
+                { title: 'Verilib', render: (_, line) => `${formatNumber(line.issuedQuantity)} ${line.unit}` },
+                { title: 'Qalan', render: (_, line) => `${formatNumber(Math.max(0, line.requestedQuantity - line.issuedQuantity))} ${line.unit}` },
+                { title: 'Status', render: (_, line) => <WarehouseLineStatusTag status={line.status} /> },
+              ]}
+            />
+            <Form form={handoverForm} layout="vertical" onFinish={issueRequest}>
+              <Form.Item name="recipientName" label="Təhvil alan">
+                <Input placeholder="Prorab və ya məsul şəxs" />
+              </Form.Item>
+              <Form.Item name="handoverNote" label="Təhvil qeydi">
+                <Input.TextArea rows={3} placeholder="Məsələn: materiallar sahəyə təhvil verildi." />
+              </Form.Item>
+              <Space>
+                <Button onClick={() => setHandoverRequest(null)}>İmtina</Button>
+                <Button type="primary" htmlType="submit">Təhvil ver</Button>
+              </Space>
+            </Form>
+          </Space>
+        )}
       </Modal>
     </div>
   )

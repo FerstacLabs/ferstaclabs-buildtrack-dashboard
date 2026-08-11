@@ -3,6 +3,7 @@ using BuildTrack.Api.Contracts;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Tenancy;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 
 namespace BuildTrack.Tests;
@@ -63,6 +64,26 @@ public sealed class SupplyCatalogSeedTests
 
         Assert.Equal(firstCount, await db.FieldWarehouseCatalogItems.CountAsync(x => x.TenantId == tenantId));
         Assert.Equal(DbInitializer.SupplyCatalogSeedItems.Count, firstCount);
+    }
+
+    [Fact]
+    public async Task DemoWarehouseStockSeedIsGuardedAndIdempotent()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, CompanyName = "Tenant A", Code = "tenant-a", Status = TenantStatus.Active });
+        await db.SaveChangesAsync();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["SEED_DEMO_WAREHOUSE_STOCK"] = "true" })
+            .Build();
+
+        await DbInitializer.SeedSupplyChainDataAsync(db, configuration, CancellationToken.None);
+        await DbInitializer.SeedSupplyChainDataAsync(db, configuration, CancellationToken.None);
+
+        var helmet = await db.FieldWarehouseCatalogItems.SingleAsync(x => x.TenantId == tenantId && x.Code == "PPE-HELMET");
+        Assert.Equal(10, helmet.MinimumStockLevel);
+        Assert.Equal(8, await db.WarehouseStockMovements.CountAsync(x => x.TenantId == tenantId && x.ReferenceType == "SeedOpeningBalance"));
+        Assert.Equal(25, await db.WarehouseStockMovements.Where(x => x.TenantId == tenantId && x.CatalogItemId == helmet.Id).SumAsync(x => x.Quantity));
     }
 
     [Fact]

@@ -2,9 +2,10 @@ import { ClockCircleOutlined, InboxOutlined, ShoppingCartOutlined, UploadOutline
 import { Card, Table, Tag } from 'antd'
 import { Link } from 'react-router-dom'
 import { KpiCard } from '../../components/ui/KpiCard'
+import { ProcurementTaskStatusTag } from '../../components/ui/WarehouseWorkflowStatusTags'
 import { formatNumber } from '../../utils/formatters'
 import { priorityLabel } from '../../utils/warehouseWorkflowLabels'
-import { supplyStatusColor, supplyStatusLabel, useSupplyPortalStore } from './supplyPortalStore'
+import { useSupplyPortalStore } from './supplyPortalStore'
 
 export const SupplyDashboardPage = () => {
   const { dashboard, tasks, loading } = useSupplyPortalStore()
@@ -38,7 +39,7 @@ export const SupplyDashboardPage = () => {
           pagination={{ pageSize: 8 }}
           columns={[
             { title: 'Tapşırıq', dataIndex: 'code', render: (value, row) => <Link to={`/tasks/${row.id}`}><strong>{value}</strong></Link> },
-            { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{supplyStatusLabel(value)}</Tag> },
+            { title: 'Status', render: (_, row) => <ProcurementTaskStatusTag status={row.status} /> },
             { title: 'Prioritet', dataIndex: 'priority', render: (value) => priorityLabel(value) },
             { title: 'Sətir', render: (_, row) => row.lines.length },
             { title: 'Məbləğsiz ehtiyac', render: (_, row) => `${formatNumber(row.lines.reduce((sum, line) => sum + line.requestedQuantity, 0))} vahid` },

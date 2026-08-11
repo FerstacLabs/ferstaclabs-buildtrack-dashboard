@@ -27,6 +27,7 @@ interface WarehouseItem {
   unit: string
   stockQuantity: number
   reservedQuantity: number
+  issuedQuantity?: number
   minimumQuantity: number
   unitPrice: number
   location: string
@@ -171,7 +172,8 @@ export const WarehousePage = () => {
             unit: row.unit,
             stockQuantity: row.onHandQuantity,
             reservedQuantity: row.reservedQuantity,
-            minimumQuantity: row.stockStatus === 'Bitib' ? 10 : 30,
+            issuedQuantity: row.issuedQuantity,
+            minimumQuantity: row.minimumQuantity,
             unitPrice: 0,
             location: row.subcategory ?? 'Mərkəzi anbar',
             lastUpdated: new Date().toLocaleString('az-AZ', { hour12: false }),
@@ -211,14 +213,16 @@ export const WarehousePage = () => {
       ...item,
       availableQuantity,
       status,
-      stockPercent: item.minimumQuantity > 0 ? Math.min(100, Math.round((availableQuantity / item.minimumQuantity) * 100)) : 100,
-      totalValue: availableQuantity * item.unitPrice,
+      stockPercent: Math.round((availableQuantity / Math.max(item.minimumQuantity * 2, availableQuantity, 1)) * 100),
+      totalValue: availableQuantity * (item.unitPrice ?? 0),
     }
   })
 
-  const totalAvailableValue = rows.reduce((sum, row) => sum + row.totalValue, 0)
+  const stockRecordRows = rows.filter((row) => row.stockQuantity > 0 || row.reservedQuantity > 0 || (row.issuedQuantity ?? 0) > 0 || row.minimumQuantity > 0)
+  const hasReliableValue = rows.some((row) => (row.unitPrice ?? 0) > 0)
+  const totalAvailableValue = hasReliableValue ? rows.reduce((sum, row) => sum + row.totalValue, 0) : undefined
   const criticalCount = rows.filter((row) => row.status === 'Critical' || row.status === 'OutOfStock').length
-  const pendingRequests = requests.filter((request) => request.status === 'Çatışmazlıq var' || request.status === 'Təsdiq gözləyir').length
+  const pendingRequests = requests.filter((request) => request.status !== 'Verildi').length
   const shortageTotal = requests.reduce((sum, request) => sum + request.shortageQuantity, 0)
   const itemOptions = rows.map((item) => ({ label: `${item.name} - ${formatNumber(item.availableQuantity)} ${item.unit} mövcuddur`, value: item.id }))
 
@@ -265,6 +269,7 @@ export const WarehousePage = () => {
     },
     { title: 'Mövcud', render: (_, row) => <Tag color="blue">{formatNumber(row.stockQuantity)} {row.unit}</Tag>, sorter: (a, b) => a.stockQuantity - b.stockQuantity },
     { title: 'Rezerv', render: (_, row) => `${formatNumber(row.reservedQuantity)} ${row.unit}` },
+    { title: 'Verilib', render: (_, row) => `${formatNumber(row.issuedQuantity ?? 0)} ${row.unit}` },
     { title: 'Verilə bilər', render: (_, row) => <strong>{formatNumber(row.availableQuantity)} {row.unit}</strong>, sorter: (a, b) => a.availableQuantity - b.availableQuantity },
     { title: 'Minimum', render: (_, row) => `${formatNumber(row.minimumQuantity)} ${row.unit}` },
     { title: 'Qalıq statusu', dataIndex: 'status', render: (value: WarehouseStatus) => <Tag color={statusColor[value]}>{stockStatusLabel[value]}</Tag> },
@@ -291,8 +296,8 @@ export const WarehousePage = () => {
         category,
         label,
         count: categoryRows.length,
-        available: categoryRows.reduce((sum, row) => sum + row.availableQuantity, 0),
         critical: categoryRows.filter((row) => row.status === 'Critical' || row.status === 'OutOfStock').length,
+        outOfStock: categoryRows.filter((row) => row.status === 'OutOfStock').length,
       }
     })
   }, [rows])
@@ -313,10 +318,10 @@ export const WarehousePage = () => {
       />
 
       <section className="kpi-grid four">
-        <KpiCard icon={<InboxOutlined />} title="Stok növü" value={formatNumber(rows.length)} trend="anbar kartı" tone="blue" />
+        <KpiCard icon={<InboxOutlined />} title="Stok növü" value={formatNumber(stockRecordRows.length)} trend="anbar kartı" tone="blue" />
         <KpiCard icon={<WarningOutlined />} title="Kritik qalıq" value={formatNumber(criticalCount)} trend="minimumdan aşağı" tone="red" />
         <KpiCard icon={<SendOutlined />} title="Açıq sorğu" value={formatNumber(pendingRequests)} trend="prorab tələbi" tone="orange" />
-        <KpiCard icon={<ToolOutlined />} title="Verilə bilən dəyər" value={formatCurrency(totalAvailableValue)} trend={`${formatNumber(shortageTotal)} əlavə ehtiyac`} tone="purple" />
+        <KpiCard icon={<ToolOutlined />} title="Dəyər məlumatı" value={totalAvailableValue === undefined ? 'Məlumat yoxdur' : formatCurrency(totalAvailableValue)} trend={`${formatNumber(shortageTotal)} əlavə ehtiyac`} tone="purple" />
       </section>
 
       <section className="content-grid wide-side">
@@ -334,8 +339,8 @@ export const WarehousePage = () => {
             {categoryStats.map((stat) => (
               <div key={stat.category} className="warehouse-category-row">
                 <span>{stat.label}</span>
-                <strong>{formatNumber(stat.available)}</strong>
-                <Tag color={stat.critical ? 'red' : 'green'}>{stat.critical ? `${stat.critical} kritik` : 'normal'}</Tag>
+                <strong>{formatNumber(stat.count)} mövqe</strong>
+                <Tag color={stat.critical ? 'red' : 'green'}>{stat.critical ? `${stat.critical} kritik / ${stat.outOfStock} bitib` : 'normal'}</Tag>
               </div>
             ))}
           </div>

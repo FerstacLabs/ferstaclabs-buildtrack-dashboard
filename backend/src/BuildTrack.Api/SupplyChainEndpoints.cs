@@ -118,11 +118,21 @@ public static class SupplyChainEndpoints
             .OrderBy(x => x.Category)
             .ThenBy(x => x.Name)
             .ToListAsync(ct);
-        var availabilityMap = await availability.GetAvailabilityMapAsync(tenantId, warehouse.Id, items.Select(x => x.Id).ToArray(), ct);
+        var itemIdsForStock = items.Select(x => x.Id).ToArray();
+        var availabilityMap = await availability.GetAvailabilityMapAsync(tenantId, warehouse.Id, itemIdsForStock, ct);
+        var issuedMap = await db.WarehouseStockMovements.AsNoTracking()
+            .Where(x => x.TenantId == tenantId
+                && x.WarehouseId == warehouse.Id
+                && x.MovementType == WarehouseStockMovementType.Issue
+                && itemIdsForStock.Contains(x.CatalogItemId))
+            .GroupBy(x => x.CatalogItemId)
+            .Select(x => new { CatalogItemId = x.Key, Issued = x.Sum(m => m.Quantity) })
+            .ToDictionaryAsync(x => x.CatalogItemId, x => x.Issued, ct);
         return Results.Ok(items.Select(item =>
         {
             var row = availabilityMap.GetValueOrDefault(item.Id, new WarehouseAvailability(warehouse.Id, item.Id, 0, 0, 0));
-            return new WarehouseStockItemDto(item.Id, item.Name, item.Category, item.Subcategory, item.Unit, item.Code, row.OnHand, row.Reserved, row.Available, ResolveStockStatus(row.Available));
+            var minimum = item.MinimumStockLevel ?? 0;
+            return new WarehouseStockItemDto(item.Id, item.Name, item.Category, item.Subcategory, item.Unit, item.Code, row.OnHand, row.Reserved, row.Available, issuedMap.GetValueOrDefault(item.Id), minimum, ResolveStockStatus(row.Available, minimum));
         }));
     }
 
@@ -577,18 +587,18 @@ public static class SupplyChainEndpoints
             task.VerificationNote,
             task.Lines.OrderBy(x => x.CatalogItem?.Name).Select(line => new ProcurementTaskLineDto(line.Id, line.ProcurementNeedId, line.CatalogItemId, line.CatalogItem?.Name ?? string.Empty, line.CatalogItem?.Category ?? string.Empty, line.RequestedQuantity, line.PurchasedQuantity, line.AcceptedQuantity, line.Unit, line.Status, line.Note, line.UnitPrice, line.SupplierId, line.Supplier?.Name)).ToArray());
 
-    private static string ResolveStockStatus(decimal available)
+    private static string ResolveStockStatus(decimal available, decimal minimum)
     {
         if (available <= 0) return "Bitib";
-        if (available <= 10) return "Kritik";
-        if (available <= 30) return "Azalır";
+        if (minimum > 0 && available <= minimum) return "Kritik";
         return "Normal";
     }
 
     private static bool IsWarehouseWorkflowConflict(InvalidOperationException ex) =>
         ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase)
         || ex.Message.Contains("Warehouse request must be pending approval", StringComparison.OrdinalIgnoreCase)
-        || ex.Message.Contains("Warehouse request is not ready for issue", StringComparison.OrdinalIgnoreCase);
+        || ex.Message.Contains("Warehouse request is not ready for issue", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("stock negative", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsManagementRole(string? role) =>
         string.Equals(role, BuildTrackUserRole.Owner.ToString(), StringComparison.OrdinalIgnoreCase)

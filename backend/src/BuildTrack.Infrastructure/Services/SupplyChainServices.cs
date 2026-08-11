@@ -566,7 +566,7 @@ public sealed class SupplyChainService(
         {
             throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
         }
-        if (request.Status != FieldWarehouseRequestStatus.ReadyForPickup || request.Lines.Any(x => x.ReservedQuantity < x.RequestedQuantity))
+        if (request.Status != FieldWarehouseRequestStatus.ReadyForPickup || request.Lines.Any(x => x.ReservedQuantity < Math.Max(0, x.RequestedQuantity - x.IssuedQuantity)))
         {
             throw new InvalidOperationException("Warehouse request is not ready for issue.");
         }
@@ -575,6 +575,27 @@ public sealed class SupplyChainService(
             .Where(x => x.TenantId == tenantId && x.WarehouseId == warehouseId && x.Status == WarehouseReservationStatus.Active && request.Lines.Select(l => l.Id).Contains(x.RequestLineId))
             .ToListAsync(ct);
         if (reservations.Count == 0) throw new InvalidOperationException("Verilməyə hazır rezerv tapılmadı");
+
+        foreach (var line in request.Lines)
+        {
+            var remainingToIssue = Math.Max(0, line.RequestedQuantity - line.IssuedQuantity);
+            var activeReserved = reservations.Where(x => x.RequestLineId == line.Id).Sum(x => x.Quantity);
+            if (activeReserved < remainingToIssue)
+            {
+                throw new InvalidOperationException("Warehouse request is not ready for issue.");
+            }
+        }
+
+        var catalogItemIds = request.Lines.Select(x => x.CatalogItemId).Distinct().ToArray();
+        var availabilityMap = await availabilityService.GetAvailabilityMapAsync(tenantId, warehouseId, catalogItemIds, ct);
+        foreach (var itemGroup in reservations.GroupBy(x => x.CatalogItemId))
+        {
+            var itemAvailability = availabilityMap.GetValueOrDefault(itemGroup.Key, new WarehouseAvailability(warehouseId, itemGroup.Key, 0, 0, 0));
+            if (itemAvailability.OnHand < itemGroup.Sum(x => x.Quantity))
+            {
+                throw new InvalidOperationException("Warehouse issue would make stock negative.");
+            }
+        }
 
         var issue = new WarehouseIssue
         {

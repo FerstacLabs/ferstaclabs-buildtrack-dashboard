@@ -3,10 +3,9 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Table, Ta
 import type { UploadFile } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { ProcurementTaskLineStatusTag, ProcurementTaskStatusTag } from '../../components/ui/WarehouseWorkflowStatusTags'
 import { buildTrackBackendApi, type ProcurementTask, type SupplierRow } from '../../services/api/buildTrackBackendApi'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
-import { procurementTaskLineStatusLabel } from '../../utils/warehouseWorkflowLabels'
-import { supplyStatusColor, supplyStatusLabel } from './supplyPortalStore'
 
 export const SupplyTaskDetailPage = () => {
   const { id } = useParams()
@@ -96,7 +95,7 @@ export const SupplyTaskDetailPage = () => {
           <span className="field-eyebrow">Sübutlu satınalma icrası</span>
         </div>
         <Space wrap>
-          <Tag color={supplyStatusColor(task.status)}>{supplyStatusLabel(task.status)}</Tag>
+          <ProcurementTaskStatusTag status={task.status} />
           <Button icon={<CheckOutlined />} onClick={accept} disabled={!['Assigned'].includes(task.status)}>Qəbul et</Button>
           <Button icon={<PlayCircleOutlined />} onClick={start} disabled={!['Assigned', 'Accepted'].includes(task.status)}>Alışa başla</Button>
         </Space>
@@ -121,7 +120,7 @@ export const SupplyTaskDetailPage = () => {
             { title: 'Lazım olan', render: (_, row) => `${formatNumber(row.requestedQuantity)} ${row.unit}` },
             { title: 'Alınıb', render: (_, row) => `${formatNumber(row.purchasedQuantity)} ${row.unit}` },
             { title: 'Məbləğ', render: (_, row) => row.unitPrice ? formatCurrency(row.unitPrice * row.purchasedQuantity) : '-' },
-            { title: 'Status', dataIndex: 'status', render: (value) => <Tag color={supplyStatusColor(value)}>{procurementTaskLineStatusLabel(value)}</Tag> },
+            { title: 'Status', render: (_, row) => <ProcurementTaskLineStatusTag status={row.status} /> },
             { title: 'Alış yenilə', width: 420, render: (_, row) => (
               <Form
                 layout="inline"

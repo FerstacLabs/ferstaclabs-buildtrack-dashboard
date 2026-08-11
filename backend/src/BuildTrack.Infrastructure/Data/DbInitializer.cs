@@ -707,7 +707,7 @@ CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_Action" ON supervisor_aud
         await EnsureSupplyChainSchemaAsync(db, cancellationToken);
         await SeedAdminUserAsync(db, configuration, cancellationToken);
         await SeedDemoFieldDataAsync(db, configuration, cancellationToken);
-        await SeedSupplyChainDataAsync(db, cancellationToken);
+        await SeedSupplyChainDataAsync(db, configuration, cancellationToken);
     }
 
     private static async Task EnsureSupplyChainSchemaAsync(BuildTrackDbContext db, CancellationToken cancellationToken)
@@ -722,6 +722,7 @@ ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "ItemType" ch
 ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "Description" character varying(1000) NULL;
 ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "SearchAliases" character varying(1000) NULL;
 ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "SpecificationSchemaJson" jsonb NULL;
+ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "MinimumStockLevel" numeric(18,3) NULL;
 ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "IsCustom" boolean NOT NULL DEFAULT false;
 ALTER TABLE field_warehouse_catalog_items ADD COLUMN IF NOT EXISTS "UpdatedAt" timestamp with time zone NULL;
 UPDATE field_warehouse_catalog_items SET "NameAz" = COALESCE("NameAz", "Name") WHERE "NameAz" IS NULL;
@@ -1138,9 +1139,16 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    internal static async Task SeedSupplyChainDataAsync(BuildTrackDbContext db, CancellationToken cancellationToken)
+    internal static Task SeedSupplyChainDataAsync(BuildTrackDbContext db, CancellationToken cancellationToken) =>
+        SeedSupplyChainDataAsync(db, null, cancellationToken);
+
+    internal static async Task SeedSupplyChainDataAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken cancellationToken)
     {
         ValidateSupplyCatalogSeedDefinitions();
+        var seedDemoWarehouseStock = configuration is null
+            || string.Equals(configuration["SEED_DEMO_WAREHOUSE_STOCK"], "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(configuration["SEED_DEMO_WAREHOUSE_STOCK"], "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(configuration["SEED_DEMO_WAREHOUSE_STOCK"], "yes", StringComparison.OrdinalIgnoreCase);
 
         var units = new[]
         {
@@ -1210,16 +1218,10 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
                 await db.SaveChangesAsync(cancellationToken);
             }
 
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "PPE-HELMET", 86, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "PPE-GLOVE", 35, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "PPE-VEST", 48, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "TOOL-DRILL-12", 0, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "TOOL-DRILL-8", 64, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "CONS-CUT-DISC", 120, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "CONS-WELD-ELECTRODE", 42, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "MAT-CEMENT-M400", 210, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "MAT-WATERPROOF-ROLL", 9, cancellationToken);
-            await SeedOpeningBalanceAsync(db, tenantId, warehouse.Id, "ELEC-EXT-CABLE-30", 14, cancellationToken);
+            if (seedDemoWarehouseStock)
+            {
+                await SeedDemoWarehouseStockAsync(db, tenantId, warehouse.Id, cancellationToken);
+            }
 
             await SeedUsagePolicyAsync(db, tenantId, "PPE", 50, cancellationToken);
             await SeedUsagePolicyAsync(db, tenantId, "Alət", 10, cancellationToken);
@@ -1375,11 +1377,40 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
         }
     }
 
-    private static async Task SeedOpeningBalanceAsync(BuildTrackDbContext db, Guid tenantId, Guid warehouseId, string itemCode, decimal quantity, CancellationToken cancellationToken)
+    private static async Task SeedDemoWarehouseStockAsync(BuildTrackDbContext db, Guid tenantId, Guid warehouseId, CancellationToken cancellationToken)
     {
-        var item = await db.FieldWarehouseCatalogItems.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == itemCode, cancellationToken);
+        var demoRows = new (string Code, decimal Quantity, decimal Minimum)[]
+        {
+            ("PPE-HELMET", 25, 10),
+            ("PPE-GLOVE", 60, 20),
+            ("FIN-TILE", 40, 10),
+            ("FIN-PRIMER", 30, 10),
+            ("MAT-CEMENT-M400", 50, 15),
+            ("MAT-REBAR-A3", 3, 1),
+            ("FIN-TILE-ADHESIVE", 5, 10),
+            ("FIN-GYPSUM-BOARD", 0, 10),
+        };
+
+        foreach (var row in demoRows)
+        {
+            await SeedOpeningBalanceAsync(db, tenantId, warehouseId, row.Code, row.Quantity, row.Minimum, cancellationToken);
+        }
+    }
+
+    private static async Task SeedOpeningBalanceAsync(BuildTrackDbContext db, Guid tenantId, Guid warehouseId, string itemCode, decimal quantity, CancellationToken cancellationToken) =>
+        await SeedOpeningBalanceAsync(db, tenantId, warehouseId, itemCode, quantity, null, cancellationToken);
+
+    private static async Task SeedOpeningBalanceAsync(BuildTrackDbContext db, Guid tenantId, Guid warehouseId, string itemCode, decimal quantity, decimal? minimumStockLevel, CancellationToken cancellationToken)
+    {
+        var item = await db.FieldWarehouseCatalogItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Code == itemCode, cancellationToken);
         if (item is null) return;
-        if (await db.WarehouseStockMovements.AnyAsync(x => x.TenantId == tenantId && x.WarehouseId == warehouseId && x.CatalogItemId == item.Id && x.ReferenceType == "SeedOpeningBalance", cancellationToken)) return;
+        if (minimumStockLevel is not null && (!item.MinimumStockLevel.HasValue || item.MinimumStockLevel.Value <= 0))
+        {
+            item.MinimumStockLevel = minimumStockLevel.Value;
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        if (await db.WarehouseStockMovements.AnyAsync(x => x.TenantId == tenantId && x.WarehouseId == warehouseId && x.CatalogItemId == item.Id, cancellationToken)) return;
 
         db.WarehouseStockMovements.Add(new WarehouseStockMovement
         {

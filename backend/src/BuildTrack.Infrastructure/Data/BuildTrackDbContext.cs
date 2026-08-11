@@ -458,6 +458,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.Property(x => x.Description).HasMaxLength(500);
             entity.Property(x => x.SearchAliases).HasMaxLength(1000);
             entity.Property(x => x.SpecificationSchemaJson).HasColumnType("jsonb");
+            entity.Property(x => x.MinimumStockLevel).HasPrecision(18, 3);
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => x.Code);
             entity.HasIndex(x => new { x.TenantId, x.Category, x.Subcategory });
