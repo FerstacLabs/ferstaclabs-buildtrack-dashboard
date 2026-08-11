@@ -152,7 +152,7 @@ public static class SupplyChainEndpoints
             var result = await supplyChain.ApproveFieldRequestAsync(RequireTenantId(tenantContext), id, RequireUserId(tenantContext), request.ManagerComment, ct);
             return Results.Ok(result);
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (IsWarehouseWorkflowConflict(ex))
         {
             return Results.Conflict(new { error = ex.Message });
         }
@@ -170,7 +170,7 @@ public static class SupplyChainEndpoints
             var issue = await supplyChain.IssueFieldRequestAsync(tenantId, id, warehouse.Id, RequireUserId(tenantContext), request.RecipientName, request.HandoverNote, ct);
             return Results.Ok(new { issue.Id, issue.Status, issue.IssuedAt });
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (IsWarehouseWorkflowConflict(ex))
         {
             return Results.Conflict(new { error = ex.Message });
         }
@@ -202,7 +202,7 @@ public static class SupplyChainEndpoints
             var task = await supplyChain.CreateProcurementTaskAsync(RequireTenantId(tenantContext), request.NeedIds, request.AssignedProcurementUserId, RequireUserId(tenantContext), request.ManagerInstruction, ct);
             return Results.Ok(ToTaskDto(task));
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (IsWarehouseWorkflowConflict(ex))
         {
             return Results.Conflict(new { error = ex.Message });
         }
@@ -496,6 +496,7 @@ public static class SupplyChainEndpoints
             request.NeededBy,
             request.Urgency,
             request.Reason,
+            request.JustificationRequestNote,
             request.Justification,
             request.ManagerComment,
             request.Status,
@@ -543,6 +544,7 @@ public static class SupplyChainEndpoints
             request.Urgency,
             request.Status,
             request.GeneralNote,
+            request.JustificationRequestNote,
             request.Justification,
             request.ManagerComment,
             request.AbnormalRequest,
@@ -582,6 +584,11 @@ public static class SupplyChainEndpoints
         if (available <= 30) return "Azalır";
         return "Normal";
     }
+
+    private static bool IsWarehouseWorkflowConflict(InvalidOperationException ex) =>
+        ex.Message.Contains("Rejected warehouse requests", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("Warehouse request must be pending approval", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("Warehouse request is not ready for issue", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsManagementRole(string? role) =>
         string.Equals(role, BuildTrackUserRole.Owner.ToString(), StringComparison.OrdinalIgnoreCase)

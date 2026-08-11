@@ -94,6 +94,36 @@ public sealed class SupplyChainServiceTests
     }
 
     [Fact]
+    public async Task NeedsJustificationWarehouseRequestCannotBeApprovedOrReserved()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        var seed = await SeedAsync(db, tenantId, "PPE-JUSTIFY-HELMET", "Kaska", 30);
+        var service = CreateService(db);
+
+        var request = await service.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+            tenantId,
+            seed.SiteId,
+            seed.UserId,
+            null,
+            FieldWarehouseUrgency.Normal,
+            null,
+            [new SupplyRequestLineInput(seed.ItemId, 10, "Kaska")]), CancellationToken.None);
+
+        var stored = await db.FieldWarehouseRequests.SingleAsync(x => x.Id == request.Id);
+        stored.Status = FieldWarehouseRequestStatus.NeedsJustification;
+        stored.JustificationRequestNote = "Explain the quantity.";
+        await db.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ApproveFieldRequestAsync(tenantId, request.Id, seed.UserId, null, CancellationToken.None));
+
+        Assert.Equal("Warehouse request must be pending approval before stock processing.", ex.Message);
+        Assert.Empty(await db.WarehouseReservations.ToListAsync());
+        Assert.Empty(await db.ProcurementNeeds.ToListAsync());
+    }
+
+    [Fact]
     public async Task RejectedWarehouseRequestCannotCreateProcurementTaskFromExistingNeed()
     {
         var tenantId = Guid.NewGuid();
@@ -121,6 +151,32 @@ public sealed class SupplyChainServiceTests
 
         Assert.Equal("Rejected warehouse requests cannot be processed.", ex.Message);
         Assert.Empty(await db.ProcurementTasks.ToListAsync());
+    }
+
+    [Fact]
+    public async Task PartiallyApprovedWarehouseRequestCannotBeIssuedUntilFullyReady()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        var seed = await SeedAsync(db, tenantId, "PPE-PARTIAL-HELMET", "Kaska", 7);
+        var service = CreateService(db);
+
+        var request = await service.CreateFieldRequestAsync(new CreateSupplyRequestInput(
+            tenantId,
+            seed.SiteId,
+            seed.UserId,
+            null,
+            FieldWarehouseUrgency.Normal,
+            null,
+            [new SupplyRequestLineInput(seed.ItemId, 20, "Kaska")]), CancellationToken.None);
+        var review = await service.ApproveFieldRequestAsync(tenantId, request.Id, seed.UserId, null, CancellationToken.None);
+
+        Assert.Equal(FieldWarehouseRequestStatus.PartiallyApproved, review.Status);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.IssueFieldRequestAsync(tenantId, request.Id, seed.WarehouseId, seed.UserId, "Prorab", null, CancellationToken.None));
+
+        Assert.Equal("Warehouse request is not ready for issue.", ex.Message);
+        Assert.Empty(await db.WarehouseIssues.ToListAsync());
     }
 
     [Fact]

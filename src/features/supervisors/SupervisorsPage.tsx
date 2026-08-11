@@ -1,5 +1,5 @@
 import { EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Button, Card, DatePicker, Descriptions, Drawer, Form, Input, Select, Space, Table, Tag, message } from 'antd'
+import { Button, Card, DatePicker, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import type { Dayjs } from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -87,10 +87,14 @@ const replaceReport = (items: FieldDailyReport[], updated: FieldDailyReport) =>
 
 type WarehouseReviewAction = 'Approved' | 'NeedsJustification' | 'Rejected' | 'Issued'
 
+type WarehouseDecisionFormValues = {
+  note: string
+}
+
 const warehouseTerminalStatuses = new Set<FieldWarehouseRequestStatus>(['Rejected', 'Issued', 'Closed', 'Cancelled'])
 
 const canApproveWarehouse = (row: ManagementWarehouseRequest) =>
-  ['Draft', 'Submitted', 'UnderReview', 'NeedsJustification', 'PendingApproval', 'Approved'].includes(row.status)
+  ['PendingApproval', 'Approved'].includes(row.status)
 
 const canRequestWarehouseJustification = (row: ManagementWarehouseRequest) =>
   ['Draft', 'Submitted', 'UnderReview', 'PendingApproval'].includes(row.status)
@@ -99,7 +103,7 @@ const canRejectWarehouse = (row: ManagementWarehouseRequest) =>
   !warehouseTerminalStatuses.has(row.status)
 
 const canIssueWarehouse = (row: ManagementWarehouseRequest) =>
-  ['Approved', 'PartiallyApproved', 'ReadyForPickup'].includes(row.status) && row.totalReserved > 0
+  row.status === 'ReadyForPickup' && row.lines.every((line) => line.reservedQuantity >= line.requestedQuantity)
 
 const warehouseMaterialSummary = (row: ManagementWarehouseRequest) => {
   const linesWithName = row.lines.filter((line) => line.itemName?.trim())
@@ -129,6 +133,7 @@ export const SupervisorsPage = () => {
   const [reportDrawerOpen, setReportDrawerOpen] = useState(false)
   const [warehouseDrawerOpen, setWarehouseDrawerOpen] = useState(false)
   const [auditDrawerOpen, setAuditDrawerOpen] = useState(false)
+  const [warehouseDecision, setWarehouseDecision] = useState<{ row: ManagementWarehouseRequest; status: Extract<WarehouseReviewAction, 'NeedsJustification' | 'Rejected'> } | null>(null)
   const [loading, setLoading] = useState(false)
   const [reviewingReportId, setReviewingReportId] = useState<string | null>(null)
   const [reviewingWarehouseId, setReviewingWarehouseId] = useState<string | null>(null)
@@ -137,6 +142,7 @@ export const SupervisorsPage = () => {
   const [auditSupervisorId, setAuditSupervisorId] = useState<string>()
   const [auditAction, setAuditAction] = useState<string>()
   const [form] = Form.useForm<SupervisorFormValues>()
+  const [warehouseDecisionForm] = Form.useForm<WarehouseDecisionFormValues>()
 
   const load = async () => {
     setLoading(true)
@@ -300,15 +306,10 @@ export const SupervisorsPage = () => {
   const reviewWarehouse = async (row: ManagementWarehouseRequest, status: WarehouseReviewAction) => {
     if (reviewingWarehouseId) return
     const managerNote = status === 'Approved'
-      ? 'Stok yoxlanıldı və rezerv/procurement axını yaradıldı.'
+      ? 'Anbar sorğusu təsdiqləndi. Sistem stok yoxlaması və rezerv prosesini avtomatik icra etdi.'
       : status === 'Issued'
         ? 'Management paneldən verildi'
-        : window.prompt(status === 'Rejected' ? 'Rədd səbəbi' : 'Əsaslandırma qeydi')?.trim()
-
-    if ((status === 'Rejected' || status === 'NeedsJustification') && !managerNote) {
-      message.warning('Rəhbər qeydi daxil edilməlidir')
-      return
-    }
+        : undefined
 
     setReviewingWarehouseId(row.id)
     try {
@@ -321,6 +322,37 @@ export const SupervisorsPage = () => {
       }
       message.success(warehouseActionMessage[status])
       await refreshManagementWarehouseRequests(row.id)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Anbar sorğusu yenilənmədi')
+    } finally {
+      setReviewingWarehouseId(null)
+    }
+  }
+
+  const openWarehouseDecision = (row: ManagementWarehouseRequest, status: Extract<WarehouseReviewAction, 'NeedsJustification' | 'Rejected'>) => {
+    warehouseDecisionForm.resetFields()
+    setWarehouseDecision({ row, status })
+  }
+
+  const submitWarehouseDecision = async (values: WarehouseDecisionFormValues) => {
+    if (!warehouseDecision || reviewingWarehouseId) return
+    const note = values.note?.trim()
+    if (!note) {
+      message.warning('Rəhbər qeydi daxil edilməlidir')
+      return
+    }
+
+    setReviewingWarehouseId(warehouseDecision.row.id)
+    try {
+      await buildTrackBackendApi.reviewManagementWarehouseRequest(warehouseDecision.row.id, {
+        status: warehouseDecision.status,
+        managerNote: note,
+      })
+      message.success(warehouseActionMessage[warehouseDecision.status])
+      const requestId = warehouseDecision.row.id
+      setWarehouseDecision(null)
+      warehouseDecisionForm.resetFields()
+      await refreshManagementWarehouseRequests(requestId)
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Anbar sorğusu yenilənmədi')
     } finally {
@@ -344,13 +376,13 @@ export const SupervisorsPage = () => {
         <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Approved')}>Təsdiq</Button>
       )}
       {canRequestWarehouseJustification(row) && (
-        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'NeedsJustification')}>Əsaslandır</Button>
+        <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => openWarehouseDecision(row, 'NeedsJustification')}>Əsaslandırma tələb et</Button>
       )}
       {canIssueWarehouse(row) && (
         <Button loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Issued')}>Verildi</Button>
       )}
       {canRejectWarehouse(row) && (
-        <Button danger loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => reviewWarehouse(row, 'Rejected')}>Rədd</Button>
+        <Button danger loading={reviewingWarehouseId === row.id} disabled={Boolean(reviewingWarehouseId)} onClick={() => openWarehouseDecision(row, 'Rejected')}>Rədd</Button>
       )}
     </Space>
   )
@@ -583,8 +615,9 @@ export const SupervisorsPage = () => {
               <Descriptions.Item label="Təcillik">{priorityLabel(selectedWarehouseRequest.urgency)}</Descriptions.Item>
               <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedWarehouseRequest.id}:${selectedWarehouseRequest.status}`} status={selectedWarehouseRequest.status} /></Descriptions.Item>
               <Descriptions.Item label="Ümumi qeyd">{selectedWarehouseRequest.generalNote || DASH}</Descriptions.Item>
-              <Descriptions.Item label="Əsaslandırma">{selectedWarehouseRequest.justification || DASH}</Descriptions.Item>
-              <Descriptions.Item label="Rəhbər qeydi">{selectedWarehouseRequest.managerComment || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Rəhbərin əsaslandırma tələbi">{selectedWarehouseRequest.justificationRequestNote || (selectedWarehouseRequest.status === 'NeedsJustification' ? 'Sistem yoxlamasına görə bu sorğu üçün əlavə əsaslandırma tələb olunur.' : DASH)}</Descriptions.Item>
+              <Descriptions.Item label="Prorabın əsaslandırması">{selectedWarehouseRequest.justification || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Son qərar qeydi">{selectedWarehouseRequest.managerComment || DASH}</Descriptions.Item>
             </Descriptions>
             <Table
               size="small"
@@ -622,6 +655,35 @@ export const SupervisorsPage = () => {
           </Descriptions>
         )}
       </Drawer>
+
+      <Modal
+        title={warehouseDecision?.status === 'NeedsJustification' ? 'Əsaslandırma tələb et' : 'Sorğunu rədd et'}
+        open={Boolean(warehouseDecision)}
+        onCancel={() => setWarehouseDecision(null)}
+        footer={null}
+        destroyOnHidden
+      >
+        <Form form={warehouseDecisionForm} layout="vertical" onFinish={submitWarehouseDecision}>
+          <Form.Item
+            name="note"
+            label={warehouseDecision?.status === 'NeedsJustification' ? 'Proraba qeyd / sual' : 'Rədd səbəbi'}
+            rules={[{ required: true, message: 'Qeyd daxil edin' }]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={warehouseDecision?.status === 'NeedsJustification'
+                ? '100 litr materialın hansı iş üçün və niyə bu həcmdə lazım olduğunu izah edin.'
+                : 'Sorğunun niyə rədd edildiyini yazın.'}
+            />
+          </Form.Item>
+          <Space className="field-form-actions">
+            <Button onClick={() => setWarehouseDecision(null)}>İmtina</Button>
+            <Button type="primary" htmlType="submit" loading={Boolean(warehouseDecision && reviewingWarehouseId === warehouseDecision.row.id)}>
+              {warehouseDecision?.status === 'NeedsJustification' ? 'Tələb göndər' : 'Rədd et'}
+            </Button>
+          </Space>
+        </Form>
+      </Modal>
     </div>
   )
 }

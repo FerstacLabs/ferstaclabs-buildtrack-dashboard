@@ -248,9 +248,13 @@ public sealed class SupplyChainService(
             .ThenInclude(x => x.CatalogItem)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == requestId, ct)
             ?? throw new InvalidOperationException("Sorğu tapılmadı");
-        if (!CanProcessFieldRequest(request.Status))
+        if (request.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Cancelled or FieldWarehouseRequestStatus.Closed or FieldWarehouseRequestStatus.Issued)
         {
             throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
+        }
+        if (!CanProcessFieldRequest(request.Status))
+        {
+            throw new InvalidOperationException("Warehouse request must be pending approval before stock processing.");
         }
 
         if (request.Lines.Count == 0)
@@ -554,14 +558,18 @@ public sealed class SupplyChainService(
             .Include(x => x.Lines)
             .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == fieldRequestId, ct)
             ?? throw new InvalidOperationException("Sorğu tapılmadı");
+        var existingIssue = await db.WarehouseIssues.Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.FieldRequestId == fieldRequestId && x.Status == WarehouseIssueStatus.Issued, ct);
+        if (existingIssue is not null) return existingIssue;
+
         if (request.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Cancelled or FieldWarehouseRequestStatus.Closed)
         {
             throw new InvalidOperationException("Rejected warehouse requests cannot be processed.");
         }
-
-        var existingIssue = await db.WarehouseIssues.Include(x => x.Lines)
-            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.FieldRequestId == fieldRequestId && x.Status == WarehouseIssueStatus.Issued, ct);
-        if (existingIssue is not null) return existingIssue;
+        if (request.Status != FieldWarehouseRequestStatus.ReadyForPickup || request.Lines.Any(x => x.ReservedQuantity < x.RequestedQuantity))
+        {
+            throw new InvalidOperationException("Warehouse request is not ready for issue.");
+        }
 
         var reservations = await db.WarehouseReservations
             .Where(x => x.TenantId == tenantId && x.WarehouseId == warehouseId && x.Status == WarehouseReservationStatus.Active && request.Lines.Select(l => l.Id).Contains(x.RequestLineId))
@@ -679,10 +687,6 @@ public sealed class SupplyChainService(
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static bool CanProcessFieldRequest(FieldWarehouseRequestStatus status) =>
-        status is FieldWarehouseRequestStatus.Draft
-            or FieldWarehouseRequestStatus.Submitted
-            or FieldWarehouseRequestStatus.UnderReview
-            or FieldWarehouseRequestStatus.NeedsJustification
-            or FieldWarehouseRequestStatus.PendingApproval
+        status is FieldWarehouseRequestStatus.PendingApproval
             or FieldWarehouseRequestStatus.Approved;
 }

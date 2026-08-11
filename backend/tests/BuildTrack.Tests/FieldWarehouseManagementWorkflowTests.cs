@@ -17,15 +17,22 @@ public sealed class FieldWarehouseManagementWorkflowTests
     [Fact]
     public void PendingWarehouseRequest_AllowsManagementReviewDecisions()
     {
-        Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.PendingApproval, FieldWarehouseRequestStatus.Approved));
+        Assert.False(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.PendingApproval, FieldWarehouseRequestStatus.Approved));
         Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.PendingApproval, FieldWarehouseRequestStatus.NeedsJustification));
         Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.PendingApproval, FieldWarehouseRequestStatus.Rejected));
     }
 
     [Fact]
-    public void ReadyForPickupWarehouseRequest_AllowsOnlyIssueOrRejectReviewActions()
+    public void NeedsJustificationWarehouseRequest_CannotBeApprovedUntilSupervisorResponds()
     {
-        Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseRequestStatus.Issued));
+        Assert.False(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.NeedsJustification, FieldWarehouseRequestStatus.Approved));
+        Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.NeedsJustification, FieldWarehouseRequestStatus.Rejected));
+    }
+
+    [Fact]
+    public void ReadyForPickupWarehouseRequest_AllowsOnlyRejectReviewAction()
+    {
+        Assert.False(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseRequestStatus.Issued));
         Assert.True(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseRequestStatus.Rejected));
         Assert.False(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseRequestStatus.Approved));
         Assert.False(FieldPortalEndpoints.IsValidWarehouseReviewTransition(FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseRequestStatus.NeedsJustification));

@@ -511,6 +511,7 @@ export interface FieldWarehouseRequest {
   unit: string
   requestedQuantity: number
   reason: string
+  justificationRequestNote?: string
   generalNote?: string
   justification?: string
   urgency: 'Normal' | 'Urgent' | 'Critical'
@@ -552,6 +553,7 @@ export interface ManagementWarehouseRequest {
   urgency: 'Normal' | 'Urgent' | 'Critical'
   status: FieldWarehouseRequestStatus
   generalNote?: string
+  justificationRequestNote?: string
   justification?: string
   managerComment?: string
   abnormalRequest: boolean
@@ -927,6 +929,8 @@ export const buildTrackBackendApi = {
     request<FieldWarehouseRequest>('/api/field/warehouse/requests', { method: 'POST', body: JSON.stringify(body) }),
   createFieldWarehouseCartRequest: (body: { siteId: string; neededBy?: string; urgency: 'Normal' | 'Urgent' | 'Critical'; generalNote?: string; lines: { catalogItemId: string; requestedQuantity: number; reason?: string; specificationJson?: string }[] }) =>
     request<FieldWarehouseRequest>('/api/field/warehouse/cart-requests', { method: 'POST', body: JSON.stringify(body) }),
+  submitFieldWarehouseJustification: (id: string, justification: string) =>
+    request<FieldWarehouseRequest>(`/api/field/warehouse/requests/${id}/justification`, { method: 'POST', body: JSON.stringify({ justification }) }),
   getWarehouseStock: async () => unwrapArray<WarehouseStockItem>(await request<unknown>('/api/procurement/warehouse/stock')),
   getProcurementWarehouseRequests: async (siteId?: string) => unwrapArray<ManagementWarehouseRequest>(await request<unknown>(`/api/procurement/warehouse/requests${siteId ? `?siteId=${encodeURIComponent(siteId)}` : ''}`)),
   approveProcurementWarehouseRequest: (id: string, managerComment?: string) =>

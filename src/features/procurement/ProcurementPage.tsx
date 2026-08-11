@@ -69,11 +69,15 @@ export const ProcurementPage = () => {
   const activeNeeds = useMemo(() => needs.filter((need) => !['Received', 'Cancelled'].includes(need.status)), [needs])
   const activeTasks = useMemo(() => tasks.filter((task) => !['Completed', 'Verified', 'Cancelled'].includes(task.status)), [tasks])
   const canCheckAndReserve = (row: ManagementWarehouseRequest) =>
-    !isTerminalWarehouseRequestStatus(row.status)
-    && ['Draft', 'Submitted', 'UnderReview', 'NeedsJustification', 'PendingApproval', 'Approved'].includes(row.status)
+    row.status === 'Approved'
+    && row.totalReserved === 0
+    && row.lines.every((line) => line.reservedQuantity === 0 && line.approvedQuantity === 0)
+  const canIssueRequest = (row: ManagementWarehouseRequest) =>
+    row.status === 'ReadyForPickup'
+    && row.lines.every((line) => line.reservedQuantity >= line.requestedQuantity)
 
   const approveRequest = async (id: string) => {
-    await buildTrackBackendApi.approveProcurementWarehouseRequest(id, 'Stok yoxlanıldı və rezerv/procurement axını yaradıldı.')
+    await buildTrackBackendApi.approveProcurementWarehouseRequest(id, 'Köhnə təsdiqli sorğu üçün stok yoxlanıldı və rezerv axını yaradıldı.')
     void message.success('Sorğu yoxlanıldı')
     await load()
   }
@@ -163,7 +167,7 @@ export const ProcurementPage = () => {
                     { title: 'Status', dataIndex: 'status', render: (_, row) => <Tag key={`${row.id}:${row.status}`} color={row.status === 'ReadyForPickup' ? 'green' : row.status === 'InFulfillment' ? 'orange' : isTerminalWarehouseRequestStatus(row.status) ? 'red' : 'blue'}>{warehouseRequestStatusLabel(row.status)}</Tag> },
                     { title: 'Toplam', render: (_, row) => `${formatNumber(row.totalRequested)} vahid` },
                     { title: 'Çatışmazlıq', render: (_, row) => row.totalShortfall > 0 ? <Tag color="red">{formatNumber(row.totalShortfall)}</Tag> : <Tag color="green">Yoxdur</Tag> },
-                    { title: 'Əməliyyat', render: (_, row) => <Space>{canCheckAndReserve(row) && <Button onClick={() => approveRequest(row.id)}>Yoxla/rezerv et</Button>}<Button onClick={() => issueRequest(row.id)} disabled={!['Approved', 'PartiallyApproved', 'ReadyForPickup'].includes(row.status) || row.totalReserved <= 0}>Ver</Button>{isTerminalWarehouseRequestStatus(row.status) && <Tag color="default">Arxiv</Tag>}</Space> },
+                    { title: 'Əməliyyat', render: (_, row) => <Space>{canCheckAndReserve(row) && <Button onClick={() => approveRequest(row.id)}>Stoku yoxla və rezerv et</Button>}<Button onClick={() => issueRequest(row.id)} disabled={!canIssueRequest(row)}>Ver</Button>{isTerminalWarehouseRequestStatus(row.status) && <Tag color="default">Arxiv</Tag>}</Space> },
                   ]}
                 />
               </Card>

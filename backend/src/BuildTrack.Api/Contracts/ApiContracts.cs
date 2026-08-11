@@ -498,6 +498,7 @@ public sealed record FieldWarehouseRequestDto(
     DateOnly? NeededBy,
     FieldWarehouseUrgency Urgency,
     string Reason,
+    string? JustificationRequestNote,
     string? Justification,
     string? ManagerComment,
     FieldWarehouseRequestStatus Status,
@@ -534,6 +535,8 @@ public sealed record CreateFieldWarehouseCartLineRequest(
 
 public sealed record ReviewFieldWarehouseRequest(FieldWarehouseRequestStatus Status, string? ManagerComment);
 
+public sealed record SubmitFieldWarehouseJustificationRequest(string Justification);
+
 public sealed record ManagementWarehouseLineDto(
     Guid Id,
     Guid CatalogItemId,
@@ -562,6 +565,7 @@ public sealed record ManagementWarehouseRequestDto(
     FieldWarehouseUrgency Urgency,
     FieldWarehouseRequestStatus Status,
     string? GeneralNote,
+    string? JustificationRequestNote,
     string? Justification,
     string? ManagerComment,
     bool AbnormalRequest,

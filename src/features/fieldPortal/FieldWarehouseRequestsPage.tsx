@@ -1,5 +1,5 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   buildTrackBackendApi,
@@ -21,6 +21,10 @@ interface CartRequestForm {
   lines: CartLineForm[]
 }
 
+interface JustificationForm {
+  justification: string
+}
+
 const defaultLine = (): CartLineForm => ({ requestedQuantity: 1 })
 
 const urgencyOptions = [
@@ -35,7 +39,9 @@ export const FieldWarehouseRequestsPage = () => {
   const [requests, setRequests] = useState<FieldWarehouseRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [justificationRequest, setJustificationRequest] = useState<FieldWarehouseRequest | null>(null)
   const [form] = Form.useForm<CartRequestForm>()
+  const [justificationForm] = Form.useForm<JustificationForm>()
   const selectedUrgency = Form.useWatch('urgency', form) ?? 'Normal'
 
   const load = async () => {
@@ -97,6 +103,27 @@ export const FieldWarehouseRequestsPage = () => {
     await load()
   }
 
+  const openJustification = (request: FieldWarehouseRequest) => {
+    justificationForm.resetFields()
+    setJustificationRequest(request)
+  }
+
+  const submitJustification = async (values: JustificationForm) => {
+    if (!justificationRequest) return
+    const justification = values.justification?.trim()
+    if (!justification) {
+      void message.warning('Əsaslandırma daxil edin')
+      return
+    }
+
+    const updated = await buildTrackBackendApi.submitFieldWarehouseJustification(justificationRequest.id, justification)
+    setRequests((items) => items.map((item) => (item.id === updated.id ? updated : item)))
+    setJustificationRequest(null)
+    justificationForm.resetFields()
+    void message.success('Əsaslandırma göndərildi')
+    await load()
+  }
+
   if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
 
   return (
@@ -155,6 +182,12 @@ export const FieldWarehouseRequestsPage = () => {
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={fieldStatusColor(status)}>{fieldStatusLabel(status)}</Tag> },
             { title: 'Qeyd', render: (_, row) => row.generalNote || row.reason || '-' },
             { title: 'Tarix', dataIndex: 'createdAt', render: (value) => new Date(value).toLocaleString('az-AZ') },
+            {
+              title: 'Əməliyyat',
+              render: (_, row) => row.status === 'NeedsJustification'
+                ? <Button onClick={() => openJustification(row)}>Əsaslandır</Button>
+                : '-',
+            },
           ]}
         />
       </Card>
@@ -230,6 +263,37 @@ export const FieldWarehouseRequestsPage = () => {
           </Space>
         </Form>
       </Drawer>
+      <Modal
+        title="Sorğunu əsaslandır"
+        open={Boolean(justificationRequest)}
+        onCancel={() => setJustificationRequest(null)}
+        footer={null}
+        destroyOnHidden
+      >
+        {justificationRequest && (
+          <Space direction="vertical" size="middle" className="full-width">
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="Sorğu nömrəsi">{justificationRequest.code || justificationRequest.id.slice(0, 8)}</Descriptions.Item>
+              <Descriptions.Item label="Materiallar">{justificationRequest.lines?.length ? `${justificationRequest.lines.length} sətir` : justificationRequest.materialName}</Descriptions.Item>
+              <Descriptions.Item label="Miqdar">{justificationRequest.lines?.length ? `${justificationRequest.lines.reduce((sum, line) => sum + line.requestedQuantity, 0)} vahid` : `${justificationRequest.requestedQuantity} ${justificationRequest.unit}`}</Descriptions.Item>
+              <Descriptions.Item label="Ümumi qeyd">{justificationRequest.generalNote || justificationRequest.reason || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Rəhbərin tələbi">
+                {justificationRequest.justificationRequestNote || 'Sistem yoxlamasına görə bu sorğu üçün əlavə əsaslandırma tələb olunur.'}
+              </Descriptions.Item>
+            </Descriptions>
+            <Form form={justificationForm} layout="vertical" onFinish={submitJustification}>
+              <Form.Item
+                name="justification"
+                label="Əsaslandırma"
+                rules={[{ required: true, message: 'Əsaslandırma daxil edin' }]}
+              >
+                <Input.TextArea rows={4} placeholder="100 litr astar 2-ci mərtəbənin 850 m² divar səthinin hazırlanması üçün tələb olunur." />
+              </Form.Item>
+              <Button type="primary" htmlType="submit">Əsaslandırmanı göndər</Button>
+            </Form>
+          </Space>
+        )}
+      </Modal>
     </div>
   )
 }

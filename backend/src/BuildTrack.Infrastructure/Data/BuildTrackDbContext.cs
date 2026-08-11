@@ -479,6 +479,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.Property(x => x.Urgency).HasConversion<string>().HasMaxLength(40).IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(1200).IsRequired();
             entity.Property(x => x.GeneralNote).HasMaxLength(1200);
+            entity.Property(x => x.JustificationRequestNote).HasMaxLength(1200);
             entity.Property(x => x.Justification).HasMaxLength(1200);
             entity.Property(x => x.ManagerComment).HasMaxLength(1200);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(60).IsRequired();

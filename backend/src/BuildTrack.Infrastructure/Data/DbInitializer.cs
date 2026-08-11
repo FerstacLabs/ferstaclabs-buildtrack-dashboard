@@ -671,6 +671,7 @@ CREATE TABLE IF NOT EXISTS field_warehouse_requests (
     "NeededBy" date NULL,
     "Urgency" character varying(40) NOT NULL,
     "Reason" character varying(1200) NOT NULL,
+    "JustificationRequestNote" character varying(1200) NULL,
     "Justification" character varying(1200) NULL,
     "ManagerComment" character varying(1200) NULL,
     "Status" character varying(60) NOT NULL,
@@ -732,6 +733,7 @@ ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "ApprovedQuantity"
 ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "ReservedQuantity" numeric(18,3) NOT NULL DEFAULT 0;
 ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "IssuedQuantity" numeric(18,3) NOT NULL DEFAULT 0;
 ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "GeneralNote" character varying(1200) NULL;
+ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "JustificationRequestNote" character varying(1200) NULL;
 ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "AbnormalRequest" boolean NOT NULL DEFAULT false;
 ALTER TABLE field_warehouse_requests ADD COLUMN IF NOT EXISTS "SubmittedAt" timestamp with time zone NULL;
 UPDATE field_warehouse_requests

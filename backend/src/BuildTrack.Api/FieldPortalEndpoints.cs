@@ -30,6 +30,7 @@ public static class FieldPortalEndpoints
         app.MapGet("/api/field/warehouse/catalog", GetFieldWarehouseCatalogAsync);
         app.MapGet("/api/field/warehouse/requests", GetFieldWarehouseRequestsAsync);
         app.MapPost("/api/field/warehouse/requests", CreateFieldWarehouseRequestAsync);
+        app.MapPost("/api/field/warehouse/requests/{id:guid}/justification", SubmitFieldWarehouseJustificationAsync);
 
         app.MapGet("/api/supervisors", GetSupervisorsAsync);
         app.MapPost("/api/supervisors", CreateSupervisorAsync);
@@ -550,6 +551,50 @@ public static class FieldPortalEndpoints
         return Results.Ok((await LoadWarehouseRequestsAsync(db, [warehouseRequest.SiteId], ct)).First(x => x.Id == warehouseRequest.Id));
     }
 
+    private static async Task<IResult> SubmitFieldWarehouseJustificationAsync(
+        Guid id,
+        SubmitFieldWarehouseJustificationRequest request,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IFieldAccessService fieldAccess,
+        CancellationToken ct)
+    {
+        var justification = Clean(request.Justification);
+        if (string.IsNullOrWhiteSpace(justification)) return Results.BadRequest(new { error = "Əsaslandırma daxil edilməlidir" });
+
+        var tenantId = RequireTenantId(tenantContext);
+        var userId = RequireUserId(tenantContext);
+        var row = await db.FieldWarehouseRequests
+            .Include(x => x.Lines)
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id && x.SupervisorUserId == userId, ct);
+        if (row is null) return Results.NotFound();
+        await fieldAccess.RequireSiteAccessAsync(row.SiteId, ct);
+
+        if (row.Status is FieldWarehouseRequestStatus.Rejected or FieldWarehouseRequestStatus.Issued or FieldWarehouseRequestStatus.Closed or FieldWarehouseRequestStatus.Cancelled)
+        {
+            return Results.Conflict(new { error = "Terminal anbar sorğusu əsaslandırıla bilməz." });
+        }
+
+        if (row.Status != FieldWarehouseRequestStatus.NeedsJustification)
+        {
+            return Results.Conflict(new { error = "Əsaslandırma yalnız tələb olunan sorğu üçün göndərilə bilər." });
+        }
+
+        row.Justification = justification;
+        row.Status = FieldWarehouseRequestStatus.PendingApproval;
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        foreach (var line in row.Lines)
+        {
+            if (line.Status == FieldWarehouseRequestLineStatus.Rejected) continue;
+            line.Status = FieldWarehouseRequestLineStatus.Pending;
+            line.UpdatedAt = row.UpdatedAt;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, "WarehouseRequestJustificationSubmitted", "FieldWarehouseRequest", row.Id, false, "Prorab anbar sorğusu üçün əsaslandırma təqdim etdi.", ct);
+        return Results.Ok((await LoadWarehouseRequestsAsync(db, [row.SiteId], ct)).First(x => x.Id == row.Id));
+    }
+
     private static async Task<IResult> GetSupervisorsAsync(BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
@@ -702,6 +747,12 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> ReviewManagementWarehouseRequestAsync(Guid id, ReviewFieldWarehouseRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
+        if (request.Status is FieldWarehouseRequestStatus.NeedsJustification or FieldWarehouseRequestStatus.Rejected
+            && string.IsNullOrWhiteSpace(request.ManagerComment))
+        {
+            return Results.BadRequest(new { error = "Manager note is required" });
+        }
+
         var tenantId = RequireTenantId(tenantContext);
         var row = await db.FieldWarehouseRequests
             .Include(x => x.CatalogItem)
@@ -715,7 +766,15 @@ public static class FieldPortalEndpoints
         }
 
         row.Status = request.Status;
-        row.ManagerComment = Clean(request.ManagerComment);
+        if (request.Status == FieldWarehouseRequestStatus.NeedsJustification)
+        {
+            row.JustificationRequestNote = Clean(request.ManagerComment);
+            row.ManagerComment = null;
+        }
+        else
+        {
+            row.ManagerComment = Clean(request.ManagerComment);
+        }
         row.ReviewedAt = DateTimeOffset.UtcNow;
         row.ReviewedByUserId = tenantContext.UserId;
         row.UpdatedAt = DateTimeOffset.UtcNow;
@@ -739,7 +798,7 @@ public static class FieldPortalEndpoints
         }
 
         await db.SaveChangesAsync(ct);
-        await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, $"WarehouseRequest{request.Status}", "FieldWarehouseRequest", row.Id, row.Status == FieldWarehouseRequestStatus.NeedsJustification, $"Anbar sorğusu yeniləndi: {BuildWarehouseAuditMaterialSummary(row)}", ct);
+        await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, $"WarehouseRequest{request.Status}", "FieldWarehouseRequest", row.Id, row.Status == FieldWarehouseRequestStatus.NeedsJustification, BuildWarehouseReviewDescription(row, request.Status), ct);
         if (rejectionCascade?.ReleasedReservations > 0)
         {
             await WriteAuditAsync(db, row.TenantId, row.SiteId, row.SupervisorUserId, "WarehouseRequestReservationReleased", "FieldWarehouseRequest", row.Id, false, "Rədd edilmiş sorğu üzrə rezerv ləğv edildi.", ct);
@@ -890,6 +949,7 @@ public static class FieldPortalEndpoints
                 x.NeededBy,
                 x.Urgency,
                 x.Reason,
+                x.JustificationRequestNote,
                 x.Justification,
                 x.ManagerComment,
                 x.Status,
@@ -985,17 +1045,19 @@ public static class FieldPortalEndpoints
                 or FieldWarehouseRequestStatus.UnderReview
                 or FieldWarehouseRequestStatus.PendingApproval,
             FieldWarehouseRequestStatus.Rejected => true,
-            FieldWarehouseRequestStatus.Approved => current is FieldWarehouseRequestStatus.Draft
-                or FieldWarehouseRequestStatus.Submitted
-                or FieldWarehouseRequestStatus.UnderReview
-                or FieldWarehouseRequestStatus.NeedsJustification
-                or FieldWarehouseRequestStatus.PendingApproval,
-            FieldWarehouseRequestStatus.Issued => current is FieldWarehouseRequestStatus.Approved
-                or FieldWarehouseRequestStatus.PartiallyApproved
-                or FieldWarehouseRequestStatus.ReadyForPickup,
+            FieldWarehouseRequestStatus.Approved => false,
+            FieldWarehouseRequestStatus.Issued => false,
             _ => false,
         };
     }
+
+    private static string BuildWarehouseReviewDescription(FieldWarehouseRequest request, FieldWarehouseRequestStatus status) => status switch
+    {
+        FieldWarehouseRequestStatus.NeedsJustification => "Anbar sorğusu üçün əsaslandırma tələb edildi.",
+        FieldWarehouseRequestStatus.Rejected => "Anbar sorğusu rədd edildi.",
+        FieldWarehouseRequestStatus.Issued => "Anbar sorğusu verildi.",
+        _ => $"Anbar sorğusu yeniləndi: {BuildWarehouseAuditMaterialSummary(request)}",
+    };
 
     private sealed record WarehouseRejectionCascadeResult(int ReleasedReservations, int CancelledNeeds, int CancelledTasks);
 

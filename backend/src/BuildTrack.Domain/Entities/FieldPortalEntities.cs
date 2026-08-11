@@ -223,6 +223,7 @@ public sealed class FieldWarehouseRequest
     public FieldWarehouseUrgency Urgency { get; set; } = FieldWarehouseUrgency.Normal;
     public string Reason { get; set; } = string.Empty;
     public string? GeneralNote { get; set; }
+    public string? JustificationRequestNote { get; set; }
     public string? Justification { get; set; }
     public string? ManagerComment { get; set; }
     public bool AbnormalRequest { get; set; }

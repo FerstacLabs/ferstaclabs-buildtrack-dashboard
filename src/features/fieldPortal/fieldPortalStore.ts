@@ -68,7 +68,7 @@ export const fieldStatusLabel = (status?: string) => {
     case 'Approved': return 'Təsdiqlənib'
     case 'NeedsCorrection': return 'Düzəliş lazımdır'
     case 'Rejected': return 'Rədd edilib'
-    case 'NeedsJustification': return 'Əsaslandırma lazımdır'
+    case 'NeedsJustification': return 'Əsaslandırma tələb olunur'
     case 'PendingApproval': return 'Təsdiq gözləyir'
     case 'PartiallyApproved': return 'Qismən təsdiq'
     case 'ReadyForPickup': return 'Təhvilə hazır'
