@@ -817,6 +817,35 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
         attendanceEvent.Source)).ToArray());
 });
 
+app.MapGet("/api/attendance/daily-roster", async (Guid? siteId, string? date, IAttendanceReportingService attendanceReports, CancellationToken ct) =>
+{
+    var workDate = DateOnly.TryParse(date, out var parsedDate) ? parsedDate : (DateOnly?)null;
+    try
+    {
+        var report = await attendanceReports.BuildDailyRosterAsync(siteId, workDate, null, ct);
+        return Results.Ok(ToAttendanceDailyRosterResponse(report));
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/api/attendance/discipline", async (Guid? siteId, string? dateFrom, string? dateTo, IAttendanceReportingService attendanceReports, CancellationToken ct) =>
+{
+    var from = DateOnly.TryParse(dateFrom, out var parsedFrom) ? parsedFrom : (DateOnly?)null;
+    var to = DateOnly.TryParse(dateTo, out var parsedTo) ? parsedTo : (DateOnly?)null;
+    try
+    {
+        var report = await attendanceReports.BuildDisciplineReportAsync(siteId, from, to, null, ct);
+        return Results.Ok(ToAttendanceDisciplineResponse(report));
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 
 app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId, BuildTrackDbContext db, CancellationToken ct) =>
 {
@@ -1899,6 +1928,93 @@ static (DateTimeOffset StartUtc, DateTimeOffset EndUtc) GetUtcRangeForWorkDate(D
     var startUtc = new DateTimeOffset(localStart, startOffset).ToUniversalTime();
     return (startUtc, startUtc.AddDays(1));
 }
+
+static AttendanceDailyRosterResponse ToAttendanceDailyRosterResponse(AttendanceDailyRosterReport report) => new(
+    report.WorkDate,
+    report.PlannedStart,
+    report.PlannedEnd,
+    report.LateGraceMinutes,
+    report.EarlyExitGraceMinutes,
+    report.ActiveWorkersCount,
+    report.PresentCount,
+    report.AbsentCount,
+    report.LateCount,
+    report.EarlyExitCount,
+    report.TotalWorkedHours,
+    report.AttendancePercent,
+    report.Rows.Select(row => new AttendanceDailyRosterRowResponse(
+        row.Key,
+        row.WorkerId,
+        row.WorkerExternalId,
+        row.WorkerName,
+        row.SiteId,
+        row.SiteName,
+        row.Role,
+        row.Brigade,
+        row.PlannedCheckIn,
+        row.PlannedCheckOut,
+        row.ActualCheckIn,
+        row.ActualCheckInLocal,
+        row.ActualCheckOut,
+        row.ActualCheckOutLocal,
+        row.Status,
+        row.LateMinutes,
+        row.EarlyExitMinutes,
+        row.WorkedHours,
+        row.EntryMethod,
+        row.RiskScore,
+        row.RiskLevel,
+        row.Source)).ToArray());
+
+static AttendanceDisciplineResponse ToAttendanceDisciplineResponse(AttendanceDisciplineReport report) => new(
+    report.DateFrom,
+    report.DateTo,
+    report.PlannedStart,
+    report.PlannedEnd,
+    report.LateGraceMinutes,
+    report.EarlyExitGraceMinutes,
+    report.ScheduledWorkerDays,
+    report.PresentWorkerDays,
+    report.AbsentWorkerDays,
+    report.LateCount,
+    report.TotalLateMinutes,
+    report.EarlyExitCount,
+    report.TotalEarlyExitMinutes,
+    report.ApprovedPermissionDays,
+    report.ApprovedPermissionHours,
+    report.AttendancePercent,
+    report.PermissionDomainAvailable,
+    report.Rows.Select(row => new AttendanceDisciplineRowResponse(
+        row.Key,
+        row.WorkerId,
+        row.WorkerExternalId,
+        row.WorkerName,
+        row.SiteId,
+        row.SiteName,
+        row.Role,
+        row.Brigade,
+        row.ScheduledDays,
+        row.PresentDays,
+        row.AbsentDays,
+        row.LateCount,
+        row.TotalLateMinutes,
+        row.EarlyExitCount,
+        row.TotalEarlyExitMinutes,
+        row.ApprovedPermissionDays,
+        row.ApprovedPermissionHours,
+        row.AttendancePercent,
+        row.RiskScore,
+        row.RiskLevel,
+        row.Trend,
+        row.Note)).ToArray(),
+    report.Trend.Select(point => new AttendanceDisciplineTrendPointResponse(
+        point.Key,
+        point.Date,
+        point.Label,
+        point.LateCount,
+        point.TotalLateMinutes,
+        point.LateHours,
+        point.EarlyExitCount)).ToArray());
 
 static bool IsRecognizedAttendancePayload(AttendanceEvent attendanceEvent)
     => DahuaVerifiedAttendancePayload.IsVerifiedAttendance(attendanceEvent);

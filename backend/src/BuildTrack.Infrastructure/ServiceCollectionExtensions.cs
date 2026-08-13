@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IPasswordProtector, AesPasswordProtector>();
         services.AddScoped<IAttendanceIngestionService, AttendanceIngestionService>();
+        services.AddScoped<IAttendanceReportingService, AttendanceReportingService>();
         services.AddScoped<IDahuaAccessRecordIngestionPipeline, DahuaAccessRecordIngestionPipeline>();
         services.AddScoped<IAttendanceSessionService, AttendanceSessionService>();
         services.AddScoped<IWorkerCameraIdentityResolver, WorkerCameraIdentityResolver>();

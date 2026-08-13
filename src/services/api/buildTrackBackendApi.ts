@@ -244,6 +244,104 @@ export interface AttendanceSnapshotRow {
   source: string
 }
 
+export interface AttendanceDailyRosterRow {
+  key: string
+  workerId: string
+  workerExternalId: string
+  workerName: string
+  siteId: string
+  siteName: string
+  role?: string
+  brigade?: string
+  plannedCheckIn: string
+  plannedCheckOut: string
+  actualCheckIn?: string
+  actualCheckInLocal?: string
+  actualCheckOut?: string
+  actualCheckOutLocal?: string
+  status: 'Gəlib' | 'Gecikib' | 'Gəlməyib' | 'Riskli'
+  lateMinutes: number
+  earlyExitMinutes: number
+  workedHours: number
+  entryMethod: string
+  riskScore: number
+  riskLevel: 'Aşağı' | 'Orta' | 'Yüksək' | 'Kritik'
+  source?: string
+}
+
+export interface AttendanceDailyRosterReport {
+  workDate: string
+  plannedStart: string
+  plannedEnd: string
+  lateGraceMinutes: number
+  earlyExitGraceMinutes: number
+  activeWorkersCount: number
+  presentCount: number
+  absentCount: number
+  lateCount: number
+  earlyExitCount: number
+  totalWorkedHours: number
+  attendancePercent: number
+  rows: AttendanceDailyRosterRow[]
+}
+
+export interface AttendanceDisciplineRow {
+  key: string
+  workerId: string
+  workerExternalId: string
+  workerName: string
+  siteId: string
+  siteName: string
+  role?: string
+  brigade?: string
+  scheduledDays: number
+  presentDays: number
+  absentDays: number
+  lateCount: number
+  totalLateMinutes: number
+  earlyExitCount: number
+  totalEarlyExitMinutes: number
+  approvedPermissionDays: number
+  approvedPermissionHours: number
+  attendancePercent: number
+  riskScore: number
+  riskLevel: string
+  trend: string
+  note: string
+}
+
+export interface AttendanceDisciplineTrendPoint {
+  key: string
+  date: string
+  label: string
+  lateCount: number
+  totalLateMinutes: number
+  lateHours: number
+  earlyExitCount: number
+}
+
+export interface AttendanceDisciplineReport {
+  dateFrom: string
+  dateTo: string
+  plannedStart: string
+  plannedEnd: string
+  lateGraceMinutes: number
+  earlyExitGraceMinutes: number
+  scheduledWorkerDays: number
+  presentWorkerDays: number
+  absentWorkerDays: number
+  lateCount: number
+  totalLateMinutes: number
+  earlyExitCount: number
+  totalEarlyExitMinutes: number
+  approvedPermissionDays: number
+  approvedPermissionHours: number
+  attendancePercent: number
+  permissionDomainAvailable: boolean
+  rows: AttendanceDisciplineRow[]
+  trend: AttendanceDisciplineTrendPoint[]
+}
+
 export type SecurityEventStatus = 'Open' | 'PendingCorrelation' | 'Reviewed' | 'Ignored' | 'AutoResolved'
 
 export interface SecurityEventRow {
@@ -905,6 +1003,19 @@ export const buildTrackBackendApi = {
   getAttendanceLive: async (siteId: string) => unwrapArray<AttendanceLiveEvent>(await request<unknown>(`/api/sites/${siteId}/attendance-live?limit=100`)),
   getAttendanceLiveStatus: async (siteId: string) => normalizeAttendanceLiveStatus(await request<unknown>(`/api/sites/${siteId}/attendance/live-status`)),
   getAttendanceDaily: async (siteId: string, date?: string) => normalizeAttendanceDaily(await request<unknown>(`/api/sites/${siteId}/attendance/daily${date ? `?date=${date}` : ''}`)),
+  getAttendanceDailyRoster: (params?: { siteId?: string; date?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.siteId) query.set('siteId', params.siteId)
+    if (params?.date) query.set('date', params.date)
+    return request<AttendanceDailyRosterReport>(`/api/attendance/daily-roster${query.toString() ? `?${query}` : ''}`)
+  },
+  getAttendanceDiscipline: (params?: { siteId?: string; dateFrom?: string; dateTo?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.siteId) query.set('siteId', params.siteId)
+    if (params?.dateFrom) query.set('dateFrom', params.dateFrom)
+    if (params?.dateTo) query.set('dateTo', params.dateTo)
+    return request<AttendanceDisciplineReport>(`/api/attendance/discipline${query.toString() ? `?${query}` : ''}`)
+  },
   getAttendanceSnapshots: async (siteId: string, workerExternalId: string, date: string) => unwrapArray<AttendanceSnapshotRow>(await request<unknown>(`/api/attendance-events/snapshots?siteId=${encodeURIComponent(siteId)}&workerExternalId=${encodeURIComponent(workerExternalId)}&date=${encodeURIComponent(date)}`)),
   getSecurityEvents: async (siteId: string, date?: string) => unwrapArray<SecurityEventRow>(await request<unknown>(`/api/sites/${siteId}/security-events${date ? `?date=${date}` : ''}`)),
   reviewSecurityEvent: (id: string, body: { status: SecurityEventStatus; reviewNote?: string }) => request(`/api/security-events/${id}/review`, { method: 'PATCH', body: JSON.stringify(body) }),

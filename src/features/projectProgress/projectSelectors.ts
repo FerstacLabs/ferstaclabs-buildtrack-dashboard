@@ -288,9 +288,12 @@ export const getRiskRowsByObject = (data: ProjectProgressData, objectId = ALL_OB
     })
 }
 
+// Fallback-only ProjectProgress insight used by legacy/offline AI context.
+// Production attendance and delay pages must use backend AttendanceSessions/AttendanceEvents APIs.
 export const getDelayRowsByObject = (data: ProjectProgressData, objectId = ALL_OBJECTS_ID) =>
   getRiskRowsByObject(data, objectId)
 
+// Fallback-only ProjectProgress attendance rows. Canonical attendance pages use backend reports.
 export const getAttendanceRowsByObject = (data: ProjectProgressData, objectId = ALL_OBJECTS_ID): AttendancePanelRow[] => {
   const workerById = new Map(data.workerAssignments.map((worker) => [worker.id, worker]))
   const crewById = new Map(data.crews.map((crew) => [crew.id, crew]))

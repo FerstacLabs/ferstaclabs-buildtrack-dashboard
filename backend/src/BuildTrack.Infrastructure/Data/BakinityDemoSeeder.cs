@@ -46,7 +46,7 @@ internal static class BakinityDemoSeeder
         var procurementUsers = await UpsertProcurementUsersAsync(db, tenant.Id, configuration, ownerPassword, ct);
         var workers = await UpsertWorkersAsync(db, tenant.Id, siteRows, ct);
         await UpsertFieldSmetaItemsAsync(db, tenant.Id, siteRows, ct);
-        await UpsertAttendanceSeedAsync(db, tenant.Id, primarySite.Id, workers.Take(6).ToArray(), ct);
+        await UpsertAttendanceSeedAsync(db, tenant.Id, siteRows, workers, ct);
         await UpsertWarehouseWorkflowSeedAsync(db, tenant.Id, primarySite.Id, supervisors[0].Id, procurementUsers[0].Id, ct);
         await UpsertWorkspaceAsync(db, tenant.Id, siteRows, workers, ct);
 
@@ -468,6 +468,195 @@ internal static class BakinityDemoSeeder
             }
         }
     }
+
+    private static async Task UpsertAttendanceSeedAsync(BuildTrackDbContext db, Guid tenantId, IReadOnlyList<Site> sites, IReadOnlyList<Worker> workers, CancellationToken ct)
+    {
+        const string seedSource = "seed_bakinity_demo";
+
+        var existingSessions = await db.AttendanceSessions
+            .Where(x => x.TenantId == tenantId && x.Source == seedSource)
+            .ToListAsync(ct);
+        var existingEvents = await db.AttendanceEvents
+            .Where(x => x.TenantId == tenantId && x.Source == seedSource)
+            .ToListAsync(ct);
+        if (existingSessions.Count > 0 || existingEvents.Count > 0)
+        {
+            db.AttendanceSessions.RemoveRange(existingSessions);
+            db.AttendanceEvents.RemoveRange(existingEvents);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var constructionSites = sites.Take(3).ToArray();
+        var devicesBySite = new Dictionary<Guid, Device>();
+        for (var i = 0; i < constructionSites.Length; i++)
+        {
+            var site = constructionSites[i];
+            var registerId = $"BAK-DEMO-CAM-{i + 1:000}";
+            var device = await db.Devices.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.RegisterDeviceId == registerId, ct);
+            if (device is null)
+            {
+                device = new Device
+                {
+                    Id = StableGuid(registerId),
+                    TenantId = tenantId,
+                    RegisterDeviceId = registerId,
+                    Username = "admin",
+                    EncryptedPassword = "seed-managed-secret",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                };
+                db.Devices.Add(device);
+            }
+
+            device.SiteId = site.Id;
+            device.Name = $"BAKİNİTY demo kamera - {site.Name}";
+            device.Vendor = "dahua";
+            device.Model = "DHI-ASI6213J-MW";
+            device.Mode = DeviceMode.Simulator;
+            device.RegisterPort = 7000;
+            device.Status = DeviceStatus.Pending;
+            device.LastRecNo = 0;
+            device.UpdatedAt = DateTimeOffset.UtcNow;
+            devicesBySite[site.Id] = device;
+        }
+
+        var timeZone = AttendanceSchedulePolicy.ResolveTimeZone("Asia/Baku");
+        var todayBaku = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
+        var latestWorkDate = todayBaku.AddDays(-1);
+        var workDates = Enumerable.Range(0, 14).Select(offset => latestWorkDate.AddDays(offset - 13)).ToArray();
+        var orderedWorkers = workers
+            .Where(worker => devicesBySite.ContainsKey(worker.SiteId))
+            .OrderBy(worker => worker.ExternalWorkerCode)
+            .ToArray();
+
+        for (var dateIndex = 0; dateIndex < workDates.Length; dateIndex++)
+        {
+            var workDate = workDates[dateIndex];
+            for (var workerIndex = 0; workerIndex < orderedWorkers.Length; workerIndex++)
+            {
+                var worker = orderedWorkers[workerIndex];
+                if (!devicesBySite.TryGetValue(worker.SiteId, out var device)) continue;
+
+                var isAbsent = (workerIndex + dateIndex * 3) % 7 == 0;
+                if (isAbsent) continue;
+
+                var pattern = SelectDemoAttendancePattern(workerIndex, dateIndex);
+                var checkInUtc = AttendanceSchedulePolicy.ToUtc(workDate, pattern.CheckIn, timeZone);
+                var checkOutUtc = AttendanceSchedulePolicy.ToUtc(workDate, pattern.CheckOut, timeZone);
+                var entryEventId = StableGuid($"BAK-DEMO-ATT-IN-{worker.ExternalWorkerCode}-{workDate:yyyyMMdd}");
+                var exitEventId = StableGuid($"BAK-DEMO-ATT-OUT-{worker.ExternalWorkerCode}-{workDate:yyyyMMdd}");
+                var baseRecNo = dateIndex * 1000L + workerIndex * 2L + 1L;
+
+                db.AttendanceEvents.Add(new AttendanceEvent
+                {
+                    Id = entryEventId,
+                    TenantId = tenantId,
+                    SiteId = worker.SiteId,
+                    DeviceId = device.Id,
+                    WorkerId = worker.Id,
+                    WorkerExternalId = worker.ExternalWorkerCode,
+                    WorkerName = worker.FullName,
+                    EventTime = checkInUtc,
+                    Direction = AttendanceDirection.Entry,
+                    Status = AttendanceEventStatus.Ok,
+                    Method = AttendanceMethod.Face,
+                    RawRecNo = baseRecNo,
+                    Source = seedSource,
+                    RawPayloadJson = JsonSerializer.Serialize(new
+                    {
+                        Source = "BAK-DEMO seed",
+                        WorkerExternalId = worker.ExternalWorkerCode,
+                        WorkerName = worker.FullName,
+                        SiteId = worker.SiteId,
+                        WorkDate = workDate,
+                        Pattern = pattern.Name,
+                    }, JsonOptions),
+                    CreatedAt = checkInUtc,
+                });
+
+                db.AttendanceEvents.Add(new AttendanceEvent
+                {
+                    Id = exitEventId,
+                    TenantId = tenantId,
+                    SiteId = worker.SiteId,
+                    DeviceId = device.Id,
+                    WorkerId = worker.Id,
+                    WorkerExternalId = worker.ExternalWorkerCode,
+                    WorkerName = worker.FullName,
+                    EventTime = checkOutUtc,
+                    Direction = AttendanceDirection.Exit,
+                    Status = AttendanceEventStatus.Ok,
+                    Method = AttendanceMethod.Face,
+                    RawRecNo = baseRecNo + 1,
+                    Source = seedSource,
+                    RawPayloadJson = JsonSerializer.Serialize(new
+                    {
+                        Source = "BAK-DEMO seed",
+                        WorkerExternalId = worker.ExternalWorkerCode,
+                        WorkerName = worker.FullName,
+                        SiteId = worker.SiteId,
+                        WorkDate = workDate,
+                        Pattern = pattern.Name,
+                    }, JsonOptions),
+                    CreatedAt = checkOutUtc,
+                });
+
+                db.AttendanceSessions.Add(new AttendanceSession
+                {
+                    Id = StableGuid($"BAK-DEMO-SESSION-{worker.ExternalWorkerCode}-{workDate:yyyyMMdd}"),
+                    TenantId = tenantId,
+                    SiteId = worker.SiteId,
+                    DeviceId = device.Id,
+                    WorkerId = worker.Id,
+                    WorkerExternalId = worker.ExternalWorkerCode,
+                    WorkerName = worker.FullName,
+                    WorkDate = workDate,
+                    CheckInEventId = entryEventId,
+                    CheckInTime = checkInUtc,
+                    CheckOutEventId = exitEventId,
+                    CheckOutTime = checkOutUtc,
+                    LastSeenEventId = exitEventId,
+                    LastSeenTime = checkOutUtc,
+                    CloseReason = "DeviceDirection",
+                    PresenceStatus = "Closed",
+                    Status = AttendanceSessionStatus.Closed,
+                    Source = seedSource,
+                    CreatedAt = checkInUtc,
+                    UpdatedAt = checkOutUtc,
+                });
+            }
+        }
+    }
+
+    private static DemoAttendancePattern SelectDemoAttendancePattern(int workerIndex, int dateIndex)
+    {
+        if ((workerIndex + dateIndex) % 23 == 0)
+        {
+            return new DemoAttendancePattern("late_early", new TimeOnly(8, 25), new TimeOnly(17, 10));
+        }
+
+        if ((workerIndex + dateIndex) % 17 == 0)
+        {
+            return new DemoAttendancePattern("early_exit", new TimeOnly(7, 58), new TimeOnly(16, 42));
+        }
+
+        if ((workerIndex + dateIndex * 2) % 8 == 0)
+        {
+            return (workerIndex + dateIndex) % 2 == 0
+                ? new DemoAttendancePattern("late_21", new TimeOnly(8, 21), new TimeOnly(18, 5))
+                : new DemoAttendancePattern("late_37", new TimeOnly(8, 37), new TimeOnly(18, 10));
+        }
+
+        if ((workerIndex + dateIndex) % 19 == 0)
+        {
+            return new DemoAttendancePattern("overtime", new TimeOnly(7, 55), new TimeOnly(20, 5));
+        }
+
+        return (workerIndex + dateIndex) % 2 == 0
+            ? new DemoAttendancePattern("normal_early", new TimeOnly(7, 52), new TimeOnly(18, 4))
+            : new DemoAttendancePattern("normal_grace", new TimeOnly(8, 2), new TimeOnly(18, 11));
+    }
+
+    private sealed record DemoAttendancePattern(string Name, TimeOnly CheckIn, TimeOnly CheckOut);
 
     private static async Task UpsertWarehouseWorkflowSeedAsync(BuildTrackDbContext db, Guid tenantId, Guid siteId, Guid supervisorId, Guid procurementUserId, CancellationToken ct)
     {

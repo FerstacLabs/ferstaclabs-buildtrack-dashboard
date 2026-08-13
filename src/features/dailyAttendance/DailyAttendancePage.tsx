@@ -1,6 +1,8 @@
+import { useEffect, useMemo, useState } from 'react'
 import { ClockCircleOutlined, DownloadOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons'
 import type { TableColumnsType } from 'antd'
-import { Tag } from 'antd'
+import { Alert, DatePicker, Space, Spin, Tag } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { DonutChartCard } from '../../components/charts/DonutChartCard'
 import { ProjectSelect } from '../../components/ProjectSelect'
 import { DataTable } from '../../components/tables/DataTable'
@@ -9,94 +11,152 @@ import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { RiskBadge } from '../../components/ui/RiskBadge'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
+import { buildTrackBackendApi, type AttendanceDailyRosterReport, type AttendanceDailyRosterRow } from '../../services/api/buildTrackBackendApi'
 import { exportRowsToExcel } from '../../services/data/exportService'
-import { formatHours, formatNumber, formatPercent } from '../../utils/formatters'
-import { getAttendanceRowsByObject, getWorkersByObject, type AttendancePanelRow } from '../projectProgress/projectSelectors'
-import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
+import { ALL_PROJECTS_ID } from '../../stores/projectSelectionStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import { formatHours, formatNumber, formatPercent } from '../../utils/formatters'
 
-const statusColor: Record<AttendancePanelRow['status'], string> = {
-  'Gəlib': 'green',
+const statusColor: Record<AttendanceDailyRosterRow['status'], string> = {
+  Gəlib: 'green',
   Gecikib: 'orange',
+  Gəlməyib: 'red',
   Riskli: 'red',
 }
 
-export const DailyAttendancePage = () => {
-  const store = useProjectProgressStore()
-  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
-  const rows = getAttendanceRowsByObject(store, selectedObjectId)
-  const workers = getWorkersByObject(store, selectedObjectId)
-  const present = new Set(rows.map((row) => row.workerId)).size
-  const absent = Math.max(0, workers.filter((worker) => worker.status === 'active').length - present)
-  const late = rows.filter((row) => row.status === 'Gecikib').length
-  const risky = rows.filter((row) => row.status === 'Riskli').length
-  const activeHours = rows.reduce((sum, row) => sum + row.totalHours, 0)
-  const total = Math.max(1, present + absent)
-  const donut = [
-    { name: 'Gəlib', value: present },
-    { name: 'Gəlməyib', value: absent },
-    { name: 'Gecikib', value: late },
-    { name: 'Riskli', value: risky },
-  ]
+const toApiDate = (value?: Dayjs | null) => value ? value.format('YYYY-MM-DD') : undefined
 
-  const columns: TableColumnsType<AttendancePanelRow> = [
+export const DailyAttendancePage = () => {
+  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
+  const [selectedDate, setSelectedDate] = useState<Dayjs | null>(null)
+  const [report, setReport] = useState<AttendanceDailyRosterReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const siteId = selectedObjectId === ALL_PROJECTS_ID ? undefined : selectedObjectId
+  const requestedDate = toApiDate(selectedDate)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const nextReport = await buildTrackBackendApi.getAttendanceDailyRoster({ siteId, date: requestedDate })
+        if (cancelled) return
+        setReport(nextReport)
+        if (!selectedDate && nextReport.workDate) {
+          setSelectedDate(dayjs(nextReport.workDate))
+        }
+      } catch (loadError) {
+        if (cancelled) return
+        console.error('Daily attendance backend load failed', loadError)
+        setError('Backend davamiyyət məlumatı yüklənmədi')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [requestedDate, selectedDate, siteId])
+
+  const rows = report?.rows ?? []
+  const total = Math.max(1, report?.activeWorkersCount ?? 0)
+  const donut = useMemo(() => [
+    { name: 'Gəlib', value: report?.presentCount ?? 0 },
+    { name: 'Gəlməyib', value: report?.absentCount ?? 0 },
+    { name: 'Gecikib', value: report?.lateCount ?? 0 },
+    { name: 'Erkən çıxış', value: report?.earlyExitCount ?? 0 },
+  ], [report])
+
+  const columns: TableColumnsType<AttendanceDailyRosterRow> = [
     { title: 'İşçi ID', dataIndex: 'workerExternalId', sorter: (a, b) => a.workerExternalId.localeCompare(b.workerExternalId) },
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
-    { title: 'Obyekt', dataIndex: 'objectName' },
-    { title: 'Vəzifə', dataIndex: 'role' },
-    { title: 'Briqada', dataIndex: 'crewName' },
-    { title: 'Plan Giriş', render: () => '08:00' },
-    { title: 'Faktiki Giriş', dataIndex: 'firstSeen' },
-    { title: 'Plan Çıxış', render: () => '18:00' },
-    { title: 'Faktiki Çıxış', dataIndex: 'lastSeen' },
-    { title: 'Status', dataIndex: 'status', render: (status: AttendancePanelRow['status']) => <Tag color={statusColor[status]}>{status}</Tag> },
-    { title: 'Gecikmə', render: (_, row) => row.status === 'Gecikib' ? '25 dəq' : '0 dəq' },
-    { title: 'İşlənmiş Saat', dataIndex: 'totalHours', sorter: (a, b) => a.totalHours - b.totalHours, render: (value) => formatHours(Number(value), 1) },
-    { title: 'Giriş Metodu', dataIndex: 'source' },
-    { title: 'Risk', dataIndex: 'riskScore', render: (score: number) => <RiskBadge level={score >= 80 ? 'Kritik' : score >= 60 ? 'Yüksək' : score >= 35 ? 'Orta' : 'Aşağı'} score={score} /> },
+    { title: 'Obyekt', dataIndex: 'siteName' },
+    { title: 'Vəzifə', dataIndex: 'role', render: (value?: string) => value || '—' },
+    { title: 'Briqada', dataIndex: 'brigade', render: (value?: string) => value || '—' },
+    { title: 'Plan Giriş', dataIndex: 'plannedCheckIn' },
+    { title: 'Faktiki Giriş', dataIndex: 'actualCheckInLocal', render: (value?: string) => value || '—' },
+    { title: 'Plan Çıxış', dataIndex: 'plannedCheckOut' },
+    { title: 'Faktiki Çıxış', dataIndex: 'actualCheckOutLocal', render: (value?: string) => value || '—' },
+    { title: 'Status', dataIndex: 'status', render: (status: AttendanceDailyRosterRow['status']) => <Tag color={statusColor[status]}>{status}</Tag> },
+    { title: 'Gecikmə', dataIndex: 'lateMinutes', sorter: (a, b) => a.lateMinutes - b.lateMinutes, render: (value: number) => `${formatNumber(value)} dəq` },
+    { title: 'İşlənmiş Saat', dataIndex: 'workedHours', sorter: (a, b) => a.workedHours - b.workedHours, render: (value: number) => formatHours(value, 1) },
+    { title: 'Giriş Metodu', dataIndex: 'entryMethod' },
+    { title: 'Risk', dataIndex: 'riskScore', render: (_: number, row) => <RiskBadge level={row.riskLevel} score={row.riskScore} /> },
   ]
 
   return (
     <div className="page-stack">
-      <PageTitle title="1. Günlük Davamiyyət Paneli" extra={<ProjectSelect pageKey="attendance" />} />
-
-      <section className="kpi-grid">
-        <KpiCard icon={<TeamOutlined />} title="Bugün Gələn" value={formatNumber(present)} trend={formatPercent((present / total) * 100)} tone="green" />
-        <KpiCard icon={<UserDeleteOutlined />} title="Gəlməyən" value={formatNumber(absent)} trend={formatPercent((absent / total) * 100)} tone="red" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Gecikən" value={formatNumber(late)} trend={formatPercent((late / total) * 100)} tone="orange" />
-        <KpiCard icon={<ClockCircleOutlined />} title="Aktiv Saat" value={formatHours(activeHours, 0)} trend="gələnlər üzrə" tone="blue" />
-      </section>
-
-      <DataTable
-        title="Günlük Davamiyyət Siyahısı"
-        columns={columns}
-        data={rows}
-        extra={<ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('gunluk-davamiyyet', rows)}>Export</ToolbarButton>}
+      <PageTitle
+        title="1. Günlük Davamiyyət Paneli"
+        extra={
+          <Space wrap>
+            <DatePicker
+              allowClear={false}
+              format="DD.MM.YYYY"
+              value={selectedDate}
+              onChange={(value) => setSelectedDate(value)}
+              placeholder="Tarix"
+            />
+            <ProjectSelect pageKey="attendance" />
+          </Space>
+        }
       />
 
-      <section className="daily-summary-grid">
-        <DonutChartCard title="Status üzrə xülasə" data={donut} centerValue={formatNumber(present + absent)} centerLabel="cəmi nəfər" height={220} />
-        <aside className="panel-card daily-insight-card">
-          <h2>Günün xülasəsi</h2>
-          <div className="summary-metric"><span>Davamiyyət faizi</span><strong>{formatPercent((present / total) * 100)}</strong></div>
-          <div className="summary-metric"><span>Riskli və gecikən qeydlər</span><strong>{formatNumber(late + risky)}</strong></div>
-          <div className="summary-metric"><span>Aktiv iş saatı</span><strong>{formatHours(activeHours, 0)}</strong></div>
-          <p>Bu bölmə central işçi, briqada və obyekt datasından hesablanır.</p>
-        </aside>
-      </section>
+      {error ? <Alert type="error" showIcon message={error} /> : null}
+      {loading && !report ? (
+        <section className="panel-card">
+          <Spin /> <span style={{ marginLeft: 12 }}>Davamiyyət məlumatı yüklənir...</span>
+        </section>
+      ) : null}
+
+      {report ? (
+        <>
+          <section className="kpi-grid">
+            <KpiCard icon={<TeamOutlined />} title="Bugün Gələn" value={formatNumber(report.presentCount)} trend={formatPercent((report.presentCount / total) * 100)} tone="green" />
+            <KpiCard icon={<UserDeleteOutlined />} title="Gəlməyən" value={formatNumber(report.absentCount)} trend={formatPercent((report.absentCount / total) * 100)} tone="red" />
+            <KpiCard icon={<ClockCircleOutlined />} title="Gecikən" value={formatNumber(report.lateCount)} trend={`${report.lateGraceMinutes} dəq grace`} tone="orange" />
+            <KpiCard icon={<ClockCircleOutlined />} title="Aktiv Saat" value={formatHours(report.totalWorkedHours, 1)} trend="canonical sessiyalar üzrə" tone="blue" />
+          </section>
+
+          <DataTable
+            title="Günlük Davamiyyət Siyahısı"
+            columns={columns}
+            data={rows}
+            emptyText="Bu tarix və obyekt üçün davamiyyət rosteri tapılmadı"
+            extra={<ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('gunluk-davamiyyet', rows)}>Export</ToolbarButton>}
+          />
+
+          <section className="daily-summary-grid">
+            <DonutChartCard title="Status üzrə xülasə" data={donut} centerValue={formatNumber(report.activeWorkersCount)} centerLabel="cəmi nəfər" height={220} />
+            <aside className="panel-card daily-insight-card">
+              <h2>Günün xülasəsi</h2>
+              <div className="summary-metric"><span>Davamiyyət faizi</span><strong>{formatPercent(report.attendancePercent)}</strong></div>
+              <div className="summary-metric"><span>Erkən çıxış</span><strong>{formatNumber(report.earlyExitCount)}</strong></div>
+              <div className="summary-metric"><span>Plan saatı</span><strong>{report.plannedStart} - {report.plannedEnd}</strong></div>
+              <p>Gecikmə hesabı faktiki giriş vaxtından plan giriş və {report.lateGraceMinutes} dəqiqə grace çıxılaraq hesablanır.</p>
+            </aside>
+          </section>
+        </>
+      ) : null}
 
       <section className="explanation-grid">
         <ExplanationCard icon={<TeamOutlined />} title="Bu tablo niyə lazımdır?">
           <ul>
-            <li>Gündəlik davamiyyətin obyekt, briqada və işçi modeli ilə uyğun izlənməsi üçün.</li>
-            <li>Gecikmə, gəlməmə və riskli qeyd hallarını eyni dashboard datasında görmək üçün.</li>
-            <li>Maaş hesablamasına gedən iş saatlarını dəqiqləşdirmək üçün.</li>
+            <li>Günlük roster backend Workers, Sites və AttendanceSessions cədvəllərindən hesablanır.</li>
+            <li>Sessiyası olmayan aktiv işçi ayrıca “Gəlməyib” kimi görünür.</li>
+            <li>Maaş hesablamasına gedən iş saatları ilə eyni canonical attendance datası istifadə olunur.</li>
           </ul>
         </ExplanationCard>
         <ExplanationCard icon={<DownloadOutlined />} title="Custom imkanlar" tone="orange">
           <ul>
-            <li>Obyekt üzrə filtr və Excel export.</li>
-            <li>Sütunların sıralanması və riskli işçilərin operativ seçilməsi.</li>
+            <li>Obyekt və tarix üzrə filtr.</li>
+            <li>Visible rosterin Excel exportu.</li>
           </ul>
         </ExplanationCard>
       </section>

@@ -35,6 +35,36 @@ public sealed class BakinityDemoSeederTests
         Assert.Equal(10, await db.SupervisorSiteAssignments.CountAsync(x => x.TenantId == tenant.Id && x.IsActive));
         Assert.Equal(48, await db.Workers.CountAsync(x => x.TenantId == tenant.Id));
         Assert.Equal(48, await db.WorkerSiteAssignments.CountAsync(x => x.TenantId == tenant.Id && x.Status == WorkerSiteAssignmentStatus.Active));
+        var bakWorkers = await db.Workers.Where(x => x.TenantId == tenant.Id).ToDictionaryAsync(x => x.Id);
+        var attendanceSessions = await db.AttendanceSessions
+            .Where(x => x.TenantId == tenant.Id && x.Source == "seed_bakinity_demo")
+            .ToListAsync();
+        var attendanceEvents = await db.AttendanceEvents
+            .Where(x => x.TenantId == tenant.Id && x.Source == "seed_bakinity_demo")
+            .ToListAsync();
+        var seededDates = attendanceSessions.Select(x => x.WorkDate).Distinct().OrderBy(x => x).ToArray();
+        var latestSeedDate = seededDates.Last();
+        var latestSessions = attendanceSessions.Where(x => x.WorkDate == latestSeedDate).ToArray();
+        var bakuTimeZone = BuildTrack.Infrastructure.Services.AttendanceSchedulePolicy.ResolveTimeZone("Asia/Baku");
+        var lateCount = latestSessions.Count(x => BuildTrack.Infrastructure.Services.AttendanceSchedulePolicy.CalculateLateMinutes(x.CheckInTime, x.WorkDate, bakuTimeZone) > 0);
+        var earlyExitCount = latestSessions.Count(x => BuildTrack.Infrastructure.Services.AttendanceSchedulePolicy.CalculateEarlyExitMinutes(x.CheckOutTime, x.WorkDate, bakuTimeZone) > 0);
+
+        Assert.Equal(14, seededDates.Length);
+        Assert.True(attendanceSessions.Select(x => x.SiteId).Distinct().Count() >= 3);
+        Assert.Equal(attendanceSessions.Count * 2, attendanceEvents.Count);
+        Assert.InRange(latestSessions.Length, 36, 42);
+        Assert.InRange(48 - latestSessions.Length, 6, 12);
+        Assert.InRange(lateCount, 4, 7);
+        Assert.InRange(earlyExitCount, 2, 4);
+        Assert.All(attendanceSessions, session =>
+        {
+            Assert.NotNull(session.WorkerId);
+            var worker = bakWorkers[session.WorkerId!.Value];
+            Assert.Equal(worker.SiteId, session.SiteId);
+            Assert.True(session.CheckOutTime > session.CheckInTime);
+            Assert.Equal(session.WorkDate, DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.CheckInTime, bakuTimeZone).DateTime));
+            Assert.Equal(session.WorkDate, DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.CheckOutTime!.Value, bakuTimeZone).DateTime));
+        });
         Assert.True(await db.FieldSmetaItems.CountAsync(x => x.TenantId == tenant.Id) >= 30);
         Assert.True(await db.FieldWarehouseCatalogItems.CountAsync(x => x.TenantId == tenant.Id) >= DbInitializer.SupplyCatalogSeedItems.Count);
         Assert.True(await db.WarehouseStockMovements.CountAsync(x => x.TenantId == tenant.Id && x.ReferenceType == "BakinitySeedOpeningBalance") >= 10);
