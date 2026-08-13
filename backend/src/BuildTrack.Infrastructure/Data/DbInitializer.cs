@@ -9,6 +9,8 @@ namespace BuildTrack.Infrastructure.Data;
 public static class DbInitializer
 {
     public static readonly Guid DemoTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    public static readonly Guid BakinityDemoTenantId = Guid.Parse("ba100000-0000-4000-9000-000000000001");
+    public const string BakinityDemoTenantCode = "BAK-DEMO";
 
     public sealed record SupplyCatalogSeedItem(
         string Code,
@@ -703,11 +705,22 @@ CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_TenantId" ON supervisor_a
 CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_SiteTime" ON supervisor_audit_events ("SiteId", "Timestamp");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_SupervisorUserId" ON supervisor_audit_events ("SupervisorUserId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_audit_events_Action" ON supervisor_audit_events ("Action");
+CREATE TABLE IF NOT EXISTS project_progress_workspaces (
+    "Id" uuid NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "WorkspaceJson" jsonb NOT NULL,
+    "LegacyBrowserImportCompleted" boolean NOT NULL DEFAULT false,
+    "LegacyBrowserImportedAt" timestamp with time zone NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_project_progress_workspaces_TenantId" ON project_progress_workspaces ("TenantId");
 """, cancellationToken);
         await EnsureSupplyChainSchemaAsync(db, cancellationToken);
         await SeedAdminUserAsync(db, configuration, cancellationToken);
         await SeedDemoFieldDataAsync(db, configuration, cancellationToken);
         await SeedSupplyChainDataAsync(db, configuration, cancellationToken);
+        await BakinityDemoSeeder.SeedAsync(db, configuration, cancellationToken);
     }
 
     private static async Task EnsureSupplyChainSchemaAsync(BuildTrackDbContext db, CancellationToken cancellationToken)

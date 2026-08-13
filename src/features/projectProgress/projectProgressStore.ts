@@ -14,10 +14,20 @@ import type {
   WorkerAssignment,
 } from '../../types/projectProgress'
 import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
-import { createEmptyProjectProgressData, projectProgressSeed, villaEstimateSummary } from './projectProgressSeed'
+import { createEmptyProjectProgressData, projectProgressSeed } from './projectProgressSeed'
+import { projectProgressApi } from './projectProgressApi'
 
 interface ProjectProgressState extends ProjectProgressData {
+  serverSyncStatus: 'idle' | 'loading' | 'ready' | 'saving' | 'fallback' | 'error'
+  serverSyncError?: string
+  legacyLocalDataAvailable: boolean
+  legacyLocalSummary?: string
+  legacyLocalSnapshot?: ProjectProgressData
   prepareWorkspaceForTenant: (tenantId: string, tenantCode?: string, companyName?: string) => void
+  loadFromBackend: () => Promise<boolean>
+  saveToBackend: () => Promise<void>
+  importLegacyLocalData: () => Promise<void>
+  dismissLegacyLocalData: () => void
   applyBackendData: (data: Partial<ProjectProgressData>) => void
   syncTenantSites: (sites: Array<{ id: string; name: string; address?: string; createdAt?: string }>, mode?: 'replace' | 'merge') => void
   refreshSeedData: () => void
@@ -172,6 +182,66 @@ const mapSiteToObject = (
 const objectBelongsTo = (objectIds: Set<string>) => <T extends { objectId?: string }>(item: T) =>
   !item.objectId || objectIds.has(item.objectId)
 
+const toProjectProgressData = (state: ProjectProgressData): ProjectProgressData => ({
+  workspaceTenantId: state.workspaceTenantId,
+  projects: state.projects,
+  activeProjectId: state.activeProjectId,
+  objects: state.objects,
+  project: state.project,
+  estimateVersions: state.estimateVersions,
+  summary: state.summary,
+  stages: state.stages,
+  workItems: state.workItems,
+  crews: state.crews,
+  workerAssignments: state.workerAssignments,
+  materials: state.materials,
+  attendanceSessions: state.attendanceSessions,
+  workHourAllocations: state.workHourAllocations,
+  dailyReports: state.dailyReports,
+  issues: state.issues,
+  risks: state.risks,
+  assistantMessages: state.assistantMessages,
+})
+
+const hasBusinessCollections = (data: Partial<ProjectProgressData>) =>
+  Boolean(
+    data.projects?.length
+    || data.objects?.length
+    || data.stages?.length
+    || data.workItems?.length
+    || data.crews?.length
+    || data.workerAssignments?.length
+    || data.materials?.length
+    || data.dailyReports?.length,
+  )
+
+const legacySummary = (data: Partial<ProjectProgressData>) =>
+  `Layihə: ${data.projects?.length ?? 0}, obyekt: ${data.objects?.length ?? 0}, smeta sətri: ${data.workItems?.length ?? 0}, briqada: ${data.crews?.length ?? 0}, işçi: ${data.workerAssignments?.length ?? 0}`
+
+const normalizeLegacySnapshot = (saved: Partial<ProjectProgressData>): ProjectProgressData => {
+  const empty = createEmptyProjectProgressData(saved.workspaceTenantId ?? 'legacy-browser', saved.project?.clientName ?? saved.project?.name)
+  return {
+    ...empty,
+    ...saved,
+    projects: saved.projects?.length ? saved.projects : [saved.project ?? empty.project],
+    activeProjectId: saved.activeProjectId ?? saved.project?.id ?? empty.activeProjectId,
+    objects: saved.objects ?? [],
+    estimateVersions: saved.estimateVersions ?? [],
+    summary: saved.summary ?? empty.summary,
+    stages: saved.stages ?? [],
+    workItems: saved.workItems ?? [],
+    crews: saved.crews ?? [],
+    workerAssignments: saved.workerAssignments ?? [],
+    materials: saved.materials ?? [],
+    attendanceSessions: saved.attendanceSessions ?? [],
+    workHourAllocations: saved.workHourAllocations ?? [],
+    dailyReports: saved.dailyReports ?? [],
+    issues: saved.issues ?? [],
+    risks: saved.risks ?? [],
+    assistantMessages: saved.assistantMessages ?? [],
+  }
+}
+
 export const statusLabel: Record<ProjectWorkStatus, string> = {
   NotStarted: 'Başlamayıb',
   InProgress: 'İcradadır',
@@ -191,19 +261,66 @@ export const statusColor: Record<ProjectWorkStatus, string> = {
 export const useProjectProgressStore = create<ProjectProgressState>()(
   persist(
     (set) => ({
-        ...projectProgressSeed,
+        ...createEmptyProjectProgressData('anonymous'),
+        serverSyncStatus: 'idle',
+        legacyLocalDataAvailable: false,
         prepareWorkspaceForTenant: (tenantId, tenantCode, companyName) => set((state) => {
         const normalizedTenantCode = tenantCode?.trim().toUpperCase()
         const targetWorkspaceId = normalizedTenantCode === 'DEMO' ? 'DEMO' : tenantId
         if (state.workspaceTenantId === targetWorkspaceId) return state
 
-        const nextData = normalizedTenantCode === 'DEMO'
-          ? { ...projectProgressSeed, workspaceTenantId: 'DEMO' }
-          : createEmptyProjectProgressData(tenantId, companyName)
+        const nextData = createEmptyProjectProgressData(targetWorkspaceId, companyName)
 
         useProjectSelectionStore.getState().setSelectedProjectId(ALL_PROJECTS_ID)
-        return nextData
+        return {
+          ...nextData,
+          serverSyncStatus: 'idle',
+          serverSyncError: undefined,
+          legacyLocalDataAvailable: state.legacyLocalDataAvailable,
+          legacyLocalSummary: state.legacyLocalSummary,
+          legacyLocalSnapshot: state.legacyLocalSnapshot,
+        }
       }),
+        loadFromBackend: async () => {
+        set({ serverSyncStatus: 'loading', serverSyncError: undefined })
+        const data = await projectProgressApi.getWorkspace()
+        if (!data) {
+          set({ serverSyncStatus: 'fallback', serverSyncError: 'Backend əlçatan deyil, lokal/demo məlumat göstərilir.' })
+          return false
+        }
+
+        set((state) => ({
+          ...state,
+          ...data,
+          serverSyncStatus: 'ready',
+          serverSyncError: undefined,
+          workspaceTenantId: data.workspaceTenantId ?? state.workspaceTenantId,
+          assistantMessages: state.assistantMessages.length ? state.assistantMessages : data.assistantMessages ?? [],
+        }))
+        return true
+      },
+        saveToBackend: async () => {
+        const current = toProjectProgressData(useProjectProgressStore.getState())
+        set({ serverSyncStatus: 'saving', serverSyncError: undefined })
+        const saved = await projectProgressApi.saveWorkspace(current)
+        set(saved ? { serverSyncStatus: 'ready', serverSyncError: undefined } : { serverSyncStatus: 'fallback', serverSyncError: 'Server yazılışı alınmadı, dəyişiklik lokal sessiyada qaldı.' })
+      },
+        importLegacyLocalData: async () => {
+        const snapshot = useProjectProgressStore.getState().legacyLocalSnapshot
+        if (!snapshot) return
+        set({ serverSyncStatus: 'saving', serverSyncError: undefined })
+        await projectProgressApi.importLegacyWorkspace(snapshot)
+        set((state) => ({
+          ...state,
+          ...snapshot,
+          legacyLocalDataAvailable: false,
+          legacyLocalSummary: undefined,
+          legacyLocalSnapshot: undefined,
+          serverSyncStatus: 'ready',
+          serverSyncError: undefined,
+        }))
+      },
+        dismissLegacyLocalData: () => set({ legacyLocalDataAvailable: false, legacyLocalSummary: undefined, legacyLocalSnapshot: undefined }),
         applyBackendData: (data) => set((state) => {
         const objects = data.objects?.length ? data.objects : state.objects
         return {
@@ -381,75 +498,48 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
       name: 'buildtrack-project-progress',
       partialize: (state) => ({
         workspaceTenantId: state.workspaceTenantId,
-        project: state.project,
-        projects: state.projects,
         activeProjectId: state.activeProjectId,
-        objects: state.objects,
-        estimateVersions: state.estimateVersions,
-        summary: state.summary ?? villaEstimateSummary,
-        stages: state.stages,
-        workItems: state.workItems,
-        crews: state.crews,
-        workerAssignments: state.workerAssignments,
-        materials: state.materials,
-        attendanceSessions: state.attendanceSessions,
-        workHourAllocations: state.workHourAllocations,
-        dailyReports: state.dailyReports,
-        issues: state.issues,
-        risks: state.risks,
         assistantMessages: state.assistantMessages,
+        legacyLocalDataAvailable: state.legacyLocalDataAvailable,
+        legacyLocalSummary: state.legacyLocalSummary,
       }),
-      version: 8,
+      version: 9,
       migrate: (persisted) => {
         const saved = persisted as Partial<ProjectProgressData>
-        if (saved.workspaceTenantId && saved.workspaceTenantId !== 'DEMO') {
-          const empty = createEmptyProjectProgressData(saved.workspaceTenantId, saved.project?.clientName ?? saved.project?.name)
-          return {
-            ...empty,
-            ...saved,
-            projects: saved.projects?.length ? saved.projects : [saved.project ?? empty.project],
-            activeProjectId: saved.activeProjectId ?? saved.project?.id ?? empty.activeProjectId,
-            objects: saved.objects ?? [],
-            stages: saved.stages ?? [],
-            workItems: saved.workItems ?? [],
-            crews: saved.crews ?? [],
-            workerAssignments: saved.workerAssignments ?? [],
-            materials: saved.materials ?? [],
-            attendanceSessions: saved.attendanceSessions ?? [],
-            workHourAllocations: saved.workHourAllocations ?? [],
-            dailyReports: saved.dailyReports ?? [],
-            issues: saved.issues ?? [],
-            risks: saved.risks ?? [],
-          }
-        }
-
-        const hasIncompleteSeedWorkers = !saved.workerAssignments?.length || saved.workerAssignments.length < 20
-        const hasIncompleteObjects = !saved.objects?.length || saved.objects.length < projectProgressSeed.objects.length
-        const shouldRefreshObjectPortfolio = hasIncompleteObjects || hasIncompleteSeedWorkers
-        const objects = shouldRefreshObjectPortfolio ? projectProgressSeed.objects : saved.objects ?? projectProgressSeed.objects
-        const workerAssignments = shouldRefreshObjectPortfolio
-          ? projectProgressSeed.workerAssignments
-          : saved.workerAssignments ?? projectProgressSeed.workerAssignments
+        const empty = createEmptyProjectProgressData(saved.workspaceTenantId ?? 'anonymous', saved.project?.clientName ?? saved.project?.name)
+        const legacySnapshot = hasBusinessCollections(saved)
+          ? normalizeLegacySnapshot({ ...saved, workerAssignments: saved.workerAssignments ? removeDummyIlhamWorker(saved.workerAssignments) : [] })
+          : undefined
 
         return {
-          ...projectProgressSeed,
-          ...saved,
-          workspaceTenantId: saved.workspaceTenantId ?? 'DEMO',
-          projects: saved.projects?.length ? saved.projects : [saved.project ?? projectProgressSeed.project],
-          activeProjectId: saved.activeProjectId ?? saved.project?.id ?? projectProgressSeed.activeProjectId,
-          objects,
-          stages: shouldRefreshObjectPortfolio ? projectProgressSeed.stages : saved.stages ?? projectProgressSeed.stages,
-          workItems: shouldRefreshObjectPortfolio ? projectProgressSeed.workItems : saved.workItems ?? projectProgressSeed.workItems,
-          crews: shouldRefreshObjectPortfolio ? projectProgressSeed.crews : saved.crews ?? projectProgressSeed.crews,
-          workerAssignments: removeDummyIlhamWorker(workerAssignments),
-          materials: shouldRefreshObjectPortfolio ? projectProgressSeed.materials : saved.materials ?? projectProgressSeed.materials,
-          attendanceSessions: shouldRefreshObjectPortfolio ? projectProgressSeed.attendanceSessions : saved.attendanceSessions ?? projectProgressSeed.attendanceSessions,
-          workHourAllocations: shouldRefreshObjectPortfolio ? projectProgressSeed.workHourAllocations : saved.workHourAllocations ?? projectProgressSeed.workHourAllocations,
-          dailyReports: shouldRefreshObjectPortfolio ? projectProgressSeed.dailyReports : saved.dailyReports ?? projectProgressSeed.dailyReports,
-          issues: shouldRefreshObjectPortfolio ? projectProgressSeed.issues : saved.issues ?? projectProgressSeed.issues,
-          risks: shouldRefreshObjectPortfolio ? projectProgressSeed.risks : saved.risks ?? projectProgressSeed.risks,
+          ...empty,
+          workspaceTenantId: saved.workspaceTenantId ?? empty.workspaceTenantId,
+          activeProjectId: saved.activeProjectId ?? ALL_PROJECTS_ID,
+          assistantMessages: saved.assistantMessages ?? [],
+          serverSyncStatus: 'idle',
+          legacyLocalDataAvailable: Boolean(legacySnapshot),
+          legacyLocalSummary: legacySnapshot ? legacySummary(legacySnapshot) : undefined,
+          legacyLocalSnapshot: legacySnapshot,
         }
       },
     },
   ),
 )
+
+let lastSavedWorkspace = ''
+let saveTimer: number | undefined
+
+useProjectProgressStore.subscribe((state) => {
+  const workspace = toProjectProgressData(state)
+  const serialized = JSON.stringify(workspace)
+  if (serialized === lastSavedWorkspace) return
+  lastSavedWorkspace = serialized
+
+  const tenantId = workspace.workspaceTenantId
+  if (!tenantId || tenantId === 'anonymous' || (state.serverSyncStatus !== 'ready' && state.serverSyncStatus !== 'saving')) return
+
+  if (saveTimer) window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => {
+    void projectProgressApi.saveWorkspace(toProjectProgressData(useProjectProgressStore.getState()))
+  }, 900)
+})

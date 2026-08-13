@@ -1668,6 +1668,7 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
 
 app.MapFieldPortalEndpoints();
 app.MapSupplyChainEndpoints();
+app.MapProjectProgressEndpoints();
 
 app.Run();
 

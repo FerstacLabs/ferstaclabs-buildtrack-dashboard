@@ -1,5 +1,5 @@
 import { MenuOutlined } from '@ant-design/icons'
-import { Button, Drawer, Spin } from 'antd'
+import { Alert, Button, Drawer, Space, Spin } from 'antd'
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { AiAssistant } from '../../features/aiAssistant/AiAssistant'
@@ -17,6 +17,11 @@ export const AppLayout = () => {
   const location = useLocation()
   const objects = useProjectProgressStore((state) => state.objects)
   const syncTenantSites = useProjectProgressStore((state) => state.syncTenantSites)
+  const loadProjectWorkspace = useProjectProgressStore((state) => state.loadFromBackend)
+  const legacyLocalDataAvailable = useProjectProgressStore((state) => state.legacyLocalDataAvailable)
+  const legacyLocalSummary = useProjectProgressStore((state) => state.legacyLocalSummary)
+  const importLegacyLocalData = useProjectProgressStore((state) => state.importLegacyLocalData)
+  const dismissLegacyLocalData = useProjectProgressStore((state) => state.dismissLegacyLocalData)
   const tenant = useAuthStore((state) => state.tenant)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const selectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
@@ -39,10 +44,12 @@ export const AppLayout = () => {
   }, [location.pathname])
 
   useEffect(() => {
-    if (!isAuthenticated || !tenant || tenant.code.toUpperCase() === 'DEMO') return
+    if (!isAuthenticated || !tenant) return
     let cancelled = false
 
-    const syncSites = async () => {
+    const loadWorkspaceOrSites = async () => {
+      const loaded = await loadProjectWorkspace()
+      if (loaded || cancelled) return
       try {
         const sites = await buildTrackBackendApi.getSites()
         if (!cancelled) syncTenantSites(sites, 'replace')
@@ -51,11 +58,11 @@ export const AppLayout = () => {
       }
     }
 
-    void syncSites()
+    void loadWorkspaceOrSites()
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated, tenant?.id, tenant?.code, syncTenantSites])
+  }, [isAuthenticated, tenant?.id, tenant?.code, loadProjectWorkspace, syncTenantSites])
 
   if (!initialized && loading) {
     return (
@@ -78,6 +85,23 @@ export const AppLayout = () => {
           Menyu
         </Button>
         <ApiConnectionStatus />
+        {legacyLocalDataAvailable && (
+          <Alert
+            style={{ marginBottom: 12 }}
+            type="warning"
+            showIcon
+            message="Brauzerdə köhnə lokal layihə datası tapıldı"
+            description={(
+              <Space direction="vertical" size={8}>
+                <span>{legacyLocalSummary}. Bu məlumatı server workspace-ə bir dəfə köçürə bilərsiniz.</span>
+                <Space>
+                  <Button size="small" type="primary" onClick={() => void importLegacyLocalData()}>Serverə köçür</Button>
+                  <Button size="small" onClick={dismissLegacyLocalData}>Gizlət</Button>
+                </Space>
+              </Space>
+            )}
+          />
+        )}
         {showProjectDebug && (
           <div
             style={{

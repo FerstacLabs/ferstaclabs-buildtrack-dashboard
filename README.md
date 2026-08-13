@@ -83,6 +83,14 @@ SEED_SUPERVISOR_FULL_NAME=Demo Prorab
 SEED_SUPERVISOR_PHONE=+994...
 SEED_SUPERVISOR_SITE_ID=
 
+# Optional isolated BAKİNİTY demo tenant. Password values must come from VPS env.
+SEED_BAKINITY_DEMO=false
+SEED_BAKINITY_DEMO_RESET=false
+SEED_BAKINITY_DEMO_EMAIL=eldar@bakinity.az
+SEED_BAKINITY_DEMO_PASSWORD=
+SEED_BAKINITY_DEMO_PRORAB_PASSWORD=
+SEED_BAKINITY_DEMO_SUPPLY_PASSWORD=
+
 CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
@@ -93,6 +101,14 @@ To rotate the seeded admin password without deleting tenant or demo data, set `S
 The seeded demo admin can manage tenant licenses from the app at `/admin/licenses`. The page lists all tenants, generates one-time raw license keys, and can directly activate a selected tenant license for onboarding/demo use.
 
 If `SEED_SUPERVISOR_EMAIL` and `SEED_SUPERVISOR_PASSWORD` are set, the initializer creates or updates a Supervisor account for the demo tenant and assigns it to `SEED_SUPERVISOR_SITE_ID` when provided. Field users inherit the tenant license and cannot activate licenses themselves.
+
+### BAKİNİTY server-authoritative demo
+
+Set `SEED_BAKINITY_DEMO=true` and provide `SEED_BAKINITY_DEMO_PASSWORD` to create the isolated tenant `BAK-DEMO` (`BAKİNİTY MMC`) with owner user `eldar@bakinity.az`. The initializer seeds BAKİNİTY sites, 10 prorab users, procurement users, workers, field smeta items, warehouse stock, warehouse request states, suppliers, one procurement task and a server-side project progress workspace. Seed passwords are never logged or committed.
+
+The BAKİNİTY demo is isolated from existing tenants such as GOLD MMC. To reset only this demo environment, set `SEED_BAKINITY_DEMO_RESET=true`, restart the API/worker once, verify the seed, then set it back to `false`. The reset removes/reseeds only tenant code `BAK-DEMO`; it does not touch other tenant codes.
+
+Project progress data is now server-authoritative through `/api/project-progress/workspace`. The frontend may detect an old `buildtrack-project-progress` browser snapshot and offers a one-time “Serverə köçür” action; after that, project/smeta/crew/worker/material business data is stored on the backend, while localStorage keeps only UI/session state.
 
 You can also create a tenant license as the demo/admin account with curl:
 

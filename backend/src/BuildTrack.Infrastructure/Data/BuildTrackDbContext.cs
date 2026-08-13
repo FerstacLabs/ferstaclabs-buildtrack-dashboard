@@ -58,6 +58,7 @@ public sealed class BuildTrackDbContext : DbContext
     public DbSet<WarehouseIssue> WarehouseIssues => Set<WarehouseIssue>();
     public DbSet<WarehouseIssueLine> WarehouseIssueLines => Set<WarehouseIssueLine>();
     public DbSet<SupplyNotification> SupplyNotifications => Set<SupplyNotification>();
+    public DbSet<ProjectProgressWorkspace> ProjectProgressWorkspaces => Set<ProjectProgressWorkspace>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -339,6 +340,16 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasIndex(x => x.CreatedAt);
             entity.HasIndex(x => x.CallbackCommand);
             entity.HasIndex(x => x.DecodeStatus);
+        });
+
+        modelBuilder.Entity<ProjectProgressWorkspace>(entity =>
+        {
+            entity.ToTable("project_progress_workspaces");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.WorkspaceJson).HasColumnType("jsonb").IsRequired();
+            entity.HasIndex(x => x.TenantId).IsUnique();
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SupervisorSiteAssignment>(entity =>

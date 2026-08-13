@@ -14,7 +14,7 @@ var host = builder.Build();
 using (var scope = host.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<BuildTrackDbContext>();
-    await DbInitializer.EnsureDatabaseAsync(db);
+    await DbInitializer.EnsureDatabaseAsync(db, builder.Configuration);
 }
 
 await host.RunAsync();
