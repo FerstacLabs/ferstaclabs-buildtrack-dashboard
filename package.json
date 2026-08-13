@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "i18n:audit": "node scripts/i18n-audit.mjs",
     "project-state:audit": "node scripts/project-state-audit.mjs",
+    "project-progress:persistence-audit": "node scripts/project-progress-persistence-audit.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

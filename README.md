@@ -50,7 +50,7 @@ CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildt
 
 If multiple origins are needed, separate them with commas. The docker-compose file keeps the backend API on port `8080`; Vercel should never point to a frontend container on the VPS.
 
-Project progress endpoints are optional for now. If `/api/project-progress/*` does not exist or the API is unavailable, the frontend keeps using persisted local demo data from `localStorage`.
+Project progress data is server-authoritative. Authenticated users load and save the workspace through `/api/project-progress/workspace`; browser storage is limited to harmless UI/session state and legacy one-time migration detection.
 
 ## SaaS auth, tenant and license setup
 

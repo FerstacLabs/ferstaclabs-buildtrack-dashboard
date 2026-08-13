@@ -46,8 +46,10 @@ public static class ProjectProgressEndpoints
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
         var validation = ValidateWorkspace(body);
         if (validation is not null) return Results.BadRequest(new { error = validation });
+        var tenantValidation = ValidateWorkspaceTenant(body, tenantId, allowLegacyImport: false);
+        if (tenantValidation is not null) return Results.BadRequest(new { error = tenantValidation });
 
-        workspace.WorkspaceJson = body.GetRawText();
+        workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return Results.Ok(new { saved = true, workspaceId = workspace.Id, updatedAt = workspace.UpdatedAt });
@@ -60,7 +62,7 @@ public static class ProjectProgressEndpoints
         var validation = ValidateWorkspace(body);
         if (validation is not null) return Results.BadRequest(new { error = validation });
 
-        workspace.WorkspaceJson = body.GetRawText();
+        workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
         workspace.LegacyBrowserImportCompleted = true;
         workspace.LegacyBrowserImportedAt = DateTimeOffset.UtcNow;
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
@@ -81,6 +83,7 @@ public static class ProjectProgressEndpoints
         var tenantId = RequireTenantId(tenantContext);
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
         var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
+        root["workspaceTenantId"] = tenantId.ToString();
         var item = JsonNode.Parse(body.GetRawText())?.AsObject();
         if (item is null) return Results.BadRequest(new { error = "Invalid JSON object" });
         item["id"] = id;
@@ -257,6 +260,29 @@ public static class ProjectProgressEndpoints
         };
 
         return JsonSerializer.Serialize(data, JsonOptions);
+    }
+
+    internal static string? ValidateWorkspaceTenant(JsonElement body, Guid tenantId, bool allowLegacyImport)
+    {
+        if (allowLegacyImport) return null;
+        if (!body.TryGetProperty("workspaceTenantId", out var workspaceTenantId)) return null;
+        if (workspaceTenantId.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return null;
+
+        var value = workspaceTenantId.ValueKind == JsonValueKind.String
+            ? workspaceTenantId.GetString()
+            : workspaceTenantId.GetRawText();
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        return string.Equals(value, tenantId.ToString(), StringComparison.OrdinalIgnoreCase)
+            ? null
+            : "Workspace tenant does not match authenticated tenant";
+    }
+
+    internal static string NormalizeWorkspaceJsonForTenant(JsonElement body, Guid tenantId)
+    {
+        var root = JsonNode.Parse(body.GetRawText())?.AsObject() ?? new JsonObject();
+        root["workspaceTenantId"] = tenantId.ToString();
+        return root.ToJsonString(JsonOptions);
     }
 
     private static string? ValidateWorkspace(JsonElement body)

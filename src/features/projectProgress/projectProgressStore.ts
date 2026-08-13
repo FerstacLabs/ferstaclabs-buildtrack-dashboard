@@ -17,9 +17,13 @@ import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectS
 import { createEmptyProjectProgressData, projectProgressSeed } from './projectProgressSeed'
 import { projectProgressApi } from './projectProgressApi'
 
+type ServerSyncStatus = 'idle' | 'loading' | 'ready' | 'saving' | 'fallback' | 'error'
+
 interface ProjectProgressState extends ProjectProgressData {
-  serverSyncStatus: 'idle' | 'loading' | 'ready' | 'saving' | 'fallback' | 'error'
+  serverSyncStatus: ServerSyncStatus
   serverSyncError?: string
+  serverPendingSave: boolean
+  serverLastSavedAt?: string
   legacyLocalDataAvailable: boolean
   legacyLocalSummary?: string
   legacyLocalSnapshot?: ProjectProgressData
@@ -218,6 +222,179 @@ const hasBusinessCollections = (data: Partial<ProjectProgressData>) =>
 const legacySummary = (data: Partial<ProjectProgressData>) =>
   `Layihə: ${data.projects?.length ?? 0}, obyekt: ${data.objects?.length ?? 0}, smeta sətri: ${data.workItems?.length ?? 0}, briqada: ${data.crews?.length ?? 0}, işçi: ${data.workerAssignments?.length ?? 0}`
 
+interface WorkspaceSaveJob {
+  revision: number
+  tenantId: string
+  serialized: string
+  workspace: ProjectProgressData
+}
+
+const PROJECT_PROGRESS_SAVE_DEBOUNCE_MS = 800
+const PROJECT_PROGRESS_SAVE_RETRY_MS = 8000
+const PROJECT_PROGRESS_SAVE_ERROR = 'Layihə dəyişiklikləri serverdə saxlanmadı. Bağlantını yoxlayın və yenidən cəhd edin.'
+
+let lastObservedWorkspace = ''
+let lastServerSavedWorkspace = ''
+let saveRevision = 0
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+let saveInFlight = false
+let pendingSaveJob: WorkspaceSaveJob | undefined
+let suppressWorkspacePersistence = false
+
+const isPersistableWorkspaceTenant = (tenantId?: string): tenantId is string =>
+  Boolean(tenantId && tenantId !== 'anonymous' && tenantId !== 'legacy-browser')
+
+const serializeWorkspace = (workspace: ProjectProgressData) => JSON.stringify(workspace)
+
+const currentWorkspace = () => toProjectProgressData(useProjectProgressStore.getState())
+
+const clearSaveTimer = () => {
+  if (!saveTimer) return
+  clearTimeout(saveTimer)
+  saveTimer = undefined
+}
+
+const resetWorkspacePersistenceForCurrentState = () => {
+  const serialized = serializeWorkspace(currentWorkspace())
+  lastObservedWorkspace = serialized
+  lastServerSavedWorkspace = serialized
+}
+
+const discardQueuedServerSaves = () => {
+  clearSaveTimer()
+  pendingSaveJob = undefined
+}
+
+const formatSaveError = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return `${PROJECT_PROGRESS_SAVE_ERROR} Texniki məlumat: ${error.message.slice(0, 220)}`
+  }
+  return PROJECT_PROGRESS_SAVE_ERROR
+}
+
+const flushProjectWorkspaceSaveQueue = async () => {
+  if (saveInFlight) return
+  saveInFlight = true
+
+  try {
+    while (pendingSaveJob) {
+      const job = pendingSaveJob
+      pendingSaveJob = undefined
+
+      if (currentWorkspace().workspaceTenantId !== job.tenantId) continue
+
+      try {
+        useProjectProgressStore.setState({
+          serverSyncStatus: 'saving',
+          serverSyncError: undefined,
+          serverPendingSave: true,
+        })
+        await projectProgressApi.saveWorkspace(job.workspace)
+      } catch (error) {
+        const latest = currentWorkspace()
+        if (latest.workspaceTenantId === job.tenantId) {
+          const latestSerialized = serializeWorkspace(latest)
+          pendingSaveJob = latestSerialized === job.serialized
+            ? job
+            : {
+                revision: ++saveRevision,
+                tenantId: job.tenantId,
+                serialized: latestSerialized,
+                workspace: latest,
+              }
+
+          useProjectProgressStore.setState({
+            serverSyncStatus: 'error',
+            serverSyncError: formatSaveError(error),
+            serverPendingSave: true,
+          })
+          if (import.meta.env.DEV) console.warn('Project progress workspace save failed', error)
+          if (typeof window !== 'undefined') {
+            clearSaveTimer()
+            saveTimer = window.setTimeout(() => {
+              saveTimer = undefined
+              void flushProjectWorkspaceSaveQueue()
+            }, PROJECT_PROGRESS_SAVE_RETRY_MS)
+          }
+        }
+        return
+      }
+
+      const latest = currentWorkspace()
+      if (latest.workspaceTenantId !== job.tenantId) continue
+
+      const latestSerialized = serializeWorkspace(latest)
+      if (latestSerialized === job.serialized) {
+        lastServerSavedWorkspace = job.serialized
+        useProjectProgressStore.setState({
+          serverSyncStatus: 'ready',
+          serverSyncError: undefined,
+          serverPendingSave: false,
+          serverLastSavedAt: new Date().toISOString(),
+        })
+      } else {
+        pendingSaveJob = {
+          revision: ++saveRevision,
+          tenantId: job.tenantId,
+          serialized: latestSerialized,
+          workspace: latest,
+        }
+      }
+    }
+  } finally {
+    saveInFlight = false
+  }
+}
+
+const queueServerSave = (workspace: ProjectProgressData, options?: { immediate?: boolean }) => {
+  const tenantId = workspace.workspaceTenantId
+  if (!isPersistableWorkspaceTenant(tenantId)) return
+
+  const serialized = serializeWorkspace(workspace)
+  if (serialized === lastServerSavedWorkspace && !pendingSaveJob) {
+    useProjectProgressStore.setState({ serverSyncStatus: 'ready', serverSyncError: undefined, serverPendingSave: false })
+    return
+  }
+
+  pendingSaveJob = {
+    revision: ++saveRevision,
+    tenantId,
+    serialized,
+    workspace,
+  }
+
+  useProjectProgressStore.setState({
+    serverSyncStatus: 'saving',
+    serverSyncError: undefined,
+    serverPendingSave: true,
+  })
+
+  clearSaveTimer()
+  if (options?.immediate) {
+    return
+  }
+
+  if (typeof window === 'undefined') {
+    void flushProjectWorkspaceSaveQueue()
+    return
+  }
+
+  saveTimer = window.setTimeout(() => {
+    saveTimer = undefined
+    void flushProjectWorkspaceSaveQueue()
+  }, PROJECT_PROGRESS_SAVE_DEBOUNCE_MS)
+}
+
+const runWithoutWorkspacePersistence = (operation: () => void) => {
+  suppressWorkspacePersistence = true
+  try {
+    operation()
+    resetWorkspacePersistenceForCurrentState()
+  } finally {
+    suppressWorkspacePersistence = false
+  }
+}
+
 const normalizeLegacySnapshot = (saved: Partial<ProjectProgressData>): ProjectProgressData => {
   const empty = createEmptyProjectProgressData(saved.workspaceTenantId ?? 'legacy-browser', saved.project?.clientName ?? saved.project?.name)
   return {
@@ -263,62 +440,88 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
     (set) => ({
         ...createEmptyProjectProgressData('anonymous'),
         serverSyncStatus: 'idle',
+        serverPendingSave: false,
         legacyLocalDataAvailable: false,
-        prepareWorkspaceForTenant: (tenantId, tenantCode, companyName) => set((state) => {
+        prepareWorkspaceForTenant: (tenantId, tenantCode, companyName) => {
         const normalizedTenantCode = tenantCode?.trim().toUpperCase()
         const targetWorkspaceId = normalizedTenantCode === 'DEMO' ? 'DEMO' : tenantId
-        if (state.workspaceTenantId === targetWorkspaceId) return state
+        if (useProjectProgressStore.getState().workspaceTenantId === targetWorkspaceId) return
 
-        const nextData = createEmptyProjectProgressData(targetWorkspaceId, companyName)
+        discardQueuedServerSaves()
+        runWithoutWorkspacePersistence(() => {
+          set((state) => {
+            const nextData = createEmptyProjectProgressData(targetWorkspaceId, companyName)
 
-        useProjectSelectionStore.getState().setSelectedProjectId(ALL_PROJECTS_ID)
-        return {
-          ...nextData,
-          serverSyncStatus: 'idle',
-          serverSyncError: undefined,
-          legacyLocalDataAvailable: state.legacyLocalDataAvailable,
-          legacyLocalSummary: state.legacyLocalSummary,
-          legacyLocalSnapshot: state.legacyLocalSnapshot,
-        }
-      }),
+            useProjectSelectionStore.getState().setSelectedProjectId(ALL_PROJECTS_ID)
+            return {
+              ...nextData,
+              serverSyncStatus: 'idle',
+              serverSyncError: undefined,
+              serverPendingSave: false,
+              serverLastSavedAt: undefined,
+              legacyLocalDataAvailable: state.legacyLocalDataAvailable,
+              legacyLocalSummary: state.legacyLocalSummary,
+              legacyLocalSnapshot: state.legacyLocalSnapshot,
+            }
+          })
+        })
+      },
         loadFromBackend: async () => {
-        set({ serverSyncStatus: 'loading', serverSyncError: undefined })
+        set({ serverSyncStatus: 'loading', serverSyncError: undefined, serverPendingSave: false })
         const data = await projectProgressApi.getWorkspace()
         if (!data) {
           set({ serverSyncStatus: 'fallback', serverSyncError: 'Backend əlçatan deyil, lokal/demo məlumat göstərilir.' })
           return false
         }
 
-        set((state) => ({
-          ...state,
-          ...data,
-          serverSyncStatus: 'ready',
-          serverSyncError: undefined,
-          workspaceTenantId: data.workspaceTenantId ?? state.workspaceTenantId,
-          assistantMessages: state.assistantMessages.length ? state.assistantMessages : data.assistantMessages ?? [],
-        }))
+        discardQueuedServerSaves()
+        runWithoutWorkspacePersistence(() => {
+          set((state) => ({
+            ...state,
+            ...data,
+            serverSyncStatus: 'ready',
+            serverSyncError: undefined,
+            serverPendingSave: false,
+            serverLastSavedAt: new Date().toISOString(),
+            workspaceTenantId: data.workspaceTenantId ?? state.workspaceTenantId,
+            assistantMessages: state.assistantMessages.length ? state.assistantMessages : data.assistantMessages ?? [],
+          }))
+        })
         return true
       },
         saveToBackend: async () => {
         const current = toProjectProgressData(useProjectProgressStore.getState())
-        set({ serverSyncStatus: 'saving', serverSyncError: undefined })
-        const saved = await projectProgressApi.saveWorkspace(current)
-        set(saved ? { serverSyncStatus: 'ready', serverSyncError: undefined } : { serverSyncStatus: 'fallback', serverSyncError: 'Server yazılışı alınmadı, dəyişiklik lokal sessiyada qaldı.' })
+        queueServerSave(current, { immediate: true })
+        await flushProjectWorkspaceSaveQueue()
       },
         importLegacyLocalData: async () => {
         const snapshot = useProjectProgressStore.getState().legacyLocalSnapshot
         if (!snapshot) return
-        set({ serverSyncStatus: 'saving', serverSyncError: undefined })
-        await projectProgressApi.importLegacyWorkspace(snapshot)
-        set((state) => ({
-          ...state,
-          ...snapshot,
-          legacyLocalDataAvailable: false,
-          legacyLocalSummary: undefined,
-          legacyLocalSnapshot: undefined,
-          serverSyncStatus: 'ready',
-          serverSyncError: undefined,
-        }))
+        set({ serverSyncStatus: 'saving', serverSyncError: undefined, serverPendingSave: true })
+        try {
+          await projectProgressApi.importLegacyWorkspace(snapshot)
+          const imported = await projectProgressApi.getWorkspace()
+          discardQueuedServerSaves()
+          runWithoutWorkspacePersistence(() => {
+            set((state) => ({
+              ...state,
+              ...(imported ?? snapshot),
+              legacyLocalDataAvailable: false,
+              legacyLocalSummary: undefined,
+              legacyLocalSnapshot: undefined,
+              serverSyncStatus: 'ready',
+              serverSyncError: undefined,
+              serverPendingSave: false,
+              serverLastSavedAt: new Date().toISOString(),
+            }))
+          })
+        } catch (error) {
+          set({
+            serverSyncStatus: 'error',
+            serverSyncError: formatSaveError(error),
+            serverPendingSave: true,
+          })
+        }
       },
         dismissLegacyLocalData: () => set({ legacyLocalDataAvailable: false, legacyLocalSummary: undefined, legacyLocalSnapshot: undefined }),
         applyBackendData: (data) => set((state) => {
@@ -371,8 +574,8 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           risks: state.risks.filter(objectBelongsTo(objectIds)),
         }
       }),
-      refreshSeedData: () => set(projectProgressSeed),
-      resetDemoData: () => set(projectProgressSeed),
+      refreshSeedData: () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId })),
+      resetDemoData: () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId })),
       addObject: (object) => {
         const objectId = createId('object')
         set((state) => ({
@@ -517,6 +720,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           activeProjectId: saved.activeProjectId ?? ALL_PROJECTS_ID,
           assistantMessages: saved.assistantMessages ?? [],
           serverSyncStatus: 'idle',
+          serverPendingSave: false,
           legacyLocalDataAvailable: Boolean(legacySnapshot),
           legacyLocalSummary: legacySnapshot ? legacySummary(legacySnapshot) : undefined,
           legacyLocalSnapshot: legacySnapshot,
@@ -526,20 +730,21 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
   ),
 )
 
-let lastSavedWorkspace = ''
-let saveTimer: number | undefined
-
 useProjectProgressStore.subscribe((state) => {
   const workspace = toProjectProgressData(state)
-  const serialized = JSON.stringify(workspace)
-  if (serialized === lastSavedWorkspace) return
-  lastSavedWorkspace = serialized
+  const serialized = serializeWorkspace(workspace)
+  if (serialized === lastObservedWorkspace) return
+  lastObservedWorkspace = serialized
 
   const tenantId = workspace.workspaceTenantId
-  if (!tenantId || tenantId === 'anonymous' || (state.serverSyncStatus !== 'ready' && state.serverSyncStatus !== 'saving')) return
+  if (suppressWorkspacePersistence) {
+    lastServerSavedWorkspace = serialized
+    discardQueuedServerSaves()
+    return
+  }
 
-  if (saveTimer) window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => {
-    void projectProgressApi.saveWorkspace(toProjectProgressData(useProjectProgressStore.getState()))
-  }, 900)
+  if (!isPersistableWorkspaceTenant(tenantId)) return
+  if (state.serverSyncStatus === 'idle' || state.serverSyncStatus === 'loading' || state.serverSyncStatus === 'fallback') return
+
+  queueServerSave(workspace)
 })

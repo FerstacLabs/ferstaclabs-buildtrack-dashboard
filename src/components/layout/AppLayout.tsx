@@ -22,6 +22,10 @@ export const AppLayout = () => {
   const legacyLocalSummary = useProjectProgressStore((state) => state.legacyLocalSummary)
   const importLegacyLocalData = useProjectProgressStore((state) => state.importLegacyLocalData)
   const dismissLegacyLocalData = useProjectProgressStore((state) => state.dismissLegacyLocalData)
+  const projectServerSyncStatus = useProjectProgressStore((state) => state.serverSyncStatus)
+  const projectServerSyncError = useProjectProgressStore((state) => state.serverSyncError)
+  const projectServerPendingSave = useProjectProgressStore((state) => state.serverPendingSave)
+  const saveProjectWorkspace = useProjectProgressStore((state) => state.saveToBackend)
   const tenant = useAuthStore((state) => state.tenant)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const selectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
@@ -85,6 +89,16 @@ export const AppLayout = () => {
           Menyu
         </Button>
         <ApiConnectionStatus />
+        {projectServerSyncStatus === 'error' && projectServerPendingSave && (
+          <Alert
+            style={{ marginBottom: 12 }}
+            type="error"
+            showIcon
+            message="Layihə dəyişiklikləri serverdə saxlanmadı"
+            description={projectServerSyncError ?? 'Bağlantını yoxlayın və yenidən cəhd edin.'}
+            action={<Button size="small" danger onClick={() => void saveProjectWorkspace()}>Yenidən saxla</Button>}
+          />
+        )}
         {legacyLocalDataAvailable && (
           <Alert
             style={{ marginBottom: 12 }}
