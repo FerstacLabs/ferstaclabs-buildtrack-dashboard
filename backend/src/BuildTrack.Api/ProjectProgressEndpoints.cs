@@ -37,6 +37,14 @@ public static class ProjectProgressEndpoints
     {
         var tenantId = RequireTenantId(tenantContext);
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
+        var normalizedWorkspace = NormalizeWorkspaceJsonStringForTenant(workspace.WorkspaceJson, tenantId);
+        if (!string.Equals(normalizedWorkspace, workspace.WorkspaceJson, StringComparison.Ordinal))
+        {
+            workspace.WorkspaceJson = normalizedWorkspace;
+            workspace.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+
         return Results.Content(workspace.WorkspaceJson, "application/json");
     }
 
@@ -114,6 +122,7 @@ public static class ProjectProgressEndpoints
             array.Add(item);
         }
 
+        NormalizeWorkspaceRoot(root, tenantId);
         workspace.WorkspaceJson = root.ToJsonString(JsonOptions);
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -281,8 +290,83 @@ public static class ProjectProgressEndpoints
     internal static string NormalizeWorkspaceJsonForTenant(JsonElement body, Guid tenantId)
     {
         var root = JsonNode.Parse(body.GetRawText())?.AsObject() ?? new JsonObject();
-        root["workspaceTenantId"] = tenantId.ToString();
+        NormalizeWorkspaceRoot(root, tenantId);
         return root.ToJsonString(JsonOptions);
+    }
+
+    internal static string NormalizeWorkspaceJsonStringForTenant(string workspaceJson, Guid tenantId)
+    {
+        var root = JsonNode.Parse(workspaceJson)?.AsObject() ?? new JsonObject();
+        NormalizeWorkspaceRoot(root, tenantId);
+        return root.ToJsonString(JsonOptions);
+    }
+
+    private static void NormalizeWorkspaceRoot(JsonObject root, Guid tenantId)
+    {
+        root["workspaceTenantId"] = tenantId.ToString();
+        NormalizeMaterialObjectIds(root);
+    }
+
+    private static void NormalizeMaterialObjectIds(JsonObject root)
+    {
+        var stageObjectIds = BuildObjectIdMap(root["stages"] as JsonArray);
+        var workItemObjectIds = BuildObjectIdMap(root["workItems"] as JsonArray);
+
+        if (root["materials"] is not JsonArray materials) return;
+        foreach (var materialNode in materials)
+        {
+            if (materialNode is not JsonObject material) continue;
+            if (!string.IsNullOrWhiteSpace(GetString(material["objectId"]))) continue;
+
+            var linkedWorkItemId = GetString(material["linkedWorkItemId"]);
+            if (!string.IsNullOrWhiteSpace(linkedWorkItemId) && workItemObjectIds.TryGetValue(linkedWorkItemId, out var workItemObjectId))
+            {
+                material["objectId"] = workItemObjectId;
+                continue;
+            }
+
+            var linkedStageId = GetString(material["linkedStageId"]);
+            if (!string.IsNullOrWhiteSpace(linkedStageId) && stageObjectIds.TryGetValue(linkedStageId, out var stageObjectId))
+            {
+                material["objectId"] = stageObjectId;
+            }
+        }
+    }
+
+    private static Dictionary<string, string> BuildObjectIdMap(JsonArray? rows)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (rows is null) return map;
+
+        foreach (var rowNode in rows)
+        {
+            if (rowNode is not JsonObject row) continue;
+            var id = GetString(row["id"]);
+            var objectId = GetString(row["objectId"]);
+            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(objectId))
+            {
+                map[id] = objectId;
+            }
+        }
+
+        return map;
+    }
+
+    private static string? GetString(JsonNode? node)
+    {
+        if (node is null) return null;
+        try
+        {
+            return node.GetValue<string>();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     private static string? ValidateWorkspace(JsonElement body)

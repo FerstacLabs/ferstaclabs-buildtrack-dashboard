@@ -186,6 +186,28 @@ const mapSiteToObject = (
 const objectBelongsTo = (objectIds: Set<string>) => <T extends { objectId?: string }>(item: T) =>
   !item.objectId || objectIds.has(item.objectId)
 
+const normalizeMaterialsForWorkspace = (
+  materials: MaterialItem[],
+  workItems: WorkItem[],
+  stages: WorkStage[],
+) => {
+  const workItemObjectIds = new Map(workItems.filter((item) => item.objectId).map((item) => [item.id, item.objectId]))
+  const stageObjectIds = new Map(stages.filter((stage) => stage.objectId).map((stage) => [stage.id, stage.objectId]))
+
+  return materials.map((material) => {
+    const objectId = material.objectId
+      ?? (material.linkedWorkItemId ? workItemObjectIds.get(material.linkedWorkItemId) : undefined)
+      ?? (material.linkedStageId ? stageObjectIds.get(material.linkedStageId) : undefined)
+    if (objectId === material.objectId) return material
+    return { ...material, objectId }
+  })
+}
+
+const normalizeProjectProgressData = (data: ProjectProgressData): ProjectProgressData => ({
+  ...data,
+  materials: normalizeMaterialsForWorkspace(data.materials, data.workItems, data.stages),
+})
+
 const toProjectProgressData = (state: ProjectProgressData): ProjectProgressData => ({
   workspaceTenantId: state.workspaceTenantId,
   projects: state.projects,
@@ -198,7 +220,7 @@ const toProjectProgressData = (state: ProjectProgressData): ProjectProgressData 
   workItems: state.workItems,
   crews: state.crews,
   workerAssignments: state.workerAssignments,
-  materials: state.materials,
+  materials: normalizeMaterialsForWorkspace(state.materials, state.workItems, state.stages),
   attendanceSessions: state.attendanceSessions,
   workHourAllocations: state.workHourAllocations,
   dailyReports: state.dailyReports,
@@ -397,7 +419,7 @@ const runWithoutWorkspacePersistence = (operation: () => void) => {
 
 const normalizeLegacySnapshot = (saved: Partial<ProjectProgressData>): ProjectProgressData => {
   const empty = createEmptyProjectProgressData(saved.workspaceTenantId ?? 'legacy-browser', saved.project?.clientName ?? saved.project?.name)
-  return {
+  return normalizeProjectProgressData({
     ...empty,
     ...saved,
     projects: saved.projects?.length ? saved.projects : [saved.project ?? empty.project],
@@ -416,7 +438,7 @@ const normalizeLegacySnapshot = (saved: Partial<ProjectProgressData>): ProjectPr
     issues: saved.issues ?? [],
     risks: saved.risks ?? [],
     assistantMessages: saved.assistantMessages ?? [],
-  }
+  })
 }
 
 export const statusLabel: Record<ProjectWorkStatus, string> = {
@@ -473,18 +495,19 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           set({ serverSyncStatus: 'fallback', serverSyncError: 'Backend əlçatan deyil, lokal/demo məlumat göstərilir.' })
           return false
         }
+        const normalizedData = normalizeProjectProgressData(data)
 
         discardQueuedServerSaves()
         runWithoutWorkspacePersistence(() => {
           set((state) => ({
             ...state,
-            ...data,
+            ...normalizedData,
             serverSyncStatus: 'ready',
             serverSyncError: undefined,
             serverPendingSave: false,
             serverLastSavedAt: new Date().toISOString(),
-            workspaceTenantId: data.workspaceTenantId ?? state.workspaceTenantId,
-            assistantMessages: state.assistantMessages.length ? state.assistantMessages : data.assistantMessages ?? [],
+            workspaceTenantId: normalizedData.workspaceTenantId ?? state.workspaceTenantId,
+            assistantMessages: state.assistantMessages.length ? state.assistantMessages : normalizedData.assistantMessages ?? [],
           }))
         })
         return true
@@ -501,11 +524,12 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         try {
           await projectProgressApi.importLegacyWorkspace(snapshot)
           const imported = await projectProgressApi.getWorkspace()
+          const normalizedImported = imported ? normalizeProjectProgressData(imported) : undefined
           discardQueuedServerSaves()
           runWithoutWorkspacePersistence(() => {
             set((state) => ({
               ...state,
-              ...(imported ?? snapshot),
+              ...(normalizedImported ?? normalizeProjectProgressData(snapshot)),
               legacyLocalDataAvailable: false,
               legacyLocalSummary: undefined,
               legacyLocalSnapshot: undefined,
@@ -526,7 +550,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         dismissLegacyLocalData: () => set({ legacyLocalDataAvailable: false, legacyLocalSummary: undefined, legacyLocalSnapshot: undefined }),
         applyBackendData: (data) => set((state) => {
         const objects = data.objects?.length ? data.objects : state.objects
-        return {
+        const merged = {
           ...state,
           project: data.project ?? state.project,
           projects: data.projects?.length ? data.projects : state.projects,
@@ -545,6 +569,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           issues: data.issues?.length ? data.issues : state.issues,
           risks: data.risks?.length ? data.risks : state.risks,
         }
+        return normalizeProjectProgressData(merged)
       }),
       syncTenantSites: (sites, mode = 'replace') => set((state) => {
         const existingById = new Map(state.objects.map((object) => [object.id, object]))

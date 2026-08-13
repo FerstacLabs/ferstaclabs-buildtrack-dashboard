@@ -76,7 +76,7 @@ export const PayrollPage = () => {
       finalAmount: grossAmount,
       exportStatus: worker.status === 'Active' ? 'Hazır' : 'Xəbərdarlıq',
     }
-  }), [backendWorkers])
+  }), [backendWorkers, sites])
 
   const allRows = backendPayrollRows.length > 0 ? backendPayrollRows : getPayrollRowsByObject(store, selectedObjectId)
   const rows = allRows

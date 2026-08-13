@@ -69,6 +69,20 @@ public sealed class ProjectProgressWorkspacePersistenceTests
     }
 
     [Fact]
+    public void WorkspaceNormalizationDerivesMaterialObjectIdFromLinkedWorkItemOrStage()
+    {
+        var tenantId = Guid.NewGuid();
+        var body = CreateWorkspaceJsonWithLegacyMaterials(tenantId.ToString(), "object-a", "stage-a", "item-a");
+
+        var normalized = ProjectProgressEndpoints.NormalizeWorkspaceJsonForTenant(body, tenantId);
+        using var document = JsonDocument.Parse(normalized);
+        var materials = document.RootElement.GetProperty("materials").EnumerateArray().ToArray();
+
+        Assert.Equal("object-a", materials[0].GetProperty("objectId").GetString());
+        Assert.Equal("object-a", materials[1].GetProperty("objectId").GetString());
+    }
+
+    [Fact]
     public async Task TenantQueryFilterPreventsCrossWorkspaceReads()
     {
         var tenantA = Guid.NewGuid();
@@ -118,6 +132,33 @@ public sealed class ProjectProgressWorkspacePersistenceTests
             crews = Array.Empty<object>(),
             workerAssignments = Array.Empty<object>(),
             materials = Array.Empty<object>(),
+            attendanceSessions = Array.Empty<object>(),
+            workHourAllocations = Array.Empty<object>(),
+            dailyReports = Array.Empty<object>(),
+            issues = Array.Empty<object>(),
+            risks = Array.Empty<object>(),
+            assistantMessages = Array.Empty<object>(),
+        });
+
+    private static JsonElement CreateWorkspaceJsonWithLegacyMaterials(string workspaceTenantId, string objectId, string stageId, string workItemId) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            workspaceTenantId,
+            projects = new[] { new { id = "project-1", name = "Project", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = "estimate-1" } },
+            activeProjectId = "project-1",
+            objects = new[] { new { id = objectId, name = "Object", projectId = "project-1", status = "InProgress" } },
+            project = new { id = "project-1", name = "Project", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = "estimate-1" },
+            estimateVersions = Array.Empty<object>(),
+            summary = new { totalAmount = 0, laborAmount = 0, materialAmount = 0, hiddenCostAmount = 0, currency = "AZN" },
+            stages = new[] { new { id = stageId, objectId, name = "Stage", order = 1, totalCost = 100, laborCost = 40, materialCost = 60, plannedStartDate = "2026-08-01", plannedEndDate = "2026-08-10", status = "InProgress", progressPercent = 20, plannedHours = 10, actualHours = 2 } },
+            workItems = new[] { new { id = workItemId, objectId, stageId, name = "Work item", unit = "m2", quantity = 1, laborUnitPrice = 40, laborTotal = 40, materialQuantity = 1, materialUnitPrice = 60, materialTotal = 60, totalCost = 100, plannedHours = 10, actualHours = 2, status = "InProgress", progressPercent = 20 } },
+            crews = Array.Empty<object>(),
+            workerAssignments = Array.Empty<object>(),
+            materials = new[]
+            {
+                new { id = "mat-work-item", name = "Material A", unit = "m2", quantity = 1, usedQuantity = 0, remainingQuantity = 1, linkedWorkItemId = (string?)workItemId, linkedStageId = (string?)null },
+                new { id = "mat-stage", name = "Material B", unit = "m2", quantity = 1, usedQuantity = 0, remainingQuantity = 1, linkedWorkItemId = (string?)null, linkedStageId = (string?)stageId },
+            },
             attendanceSessions = Array.Empty<object>(),
             workHourAllocations = Array.Empty<object>(),
             dailyReports = Array.Empty<object>(),

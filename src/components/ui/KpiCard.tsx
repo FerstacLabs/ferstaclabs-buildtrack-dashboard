@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
+import { StableMetricValue } from './StableMetricValue'
 
 interface KpiCardProps {
   title: string
-  value: string
+  value: string | number
   suffix?: string
   trend?: string
   tone: 'blue' | 'green' | 'orange' | 'red' | 'purple'
@@ -16,7 +17,7 @@ export const KpiCard = ({ icon, suffix, title, tone, trend, value }: KpiCardProp
       <span className="kpi-title">{title}</span>
     </div>
     <div className="kpi-value">
-      {value}
+      <StableMetricValue key={`${title}:${String(value)}:${suffix ?? ''}`} value={value} />
       {suffix ? <small>{suffix}</small> : null}
     </div>
     {trend ? <div className="kpi-trend">↑ {trend}</div> : null}

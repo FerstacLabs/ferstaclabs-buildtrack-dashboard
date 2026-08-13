@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Security;
+using BuildTrack.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
@@ -477,7 +478,7 @@ internal static class BakinityDemoSeeder
         {
             ("BAK-WR-001", "PPE-HELMET", 20m, FieldWarehouseRequestStatus.PendingApproval, FieldWarehouseUrgency.Normal, "Yeni briqada üçün kaska ehtiyacı"),
             ("BAK-WR-002", "PPE-GLOVE", 150m, FieldWarehouseRequestStatus.NeedsJustification, FieldWarehouseUrgency.Urgent, "Əlcək normadan artıq istənilib"),
-            ("BAK-WR-003", "FIN-TILE-ADHESIVE", 90m, FieldWarehouseRequestStatus.InFulfillment, FieldWarehouseUrgency.Critical, "Suvaq/plitka işləri dayanmasın"),
+            ("BAK-WR-003", "FIN-TILE-ADHESIVE", 260m, FieldWarehouseRequestStatus.InFulfillment, FieldWarehouseUrgency.Critical, "Suvaq/plitka işləri dayanmasın"),
             ("BAK-WR-004", "PPE-VEST", 15m, FieldWarehouseRequestStatus.ReadyForPickup, FieldWarehouseUrgency.Normal, "Yeni işçilər üçün jilet"),
             ("BAK-WR-005", "TOOL-DRILL", 4m, FieldWarehouseRequestStatus.Rejected, FieldWarehouseUrgency.Normal, "Əlavə drel sorğusu əsaslandırılmadı"),
             ("BAK-WR-006", "CONS-CUT-DISC", 40m, FieldWarehouseRequestStatus.Issued, FieldWarehouseUrgency.Normal, "Kəsici disk gündəlik sərfiyyat"),
@@ -564,6 +565,7 @@ internal static class BakinityDemoSeeder
         }
 
         await db.SaveChangesAsync(ct);
+        await RebuildWarehouseWorkflowSeedWithCanonicalServiceAsync(db, tenantId, siteId, supervisorId, procurementUserId, warehouse.Id, byCode, ct);
         var need = await db.ProcurementNeeds.Include(x => x.CatalogItem).FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Status == ProcurementNeedStatus.Assigned, ct);
         if (need is not null && !await db.ProcurementTasks.AnyAsync(x => x.TenantId == tenantId && x.Code == "BAK-PO-001", ct))
         {
@@ -591,6 +593,206 @@ internal static class BakinityDemoSeeder
             });
             db.ProcurementTasks.Add(task);
         }
+    }
+
+    private static async Task RebuildWarehouseWorkflowSeedWithCanonicalServiceAsync(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        Guid siteId,
+        Guid supervisorId,
+        Guid procurementUserId,
+        Guid warehouseId,
+        IReadOnlyDictionary<string, FieldWarehouseCatalogItem> catalogByCode,
+        CancellationToken ct)
+    {
+        var rows = new[]
+        {
+            (Code: "BAK-WR-001", ItemCode: "PPE-HELMET", Quantity: 20m, FinalStatus: FieldWarehouseRequestStatus.PendingApproval, Urgency: FieldWarehouseUrgency.Normal, Reason: "Yeni briqada üçün kaska ehtiyacı"),
+            (Code: "BAK-WR-002", ItemCode: "PPE-GLOVE", Quantity: 150m, FinalStatus: FieldWarehouseRequestStatus.NeedsJustification, Urgency: FieldWarehouseUrgency.Urgent, Reason: "Əlcək normadan artıq istənilib"),
+            (Code: "BAK-WR-003", ItemCode: "FIN-TILE-ADHESIVE", Quantity: 260m, FinalStatus: FieldWarehouseRequestStatus.InFulfillment, Urgency: FieldWarehouseUrgency.Critical, Reason: "Suvaq/plitka işləri dayanmasın"),
+            (Code: "BAK-WR-004", ItemCode: "PPE-VEST", Quantity: 15m, FinalStatus: FieldWarehouseRequestStatus.ReadyForPickup, Urgency: FieldWarehouseUrgency.Normal, Reason: "Yeni işçilər üçün jilet"),
+            (Code: "BAK-WR-005", ItemCode: "TOOL-DRILL", Quantity: 4m, FinalStatus: FieldWarehouseRequestStatus.Rejected, Urgency: FieldWarehouseUrgency.Normal, Reason: "Əlavə drel sorğusu əsaslandırılmadı"),
+            (Code: "BAK-WR-006", ItemCode: "CONS-CUT-DISC", Quantity: 40m, FinalStatus: FieldWarehouseRequestStatus.Issued, Urgency: FieldWarehouseUrgency.Normal, Reason: "Kəsici disk gündəlik sərfiyyat"),
+        };
+
+        await ResetWarehouseWorkflowSeedArtifactsAsync(db, tenantId, rows.Select(x => x.Code).ToArray(), ct);
+
+        var supplyService = new SupplyChainService(db, new WarehouseAvailabilityService(db), new WarehouseUsagePolicyService(db));
+        for (var index = 0; index < rows.Length; index++)
+        {
+            var row = rows[index];
+            if (!catalogByCode.TryGetValue(row.ItemCode, out var catalog)) continue;
+
+            var request = await db.FieldWarehouseRequests
+                .Include(x => x.Lines)
+                .FirstAsync(x => x.TenantId == tenantId && x.Code == row.Code, ct);
+            request.ProjectId = StableGuid("BAK-DEMO-PROJECT");
+            request.SiteId = siteId;
+            request.SupervisorUserId = supervisorId;
+            request.CatalogItemId = catalog.Id;
+            request.RequestedQuantity = row.Quantity;
+            request.ApprovedQuantity = 0;
+            request.ReservedQuantity = 0;
+            request.IssuedQuantity = 0;
+            request.Unit = catalog.Unit;
+            request.NeededBy = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(5 + index));
+            request.Urgency = row.Urgency;
+            request.Reason = row.Reason;
+            request.Status = FieldWarehouseRequestStatus.PendingApproval;
+            request.AbnormalRequest = row.FinalStatus == FieldWarehouseRequestStatus.NeedsJustification;
+            request.JustificationRequestNote = request.AbnormalRequest ? "Sorğu miqdarı norma limitindən yüksəkdir." : null;
+            request.Justification = request.AbnormalRequest ? "Briqada sayı artırılıb, 2 günlük ehtiyat tələb olunur." : null;
+            request.ManagerComment = row.FinalStatus == FieldWarehouseRequestStatus.Rejected ? "Mövcud inventar kifayətdir." : null;
+            request.ReviewedAt = null;
+            request.ReviewedByUserId = null;
+            request.UpdatedAt = DateTimeOffset.UtcNow;
+
+            var line = request.Lines.Single();
+            line.CatalogItemId = catalog.Id;
+            line.RequestedQuantity = row.Quantity;
+            line.ApprovedQuantity = 0;
+            line.ReservedQuantity = 0;
+            line.IssuedQuantity = 0;
+            line.Unit = catalog.Unit;
+            line.Reason = row.Reason;
+            line.Status = row.FinalStatus == FieldWarehouseRequestStatus.Rejected
+                ? FieldWarehouseRequestLineStatus.Rejected
+                : FieldWarehouseRequestLineStatus.Pending;
+            line.UpdatedAt = DateTimeOffset.UtcNow;
+
+            if (row.FinalStatus == FieldWarehouseRequestStatus.NeedsJustification)
+            {
+                request.Status = FieldWarehouseRequestStatus.NeedsJustification;
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
+            if (row.FinalStatus == FieldWarehouseRequestStatus.Rejected)
+            {
+                request.Status = FieldWarehouseRequestStatus.Rejected;
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
+            if (row.FinalStatus == FieldWarehouseRequestStatus.PendingApproval)
+            {
+                request.Status = FieldWarehouseRequestStatus.PendingApproval;
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
+            await db.SaveChangesAsync(ct);
+            await supplyService.ApproveFieldRequestAsync(tenantId, request.Id, supervisorId, "BAK-DEMO canonical stock check", ct);
+
+            request = await db.FieldWarehouseRequests.Include(x => x.Lines).FirstAsync(x => x.TenantId == tenantId && x.Id == request.Id, ct);
+            line = request.Lines.Single();
+
+            if (row.FinalStatus == FieldWarehouseRequestStatus.ReadyForPickup)
+            {
+                request.Status = FieldWarehouseRequestStatus.ReadyForPickup;
+                line.Status = FieldWarehouseRequestLineStatus.ReadyForIssue;
+                request.UpdatedAt = DateTimeOffset.UtcNow;
+                line.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
+            else if (row.FinalStatus == FieldWarehouseRequestStatus.Issued)
+            {
+                line.Status = FieldWarehouseRequestLineStatus.ReadyForIssue;
+                request.Status = FieldWarehouseRequestStatus.ReadyForPickup;
+                await db.SaveChangesAsync(ct);
+                await supplyService.IssueFieldRequestAsync(tenantId, request.Id, warehouseId, supervisorId, "BAK-DEMO prorab", "Demo təhvil", ct);
+            }
+            else if (row.FinalStatus == FieldWarehouseRequestStatus.InFulfillment)
+            {
+                var need = await db.ProcurementNeeds
+                    .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SourceRequestId == request.Id && x.Status != ProcurementNeedStatus.Cancelled, ct);
+                if (need is null) continue;
+
+                var task = await supplyService.CreateProcurementTaskAsync(
+                    tenantId,
+                    new[] { need.Id },
+                    procurementUserId,
+                    supervisorId,
+                    "Qiymət və məhsul şəkli ilə təsdiqə göndərin.",
+                    ct);
+                task.Code = "BAK-PO-001";
+                task.Status = ProcurementTaskStatus.Shopping;
+                task.StartedAt = DateTimeOffset.UtcNow.AddHours(-8);
+                foreach (var taskLine in task.Lines)
+                {
+                    taskLine.Status = ProcurementTaskLineStatus.Searching;
+                    taskLine.Note = "Demo satınalma prosesi";
+                    taskLine.UpdatedAt = DateTimeOffset.UtcNow;
+                }
+
+                need.Status = ProcurementNeedStatus.Assigned;
+                need.UpdatedAt = DateTimeOffset.UtcNow;
+                line.Status = FieldWarehouseRequestLineStatus.ProcurementInProgress;
+                line.UpdatedAt = DateTimeOffset.UtcNow;
+                request.Status = FieldWarehouseRequestStatus.InFulfillment;
+                request.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+    }
+
+    private static async Task ResetWarehouseWorkflowSeedArtifactsAsync(BuildTrackDbContext db, Guid tenantId, IReadOnlyCollection<string> seedRequestCodes, CancellationToken ct)
+    {
+        var requests = await db.FieldWarehouseRequests
+            .Include(x => x.Lines)
+            .Where(x => x.TenantId == tenantId && seedRequestCodes.Contains(x.Code))
+            .ToListAsync(ct);
+        var requestIds = requests.Select(x => x.Id).ToArray();
+        var requestLineIds = requests.SelectMany(x => x.Lines).Select(x => x.Id).ToArray();
+
+        var oldTasks = await db.ProcurementTasks
+            .Include(x => x.Lines)
+            .Where(x => x.TenantId == tenantId && x.Code == "BAK-PO-001")
+            .ToListAsync(ct);
+        db.ProcurementTaskLines.RemoveRange(oldTasks.SelectMany(x => x.Lines));
+        db.ProcurementTasks.RemoveRange(oldTasks);
+
+        if (requestIds.Length > 0)
+        {
+            var needs = await db.ProcurementNeeds
+                .Where(x => x.TenantId == tenantId && requestIds.Contains(x.SourceRequestId))
+                .ToListAsync(ct);
+            db.ProcurementNeeds.RemoveRange(needs);
+
+            var issues = await db.WarehouseIssues
+                .Include(x => x.Lines)
+                .Where(x => x.TenantId == tenantId && requestIds.Contains(x.FieldRequestId))
+                .ToListAsync(ct);
+            var issueReservationIds = issues.SelectMany(x => x.Lines).Select(x => x.ReservationId).ToArray();
+            var directReservationIds = requestLineIds.Length == 0
+                ? Array.Empty<Guid>()
+                : await db.WarehouseReservations
+                    .Where(x => x.TenantId == tenantId && requestLineIds.Contains(x.RequestLineId))
+                    .Select(x => x.Id)
+                    .ToArrayAsync(ct);
+            var reservationIds = issueReservationIds.Concat(directReservationIds).Distinct().ToArray();
+
+            var seedIssueMovements = await db.WarehouseStockMovements
+                .Where(x => x.TenantId == tenantId
+                    && x.ReferenceType == "WarehouseIssueLine"
+                    && x.ReferenceId.HasValue
+                    && reservationIds.Contains(x.ReferenceId.Value))
+                .ToListAsync(ct);
+            db.WarehouseStockMovements.RemoveRange(seedIssueMovements);
+
+            db.WarehouseIssueLines.RemoveRange(issues.SelectMany(x => x.Lines));
+            db.WarehouseIssues.RemoveRange(issues);
+
+            if (reservationIds.Length > 0)
+            {
+                var reservations = await db.WarehouseReservations
+                    .Where(x => x.TenantId == tenantId && reservationIds.Contains(x.Id))
+                    .ToListAsync(ct);
+                db.WarehouseReservations.RemoveRange(reservations);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     private static async Task UpsertWorkspaceAsync(BuildTrackDbContext db, Guid tenantId, IReadOnlyList<Site> sites, IReadOnlyList<Worker> workers, CancellationToken ct)
@@ -761,12 +963,12 @@ internal static class BakinityDemoSeeder
             }).ToArray(),
             materials = new[]
             {
-                Material("MAT-REBAR-A3", "Armatur A3", "ton", 20.75m, 8.2m, stages[1].id, workItems[1].id),
-                Material("MAT-CONCRETE-B25", "Beton B25", "m3", 328.2m, 126.5m, stages[1].id, workItems[2].id),
-                Material("FORM-TIMBER", "Taxta", "m3", 19m, 7.4m, stages[2].id, workItems[4].id),
-                Material("PPE-HELMET", "Kaska", "ədəd", 140m, 22m, stages[0].id, workItems[0].id),
-                Material("PPE-GLOVE", "İş əlcəyi", "cüt", 420m, 96m, stages[0].id, workItems[0].id),
-                Material("CONS-DRILL-BIT-10", "Sverlo 10 mm", "ədəd", 65m, 17m, stages[5].id, workItems[6].id),
+                Material("MAT-REBAR-A3", "Armatur A3", "ton", 20.75m, 8.2m, workItems[1].objectId, workItems[1].stageId, workItems[1].id, workItems[1].materialUnitPrice),
+                Material("MAT-CONCRETE-B25", "Beton B25", "m3", 328.2m, 126.5m, workItems[2].objectId, workItems[2].stageId, workItems[2].id, workItems[2].materialUnitPrice),
+                Material("FORM-TIMBER", "Taxta", "m3", 19m, 7.4m, workItems[4].objectId, workItems[4].stageId, workItems[4].id, workItems[4].materialUnitPrice),
+                Material("PPE-HELMET", "Kaska", "ədəd", 140m, 22m, workItems[0].objectId, workItems[0].stageId, workItems[0].id, workItems[0].materialUnitPrice),
+                Material("PPE-GLOVE", "İş əlcəyi", "cüt", 420m, 96m, workItems[0].objectId, workItems[0].stageId, workItems[0].id, workItems[0].materialUnitPrice),
+                Material("CONS-DRILL-BIT-10", "Sverlo 10 mm", "ədəd", 65m, 17m, workItems[6].objectId, workItems[6].stageId, workItems[6].id, workItems[6].materialUnitPrice),
             },
             attendanceSessions = Array.Empty<object>(),
             workHourAllocations = Array.Empty<object>(),
@@ -783,9 +985,10 @@ internal static class BakinityDemoSeeder
         return JsonSerializer.Serialize(data, JsonOptions);
     }
 
-    private static object Material(string code, string name, string unit, decimal quantity, decimal used, string stageId, string workItemId) => new
+    private static object Material(string code, string name, string unit, decimal quantity, decimal used, string objectId, string stageId, string workItemId, decimal unitPrice) => new
     {
         id = StableGuid($"BAK-DEMO-MAT-{code}").ToString(),
+        objectId,
         catalogItemId = code,
         category = "Tikinti materialı",
         name,
@@ -793,7 +996,7 @@ internal static class BakinityDemoSeeder
         quantity,
         usedQuantity = used,
         remainingQuantity = quantity - used,
-        unitPrice = 1,
+        unitPrice,
         linkedStageId = stageId,
         linkedWorkItemId = workItemId,
         deliveryDate = DateTime.UtcNow.Date.AddDays(10).ToString("yyyy-MM-dd"),

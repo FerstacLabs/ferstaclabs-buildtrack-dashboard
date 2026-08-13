@@ -47,10 +47,21 @@ export const MaterialsPage = () => {
   }
 
   const saveMaterial = (values: MaterialFormValues) => {
-    const linkedStage = values.linkedStageId ? stages.find((stage) => stage.id === values.linkedStageId) : undefined
-    const objectId = editingMaterial?.objectId ?? linkedStage?.objectId ?? (selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId)
-    if (editingMaterial) updateMaterial(editingMaterial.id, { ...values, objectId })
-    else addMaterial({ ...values, objectId })
+    const linkedWorkItem = values.linkedWorkItemId ? store.workItems.find((item) => item.id === values.linkedWorkItemId) : undefined
+    const linkedStageId = linkedWorkItem?.stageId ?? values.linkedStageId
+    const linkedStage = linkedStageId ? stages.find((stage) => stage.id === linkedStageId) : undefined
+    const objectId = editingMaterial?.objectId
+      ?? linkedWorkItem?.objectId
+      ?? linkedStage?.objectId
+      ?? (selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId)
+    const normalizedValues = {
+      ...values,
+      objectId,
+      linkedStageId,
+      unitPrice: values.unitPrice && values.unitPrice > 0 ? values.unitPrice : linkedWorkItem?.materialUnitPrice ?? values.unitPrice,
+    }
+    if (editingMaterial) updateMaterial(editingMaterial.id, normalizedValues)
+    else addMaterial(normalizedValues)
     setDrawerOpen(false)
     void message.success('Material məlumatı yadda saxlandı')
   }
