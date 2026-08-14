@@ -5,12 +5,9 @@ import type { AiAssistantMessage } from '../../types/projectProgress'
 interface AiAssistantState {
   tenantId?: string
   userId?: string
-  selectedSiteId?: string | null
   messages: AiAssistantMessage[]
   messagesByScope: Record<string, AiAssistantMessage[]>
   setScope: (tenantId?: string, userId?: string) => void
-  setContext: (selectedSiteId?: string | null) => void
-  initializeContext: (selectedSiteId?: string | null) => void
   addMessage: (message: Omit<AiAssistantMessage, 'id' | 'createdAt'>) => void
   clearMessages: () => void
   migrateLegacyProjectProgressMessages: () => void
@@ -47,7 +44,6 @@ export const useAiAssistantStore = create<AiAssistantState>()(
     (set, get) => ({
       tenantId: undefined,
       userId: undefined,
-      selectedSiteId: null,
       messages: [],
       messagesByScope: {},
       setScope: (tenantId, userId) => {
@@ -55,16 +51,9 @@ export const useAiAssistantStore = create<AiAssistantState>()(
         set((state) => ({
           tenantId,
           userId,
-          selectedSiteId: null,
           messages: state.messagesByScope[nextKey] ?? [],
         }))
       },
-      setContext: (selectedSiteId) => set({
-        selectedSiteId: selectedSiteId ?? null,
-      }),
-      initializeContext: (selectedSiteId) => set({
-        selectedSiteId: selectedSiteId ?? null,
-      }),
       addMessage: (message) => set((state) => {
         const key = scopeKey(state.tenantId, state.userId)
         const nextMessages = [
@@ -119,7 +108,7 @@ export const useAiAssistantStore = create<AiAssistantState>()(
         userId: state.userId,
         messagesByScope: state.messagesByScope,
       }),
-      version: 2,
+      version: 3,
     },
   ),
 )

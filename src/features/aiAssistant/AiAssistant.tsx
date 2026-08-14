@@ -1,4 +1,4 @@
-import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
+import { AudioOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
 import { Button, Drawer, Input, Select, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { tryApiRequest } from '../../shared/api/client'
@@ -79,14 +79,12 @@ export const AiAssistant = () => {
   const globalSelectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const objects = useProjectProgressStore((state) => state.objects)
   const messages = useAiAssistantStore((state) => state.messages)
-  const aiSelectedSiteId = useAiAssistantStore((state) => state.selectedSiteId)
   const addAssistantMessage = useAiAssistantStore((state) => state.addMessage)
   const clearAssistantMessages = useAiAssistantStore((state) => state.clearMessages)
   const setAssistantScope = useAiAssistantStore((state) => state.setScope)
-  const setAiContext = useAiAssistantStore((state) => state.setContext)
-  const initializeAiContext = useAiAssistantStore((state) => state.initializeContext)
   const migrateLegacyProjectProgressMessages = useAiAssistantStore((state) => state.migrateLegacyProjectProgressMessages)
   const [open, setOpen] = useState(false)
+  const [aiSelectedSiteId, setAiSelectedSiteId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [speechStatus, setSpeechStatus] = useState<string | null>(null)
@@ -97,13 +95,10 @@ export const AiAssistant = () => {
   const audioUrlRef = useRef<string | null>(null)
   const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
-  const selectedSiteId = aiSelectedSiteId ?? undefined
-  const contextSite = aiSelectedSiteId ? objects.find((object) => object.id === aiSelectedSiteId) : undefined
   const projectOptions = useMemo(
     () => objects.map((object) => ({ value: object.id, label: object.name })),
     [objects],
   )
-  const contextLabel = contextSite?.name ?? 'Bütün layihələr'
 
   const cleanupAudioUrl = () => {
     if (audioRef.current) {
@@ -139,16 +134,17 @@ export const AiAssistant = () => {
   useEffect(() => {
     setAssistantScope(tenantId, userId)
     migrateLegacyProjectProgressMessages()
+    setAiSelectedSiteId(null)
   }, [migrateLegacyProjectProgressMessages, setAssistantScope, tenantId, userId])
 
   useEffect(() => {
     if (!aiSelectedSiteId) return
     if (projectOptions.some((option) => option.value === aiSelectedSiteId)) return
-    setAiContext(null)
-  }, [aiSelectedSiteId, projectOptions, setAiContext])
+    setAiSelectedSiteId(null)
+  }, [aiSelectedSiteId, projectOptions])
 
   const openDrawer = () => {
-    initializeAiContext(globalSelectedProjectId === ALL_PROJECTS_ID ? null : globalSelectedProjectId)
+    setAiSelectedSiteId(globalSelectedProjectId === ALL_PROJECTS_ID ? null : globalSelectedProjectId)
     setOpen(true)
   }
 
@@ -175,7 +171,7 @@ export const AiAssistant = () => {
       method: 'POST',
       body: JSON.stringify({
         message: trimmed,
-        selectedSiteId: selectedSiteId ?? null,
+        selectedSiteId: aiSelectedSiteId ?? null,
         history,
       }),
     })
@@ -318,23 +314,19 @@ export const AiAssistant = () => {
         open={open}
         width={480}
         onClose={closeDrawer}
-        extra={<Button icon={<CloseOutlined />} onClick={closeDrawer} />}
       >
         <div className="assistant-panel">
-          <div className="assistant-context-controls">
-            <label>
-              <span>Layihə</span>
-              <Select
-                value={aiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE}
-                options={[
-                  { value: AI_ALL_PROJECTS_VALUE, label: 'Bütün layihələr' },
-                  ...projectOptions,
-                ]}
-                onChange={(value) => setAiContext(value === AI_ALL_PROJECTS_VALUE ? null : value)}
-              />
-            </label>
+          <div className="assistant-project-toolbar">
+            <span className="assistant-project-label">Layihə</span>
+            <Select
+              value={aiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE}
+              options={[
+                { value: AI_ALL_PROJECTS_VALUE, label: 'Bütün layihələr' },
+                ...projectOptions,
+              ]}
+              onChange={(value) => setAiSelectedSiteId(value === AI_ALL_PROJECTS_VALUE ? null : value)}
+            />
           </div>
-          <div className="assistant-context-line">Kontekst: <strong>{contextLabel}</strong></div>
           <div className="assistant-prompts">
             {quickPrompts.map((prompt) => (
               <button type="button" key={prompt} onClick={() => void submitQuestion(prompt)}>
