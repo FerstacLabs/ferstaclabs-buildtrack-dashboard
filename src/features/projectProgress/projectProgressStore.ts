@@ -830,15 +830,8 @@ useProjectProgressStore.subscribe((state) => {
   if (serialized === lastObservedWorkspace) return
   lastObservedWorkspace = serialized
 
-  const tenantId = workspace.workspaceTenantId
   if (suppressWorkspacePersistence) {
     lastServerSavedWorkspace = serialized
     discardQueuedServerSaves()
-    return
   }
-
-  if (!isPersistableWorkspaceTenant(tenantId)) return
-  if (state.serverSyncStatus === 'idle' || state.serverSyncStatus === 'loading' || state.serverSyncStatus === 'fallback') return
-
-  queueServerSave(workspace)
 })

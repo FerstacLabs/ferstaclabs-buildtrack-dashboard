@@ -10,6 +10,7 @@ import { useI18n } from '../../i18n'
 import type { Crew, ProjectWorkStatus } from '../../types/projectProgress'
 import { formatNumber, formatPercent } from '../../utils/formatters'
 import { ALL_OBJECTS_ID, getCrewsByObject, getCrewActualHours, getEstimateRowsByObject, getStagesByObject, getWorkersByCrew } from './projectSelectors'
+import { projectProgressApi } from './projectProgressApi'
 import { calculateStageProgress, statusColor, useProjectProgressStore } from './projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
@@ -30,7 +31,7 @@ const isProjectWorkStatus = (value: unknown): value is ProjectWorkStatus =>
 export const ProjectCrewsPage = () => {
   const { language, t } = useI18n()
   const store = useProjectProgressStore()
-  const { addCrew, deleteCrew, stages, updateCrew, workItems } = store
+  const { loadFromBackend, project, stages, workItems } = store
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const scopedCrews = getCrewsByObject(store, selectedObjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
@@ -58,13 +59,30 @@ export const ProjectCrewsPage = () => {
     setDrawerOpen(true)
   }
 
-  const saveCrew = (values: CrewFormValues) => {
+  const saveCrew = async (values: CrewFormValues) => {
     const objectId = editingCrew?.objectId ?? (selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId)
     const normalizedValues = { ...values, type: resolveCrewTypeValue(values.type) }
-    if (editingCrew) updateCrew(editingCrew.id, { ...normalizedValues, objectId })
-    else addCrew({ ...normalizedValues, objectId })
-    setDrawerOpen(false)
-    void message.success(t('crews.saved'))
+    try {
+      if (editingCrew) await projectProgressApi.saveCrew({ ...editingCrew, ...normalizedValues, objectId })
+      else await projectProgressApi.createCrew(project.id, { ...normalizedValues, objectId })
+      await loadFromBackend()
+      setDrawerOpen(false)
+      void message.success(t('crews.saved'))
+    } catch (error) {
+      console.error('Project crew save failed', error)
+      void message.error('Briqada serverdə saxlanmadı')
+    }
+  }
+
+  const deleteServerCrew = async (crewId: string) => {
+    try {
+      await projectProgressApi.deleteCrew(crewId)
+      await loadFromBackend()
+      void message.success('Briqada silindi')
+    } catch (error) {
+      console.error('Project crew delete failed', error)
+      void message.error('Briqada silinmədi')
+    }
   }
 
   const rows = scopedCrews.map((crew) => {
@@ -102,7 +120,7 @@ export const ProjectCrewsPage = () => {
       render: (_, row) => (
         <Space>
           <Button icon={<EditOutlined />} onClick={() => openDrawer(row)} />
-          <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: t('crews.deleteConfirm'), okText: t('common.delete'), cancelText: t('common.cancel'), onOk: () => deleteCrew(row.id) })} />
+          <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: t('crews.deleteConfirm'), okText: t('common.delete'), cancelText: t('common.cancel'), onOk: () => deleteServerCrew(row.id) })} />
         </Space>
       ),
     },

@@ -21,6 +21,7 @@ import {
   type ParsedEstimateRow,
 } from './estimateExcelService'
 import { ALL_OBJECTS_ID, getCrewsByObject, getEstimateRowsByObject, getMaterialsByObject, getObjectName, getStagesByObject } from './projectSelectors'
+import { projectProgressApi } from './projectProgressApi'
 import { calculateStageProgress, statusColor, statusLabel, useProjectProgressStore } from './projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
@@ -82,6 +83,24 @@ const stockText = (stock?: WarehouseStockItem) => {
   return `Anbarda: ${formatNumber(stock.availableQuantity)} ${stock.unit}`
 }
 
+const WorkItemProgressSlider = ({ value, onCommit }: { value: number; onCommit: (value: number) => void }) => {
+  const [draftValue, setDraftValue] = useState(Number(value))
+
+  useEffect(() => {
+    setDraftValue(Number(value))
+  }, [value])
+
+  return (
+    <Slider
+      min={0}
+      max={100}
+      value={draftValue}
+      onChange={(nextValue) => setDraftValue(Number(nextValue))}
+      onChangeComplete={(nextValue) => onCommit(Number(nextValue))}
+    />
+  )
+}
+
 export const ProjectEstimatePage = () => {
   const { language, t } = useI18n()
   const store = useProjectProgressStore()
@@ -92,10 +111,8 @@ export const ProjectEstimatePage = () => {
     addStage,
     addWorkItem,
     crews,
-    deleteMaterial,
-    deleteStage,
-    deleteWorkItem,
     estimateVersions,
+    loadFromBackend,
     project,
     stages,
     summary,
@@ -262,7 +279,7 @@ export const ProjectEstimatePage = () => {
     setItemDrawerOpen(true)
   }
 
-  const saveWorkItem = (values: WorkItemFormValues) => {
+  const saveWorkItem = async (values: WorkItemFormValues) => {
     const materialRows = (values.materials ?? [])
       .map((material) => {
         const catalogItem = material.catalogItemId ? catalogById.get(material.catalogItemId) : undefined
@@ -312,48 +329,60 @@ export const ProjectEstimatePage = () => {
       totalCost: laborTotal + materialTotal,
       remainingHours: Math.max(0, values.plannedHours - values.actualHours),
     }
-    const savedItemId = editingItem?.id ?? addWorkItem(payload)
-    if (editingItem) updateWorkItem(editingItem.id, payload)
+    try {
+      const savedItem = editingItem
+        ? await projectProgressApi.updateWorkItem(editingItem.id, payload)
+        : await projectProgressApi.createWorkItem(project.id, payload)
+      const savedItemId = savedItem.id
 
-    const previousLinkedMaterials = editingItem ? scopedMaterials.filter((material) => material.linkedWorkItemId === savedItemId) : []
-    const retainedMaterialIds = new Set<string>()
+      const previousLinkedMaterials = editingItem ? scopedMaterials.filter((material) => material.linkedWorkItemId === savedItemId) : []
+      const retainedMaterialIds = new Set<string>()
 
-    materialRows.forEach((material) => {
-      const materialPayload: Omit<MaterialItem, 'id' | 'remainingQuantity'> = {
-        objectId,
-        catalogItemId: material.catalogItemId,
-        category: material.catalogItem?.category,
-        name: material.name,
-        unit: material.unit,
-        quantity: material.quantity,
-        usedQuantity: Math.min(material.quantity, Math.max(0, material.quantity * (progressPercent / 100))),
-        unitPrice: material.unitPrice,
-        linkedStageId: values.stageId,
-        linkedWorkItemId: savedItemId,
-        notes: values.notes,
+      for (const material of materialRows) {
+        const materialPayload: Omit<MaterialItem, 'id' | 'remainingQuantity'> = {
+          objectId,
+          catalogItemId: material.catalogItemId,
+          category: material.catalogItem?.category,
+          name: material.name,
+          unit: material.unit,
+          quantity: material.quantity,
+          usedQuantity: Math.min(material.quantity, Math.max(0, material.quantity * (progressPercent / 100))),
+          unitPrice: material.unitPrice,
+          linkedStageId: values.stageId,
+          linkedWorkItemId: savedItemId,
+          notes: values.notes,
+        }
+        const existingMaterial = material.id
+          ? previousLinkedMaterials.find((entry) => entry.id === material.id)
+          : previousLinkedMaterials.find((entry) =>
+              entry.catalogItemId === material.catalogItemId
+              || (!entry.catalogItemId && normalizeName(entry.name) === normalizeName(material.name)))
+
+        if (existingMaterial) {
+          await projectProgressApi.saveMaterial({
+            ...existingMaterial,
+            ...materialPayload,
+            remainingQuantity: Math.max(0, materialPayload.quantity - materialPayload.usedQuantity),
+          })
+          retainedMaterialIds.add(existingMaterial.id)
+        } else {
+          await projectProgressApi.createMaterial(project.id, materialPayload)
+        }
       }
-      const existingMaterial = material.id
-        ? previousLinkedMaterials.find((entry) => entry.id === material.id)
-        : previousLinkedMaterials.find((entry) =>
-            entry.catalogItemId === material.catalogItemId
-            || (!entry.catalogItemId && normalizeName(entry.name) === normalizeName(material.name)))
 
-      if (existingMaterial) {
-        updateMaterial(existingMaterial.id, materialPayload)
-        retainedMaterialIds.add(existingMaterial.id)
-      } else {
-        addMaterial(materialPayload)
+      for (const material of previousLinkedMaterials.filter((material) => !retainedMaterialIds.has(material.id) && !materialRows.some((row) => row.id === material.id))) {
+        await projectProgressApi.deleteMaterial(material.id)
       }
-    })
 
-    previousLinkedMaterials
-      .filter((material) => !retainedMaterialIds.has(material.id) && !materialRows.some((row) => row.id === material.id))
-      .forEach((material) => deleteMaterial(material.id))
-
-    setItemDrawerOpen(false)
-    setEditingItem(undefined)
-    refreshEstimateTables()
-    void message.success(materialRows.length ? 'Smeta sətri və bağlı materiallar yadda saxlandı' : 'Smeta sətri yadda saxlandı')
+      await loadFromBackend()
+      setItemDrawerOpen(false)
+      setEditingItem(undefined)
+      refreshEstimateTables()
+      void message.success(materialRows.length ? 'Smeta sətri və bağlı materiallar serverdə saxlandı' : 'Smeta sətri serverdə saxlandı')
+    } catch (error) {
+      console.error('Project work item save failed', error)
+      void message.error('Smeta sətri saxlanmadı. Server bağlantısını və məlumatları yoxlayın.')
+    }
   }
 
   const createProjectObject = async (values: ProjectObjectFormValues) => {
@@ -367,6 +396,7 @@ export const ProjectEstimatePage = () => {
         timeZone: 'Asia/Baku',
       })
       syncTenantSites([site], 'merge')
+      await loadFromBackend()
       useProjectSelectionStore.getState().setSelectedProjectId(site.id)
       projectForm.resetFields()
       setProjectModalOpen(false)
@@ -394,24 +424,65 @@ export const ProjectEstimatePage = () => {
     useProjectSelectionStore.getState().setSelectedProjectId(objectId)
   }
 
-  const addNewStage = (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate?: Dayjs; plannedEndDate?: Dayjs }) => {
-    addStage({
-      name: values.name,
-      objectId: selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId,
-      totalCost: values.totalCost,
-      laborCost: 0,
-      materialCost: values.totalCost,
-      plannedStartDate: toDateString(values.plannedStartDate) || '2026-10-01',
-      plannedEndDate: toDateString(values.plannedEndDate) || '2026-10-15',
-      status: 'NotStarted',
-      progressPercent: 0,
-      plannedHours: values.plannedHours,
-      actualHours: 0,
-    })
-    setStageModalOpen(false)
-    stageForm.resetFields()
-    refreshEstimateTables()
-    void message.success('Yeni etap əlavə edildi')
+  const addNewStage = async (values: { name: string; totalCost: number; plannedHours: number; plannedStartDate?: Dayjs; plannedEndDate?: Dayjs }) => {
+    try {
+      await projectProgressApi.createStage(project.id, {
+        name: values.name,
+        objectId: selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId,
+        totalCost: values.totalCost,
+        laborCost: 0,
+        materialCost: values.totalCost,
+        plannedStartDate: toDateString(values.plannedStartDate) || '2026-10-01',
+        plannedEndDate: toDateString(values.plannedEndDate) || '2026-10-15',
+        status: 'NotStarted',
+        progressPercent: 0,
+        plannedHours: values.plannedHours,
+        actualHours: 0,
+      })
+      await loadFromBackend()
+      setStageModalOpen(false)
+      stageForm.resetFields()
+      refreshEstimateTables()
+      void message.success('Yeni etap serverdə əlavə edildi')
+    } catch (error) {
+      console.error('Project stage save failed', error)
+      void message.error('Etap saxlanmadı. Server bağlantısını yoxlayın.')
+    }
+  }
+
+  const saveWorkItemProgress = async (row: WorkItem, progressPercent: number) => {
+    try {
+      await projectProgressApi.updateWorkItem(row.id, { ...row, progressPercent })
+      await loadFromBackend()
+      refreshEstimateTables()
+    } catch (error) {
+      console.error('Project work item progress save failed', error)
+      void message.error('Gedişat faizi serverdə saxlanmadı')
+    }
+  }
+
+  const deleteServerWorkItem = async (row: WorkItem) => {
+    try {
+      await projectProgressApi.deleteWorkItem(row.id)
+      await loadFromBackend()
+      refreshEstimateTables()
+      void message.success('Smeta sətri silindi')
+    } catch (error) {
+      console.error('Project work item delete failed', error)
+      void message.error('Smeta sətri silinmədi')
+    }
+  }
+
+  const deleteServerStage = async (stageId: string) => {
+    try {
+      await projectProgressApi.deleteStage(stageId)
+      await loadFromBackend()
+      refreshEstimateTables()
+      void message.success('Etap silindi')
+    } catch (error) {
+      console.error('Project stage delete failed', error)
+      void message.error('Etap silinmədi')
+    }
   }
 
   const applyImportedRows = (rows: ParsedEstimateRow[], invalidRows: InvalidEstimateRow[]): EstimateImportSummary => {
@@ -633,7 +704,7 @@ export const ProjectEstimatePage = () => {
     { title: 'Faktiki saat', dataIndex: 'actualHours', width: 120, align: 'right', render: (value) => formatHours(Number(value), 0) },
     { title: 'Briqada', dataIndex: 'assignedCrewId', width: 170, render: (value) => crewNameById.get(String(value)) ?? 'Təyin edilməyib' },
     { title: 'Status', dataIndex: 'status', width: 130, render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
-    { title: 'Gedişat %', dataIndex: 'progressPercent', width: 160, render: (value, row) => <Slider min={0} max={100} value={Number(value)} onChange={(progressPercent) => updateWorkItem(row.id, { progressPercent })} onChangeComplete={refreshEstimateTables} /> },
+    { title: 'Gedişat %', dataIndex: 'progressPercent', width: 160, render: (value, row) => <WorkItemProgressSlider value={Number(value)} onCommit={(progressPercent) => void saveWorkItemProgress(row, progressPercent)} /> },
     {
       title: 'Əməliyyat',
       fixed: 'right',
@@ -644,7 +715,7 @@ export const ProjectEstimatePage = () => {
           <Button
             danger
             icon={<DeleteOutlined />}
-            onClick={() => Modal.confirm({ title: 'Sətri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => { deleteWorkItem(row.id); refreshEstimateTables() } })}
+            onClick={() => Modal.confirm({ title: 'Sətri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteServerWorkItem(row) })}
           />
         </Space>
       ),
@@ -704,7 +775,7 @@ export const ProjectEstimatePage = () => {
             { title: 'Məbləğ', dataIndex: 'totalCost', align: 'right', render: (value) => formatCurrency(Number(value)) },
             { title: 'Plan tarix', render: (_, row) => `${formatDisplayDate(row.plannedStartDate)} - ${formatDisplayDate(row.plannedEndDate)}` },
             { title: 'Status', dataIndex: 'status', render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
-            { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => { deleteStage(row.id); refreshEstimateTables() } })} /> },
+            { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteServerStage(row.id) })} /> },
           ]}
         />
       </section>

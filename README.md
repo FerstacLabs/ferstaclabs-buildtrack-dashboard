@@ -108,7 +108,7 @@ Set `SEED_BAKINITY_DEMO=true` and provide `SEED_BAKINITY_DEMO_PASSWORD` to creat
 
 The BAKİNİTY demo is isolated from existing tenants such as GOLD MMC. To reset only this demo environment, set `SEED_BAKINITY_DEMO_RESET=true`, restart the API/worker once, verify the seed, then set it back to `false`. The reset removes/reseeds only tenant code `BAK-DEMO`; it does not touch other tenant codes.
 
-Project progress data is now server-authoritative through `/api/project-progress/workspace`. The frontend may detect an old `buildtrack-project-progress` browser snapshot and offers a one-time “Serverə köçür” action; after that, project/smeta/crew/worker/material business data is stored on the backend, while localStorage keeps only UI/session state.
+Project progress data is server-authoritative through PostgreSQL-backed project, stage, work-item, crew and material endpoints. `/api/project-progress/workspace` remains a read/legacy compatibility projection and the visible one-time "Serverə köçür" migration path for old browser snapshots; normal Smeta/crew/material edits use granular backend writes and localStorage keeps only UI/session state.
 
 You can also create a tenant license as the demo/admin account with curl:
 

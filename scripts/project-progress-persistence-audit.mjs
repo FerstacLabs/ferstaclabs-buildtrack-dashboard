@@ -7,25 +7,27 @@ const read = (path) => readFileSync(resolve(root, path), 'utf8')
 
 const checks = [
   {
-    name: 'saveWorkspace uses strict apiRequest',
+    name: 'legacy saveWorkspace remains explicit strict API path',
     pass: () => {
       const api = read('src/features/projectProgress/projectProgressApi.ts')
       return /saveWorkspace:\s*\([^)]*\)\s*=>\s*apiRequest/.test(api)
         && !/saveWorkspace:\s*\([^)]*\)\s*=>\s*tryApiRequest/.test(api)
+        && api.includes('Compatibility-only path')
     },
   },
   {
-    name: 'central serialized save queue exists',
+    name: 'normal runtime full-workspace autosave is disabled',
     pass: () => {
       const store = read('src/features/projectProgress/projectProgressStore.ts')
+      const subscribeIndex = store.indexOf('useProjectProgressStore.subscribe')
+      const subscribeTail = subscribeIndex >= 0 ? store.slice(subscribeIndex) : ''
       return store.includes('flushProjectWorkspaceSaveQueue')
-        && store.includes('saveInFlight')
-        && store.includes('pendingSaveJob')
-        && store.includes('queueServerSave(workspace)')
+        && store.includes('queueServerSave')
+        && !subscribeTail.includes('queueServerSave(')
     },
   },
   {
-    name: 'tenant switch/hydration suppresses saves',
+    name: 'tenant switch/hydration suppresses save fingerprints',
     pass: () => {
       const store = read('src/features/projectProgress/projectProgressStore.ts')
       return store.includes('suppressWorkspacePersistence')
@@ -34,23 +36,27 @@ const checks = [
     },
   },
   {
-    name: 'server write failures are visible and retryable',
+    name: 'Smeta normal mutations use granular server APIs',
     pass: () => {
-      const store = read('src/features/projectProgress/projectProgressStore.ts')
-      const layout = read('src/components/layout/AppLayout.tsx')
-      return store.includes("serverSyncStatus: 'error'")
-        && store.includes('serverPendingSave: true')
-        && layout.includes('Layihə dəyişiklikləri serverdə saxlanmadı')
-        && layout.includes('Yenidən saxla')
+      const api = read('src/features/projectProgress/projectProgressApi.ts')
+      const page = read('src/features/projectProgress/ProjectEstimatePage.tsx')
+      return api.includes('/api/project-work-items/')
+        && api.includes('/api/projects/${projectId}/work-items')
+        && page.includes('projectProgressApi.createWorkItem')
+        && page.includes('projectProgressApi.updateWorkItem')
+        && page.includes('projectProgressApi.deleteWorkItem')
+        && page.includes('await loadFromBackend()')
     },
   },
   {
-    name: 'backend rejects cross-tenant workspace save',
+    name: 'backend exposes canonical project-progress CRUD',
     pass: () => {
       const endpoints = read('backend/src/BuildTrack.Api/ProjectProgressEndpoints.cs')
-      return endpoints.includes('ValidateWorkspaceTenant')
-        && endpoints.includes('Workspace tenant does not match authenticated tenant')
-        && endpoints.includes('NormalizeWorkspaceJsonForTenant')
+      return endpoints.includes('/api/projects/{projectId}/work-items')
+        && endpoints.includes('/api/project-work-items/{id}')
+        && endpoints.includes('BuildWorkspaceFromCanonicalTablesAsync')
+        && endpoints.includes('ImportWorkspaceJsonIntoCanonicalAsync')
+        && endpoints.includes('UpsertFieldSmetaItemForWorkItemAsync')
     },
   },
 ]

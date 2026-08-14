@@ -9,6 +9,7 @@ import type { MaterialItem } from '../../types/projectProgress'
 import { formatCurrency, formatNumber } from '../../utils/formatters'
 import { UnitSelect } from '../projectProgress/constructionUnits'
 import { ALL_OBJECTS_ID, getEstimateRowsByObject, getMaterialsByObject, getStagesByObject } from '../projectProgress/projectSelectors'
+import { projectProgressApi } from '../projectProgress/projectProgressApi'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
@@ -27,7 +28,7 @@ interface MaterialFormValues {
 
 export const MaterialsPage = () => {
   const store = useProjectProgressStore()
-  const { addMaterial, deleteMaterial, stages, updateMaterial } = store
+  const { loadFromBackend, project, stages } = store
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const materials = getMaterialsByObject(store, selectedObjectId)
   const scopedStages = getStagesByObject(store, selectedObjectId)
@@ -46,7 +47,7 @@ export const MaterialsPage = () => {
     setDrawerOpen(true)
   }
 
-  const saveMaterial = (values: MaterialFormValues) => {
+  const saveMaterial = async (values: MaterialFormValues) => {
     const linkedWorkItem = values.linkedWorkItemId ? store.workItems.find((item) => item.id === values.linkedWorkItemId) : undefined
     const linkedStageId = linkedWorkItem?.stageId ?? values.linkedStageId
     const linkedStage = linkedStageId ? stages.find((stage) => stage.id === linkedStageId) : undefined
@@ -60,10 +61,34 @@ export const MaterialsPage = () => {
       linkedStageId,
       unitPrice: values.unitPrice && values.unitPrice > 0 ? values.unitPrice : linkedWorkItem?.materialUnitPrice ?? values.unitPrice,
     }
-    if (editingMaterial) updateMaterial(editingMaterial.id, normalizedValues)
-    else addMaterial(normalizedValues)
-    setDrawerOpen(false)
-    void message.success('Material məlumatı yadda saxlandı')
+    try {
+      if (editingMaterial) {
+        await projectProgressApi.saveMaterial({
+          ...editingMaterial,
+          ...normalizedValues,
+          remainingQuantity: Math.max(0, normalizedValues.quantity - normalizedValues.usedQuantity),
+        })
+      } else {
+        await projectProgressApi.createMaterial(project.id, normalizedValues)
+      }
+      await loadFromBackend()
+      setDrawerOpen(false)
+      void message.success('Material məlumatı serverdə saxlandı')
+    } catch (error) {
+      console.error('Project material save failed', error)
+      void message.error('Material serverdə saxlanmadı')
+    }
+  }
+
+  const deleteServerMaterial = async (materialId: string) => {
+    try {
+      await projectProgressApi.deleteMaterial(materialId)
+      await loadFromBackend()
+      void message.success('Material silindi')
+    } catch (error) {
+      console.error('Project material delete failed', error)
+      void message.error('Material silinmədi')
+    }
   }
 
   const rows = materials.map((material) => ({
@@ -88,7 +113,7 @@ export const MaterialsPage = () => {
       render: (_, row) => (
         <Space>
           <Button icon={<EditOutlined />} onClick={() => openDrawer(row)} />
-          <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Materialı silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteMaterial(row.id) })} />
+          <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Materialı silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteServerMaterial(row.id) })} />
         </Space>
       ),
     },

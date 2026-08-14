@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Security;
@@ -561,6 +561,156 @@ CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_TenantId" ON supervis
 CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_SupervisorUserId" ON supervisor_site_assignments ("SupervisorUserId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_SiteId" ON supervisor_site_assignments ("SiteId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_site_assignments_Access" ON supervisor_site_assignments ("TenantId", "SupervisorUserId", "SiteId", "IsActive");
+CREATE TABLE IF NOT EXISTS projects (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
+    "Name" character varying(180) NOT NULL,
+    "Code" character varying(80) NULL,
+    "Currency" character varying(10) NOT NULL DEFAULT 'AZN',
+    "Location" character varying(300) NULL,
+    "ClientName" character varying(180) NULL,
+    "ActiveEstimateVersionId" character varying(160) NULL,
+    "StartDate" date NULL,
+    "EndDate" date NULL,
+    "Status" character varying(40) NOT NULL DEFAULT 'InProgress',
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_projects_TenantId" ON projects ("TenantId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_projects_code" ON projects ("TenantId", "Code") WHERE "Code" IS NOT NULL;
+CREATE TABLE IF NOT EXISTS project_estimate_versions (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL REFERENCES projects("Id") ON DELETE CASCADE,
+    "Name" character varying(180) NOT NULL,
+    "TotalAmount" numeric(18,2) NOT NULL DEFAULT 0,
+    "Notes" character varying(1000) NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_estimate_versions_TenantId" ON project_estimate_versions ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_project_estimate_versions_ProjectId" ON project_estimate_versions ("TenantId", "ProjectId");
+CREATE TABLE IF NOT EXISTS project_sites (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL REFERENCES projects("Id") ON DELETE CASCADE,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "Zone" character varying(180) NULL,
+    "Status" character varying(40) NOT NULL DEFAULT 'NotStarted',
+    "PlannedStartDate" date NULL,
+    "PlannedEndDate" date NULL,
+    "Notes" character varying(1000) NULL,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_sites_TenantId" ON project_sites ("TenantId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_project_sites_project_site" ON project_sites ("TenantId", "ProjectId", "SiteId");
+CREATE TABLE IF NOT EXISTS project_stages (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL,
+    "EstimateVersionId" character varying(160) NULL,
+    "SiteId" uuid NULL,
+    "Name" character varying(180) NOT NULL,
+    "Code" character varying(80) NULL,
+    "Order" integer NOT NULL DEFAULT 0,
+    "TotalCost" numeric(18,2) NOT NULL DEFAULT 0,
+    "LaborCost" numeric(18,2) NOT NULL DEFAULT 0,
+    "MaterialCost" numeric(18,2) NOT NULL DEFAULT 0,
+    "PlannedStartDate" date NULL,
+    "PlannedEndDate" date NULL,
+    "Status" character varying(40) NOT NULL DEFAULT 'NotStarted',
+    "ProgressPercent" numeric(8,2) NOT NULL DEFAULT 0,
+    "AssignedCrewId" character varying(160) NULL,
+    "PlannedHours" numeric(18,2) NOT NULL DEFAULT 0,
+    "ActualHours" numeric(18,2) NOT NULL DEFAULT 0,
+    "Notes" character varying(1000) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_stages_TenantId" ON project_stages ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_project_stages_ProjectSiteName" ON project_stages ("TenantId", "ProjectId", "SiteId", "Name");
+CREATE TABLE IF NOT EXISTS project_work_items (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL,
+    "SiteId" uuid NOT NULL REFERENCES sites("Id") ON DELETE CASCADE,
+    "StageId" character varying(160) NOT NULL,
+    "EstimateVersionId" character varying(160) NULL,
+    "Code" character varying(80) NULL,
+    "Name" character varying(220) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "Quantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "CompletedQuantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "UnitPrice" numeric(18,4) NULL,
+    "LaborUnitPrice" numeric(18,4) NOT NULL DEFAULT 0,
+    "LaborTotal" numeric(18,2) NOT NULL DEFAULT 0,
+    "MaterialUnit" character varying(40) NULL,
+    "MaterialQuantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "MaterialUnitPrice" numeric(18,4) NOT NULL DEFAULT 0,
+    "MaterialTotal" numeric(18,2) NOT NULL DEFAULT 0,
+    "TotalCost" numeric(18,2) NOT NULL DEFAULT 0,
+    "PlannedHours" numeric(18,2) NOT NULL DEFAULT 0,
+    "ActualHours" numeric(18,2) NOT NULL DEFAULT 0,
+    "AssignedCrewId" character varying(160) NULL,
+    "Status" character varying(40) NOT NULL DEFAULT 'NotStarted',
+    "ProgressPercent" numeric(8,2) NOT NULL DEFAULT 0,
+    "PlannedStartDate" date NULL,
+    "PlannedEndDate" date NULL,
+    "Notes" character varying(1000) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_work_items_TenantId" ON project_work_items ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_project_work_items_ProjectSite" ON project_work_items ("TenantId", "ProjectId", "SiteId");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_project_work_items_code" ON project_work_items ("TenantId", "ProjectId", "Code") WHERE "Code" IS NOT NULL;
+CREATE TABLE IF NOT EXISTS project_work_item_materials (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL,
+    "SiteId" uuid NULL,
+    "StageId" character varying(160) NULL,
+    "WorkItemId" character varying(160) NOT NULL,
+    "CatalogItemId" character varying(160) NULL,
+    "Category" character varying(100) NULL,
+    "Name" character varying(180) NOT NULL,
+    "Unit" character varying(40) NOT NULL,
+    "Quantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "UsedQuantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "RemainingQuantity" numeric(18,3) NOT NULL DEFAULT 0,
+    "UnitPrice" numeric(18,4) NULL,
+    "DeliveryDate" date NULL,
+    "Supplier" character varying(180) NULL,
+    "Notes" character varying(1000) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_work_item_materials_TenantId" ON project_work_item_materials ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_project_work_item_materials_WorkItem" ON project_work_item_materials ("TenantId", "WorkItemId");
+CREATE TABLE IF NOT EXISTS project_crews (
+    "Id" character varying(160) NOT NULL PRIMARY KEY,
+    "TenantId" uuid NOT NULL,
+    "ProjectId" character varying(160) NOT NULL,
+    "SiteId" uuid NULL,
+    "Name" character varying(180) NOT NULL,
+    "Type" character varying(120) NOT NULL,
+    "ForemanName" character varying(180) NOT NULL,
+    "WorkerCount" integer NOT NULL DEFAULT 0,
+    "ActiveWorkStageId" character varying(160) NULL,
+    "ActiveWorkItemId" character varying(160) NULL,
+    "PlannedDailyHours" numeric(18,2) NOT NULL DEFAULT 8,
+    "Status" character varying(40) NULL,
+    "ProgressPercent" numeric(8,2) NULL,
+    "Notes" character varying(1000) NULL,
+    "IsActive" boolean NOT NULL DEFAULT true,
+    "CreatedAt" timestamp with time zone NOT NULL,
+    "UpdatedAt" timestamp with time zone NULL
+);
+CREATE INDEX IF NOT EXISTS "IX_project_crews_TenantId" ON project_crews ("TenantId");
+CREATE INDEX IF NOT EXISTS "IX_project_crews_ProjectSiteName" ON project_crews ("TenantId", "ProjectId", "SiteId", "Name");
 CREATE TABLE IF NOT EXISTS field_smeta_items (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,

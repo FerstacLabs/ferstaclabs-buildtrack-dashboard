@@ -70,14 +70,23 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
         SupervisorDailyReport report,
         CancellationToken cancellationToken)
     {
-        var workspace = await db.ProjectProgressWorkspaces.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        if (workspace is null)
+        var plannedByWorkItemId = await db.ProjectWorkItems
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.IsActive)
+            .ToDictionaryAsync(x => x.Id, x => x.Quantity, StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+        if (plannedByWorkItemId.Count == 0)
         {
-            return new ProjectProgressApprovalValidationResult(false, "Project progress workspace was not found.", null, 0, 0);
+            var workspace = await db.ProjectProgressWorkspaces.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+            if (workspace is null)
+            {
+                return new ProjectProgressApprovalValidationResult(false, "Project progress workspace was not found.", null, 0, 0);
+            }
+
+            var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
+            plannedByWorkItemId = BuildPlannedQuantityMap(root["workItems"] as JsonArray);
         }
 
-        var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
-        var plannedByWorkItemId = BuildPlannedQuantityMap(root["workItems"] as JsonArray);
         var existingApproved = await LoadApprovedLineTotalsAsync(tenantId, excludeReportId: report.Id, cancellationToken);
         var currentReportTotals = BuildReportLineTotals(report.Lines);
 
@@ -106,18 +115,6 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
         Guid? sourceReportId,
         CancellationToken cancellationToken)
     {
-        var workspace = await db.ProjectProgressWorkspaces.FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        if (workspace is null)
-        {
-            return new ProjectProgressRecalculationResult(0, 0, 0, sourceReportId);
-        }
-
-        var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
-        if (root["workItems"] is not JsonArray workItems)
-        {
-            return new ProjectProgressRecalculationResult(0, 0, 0, sourceReportId);
-        }
-
         var approvedLines = await LoadApprovedLinesAsync(tenantId, cancellationToken);
         var approvedQuantityByWorkItemId = approvedLines
             .GroupBy(x => x.ProjectWorkItemId, StringComparer.OrdinalIgnoreCase)
@@ -127,6 +124,65 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
             .ToDictionary(x => x.Key, x => x.Sum(line => line.WorkHours ?? 0), StringComparer.OrdinalIgnoreCase);
 
         var updatedWorkItems = 0;
+        var updatedStages = 0;
+        var canonicalItems = await db.ProjectWorkItems
+            .Where(x => x.TenantId == tenantId && x.IsActive)
+            .ToArrayAsync(cancellationToken);
+        if (canonicalItems.Length > 0)
+        {
+            foreach (var item in canonicalItems)
+            {
+                var completedQuantity = approvedQuantityByWorkItemId.GetValueOrDefault(item.Id);
+                var actualHours = approvedHoursByWorkItemId.GetValueOrDefault(item.Id);
+                var progress = item.Quantity > 0
+                    ? Math.Min(100m, Math.Round(completedQuantity / item.Quantity * 100m, 1))
+                    : 0;
+
+                item.CompletedQuantity = Math.Round(completedQuantity, 3);
+                item.ActualHours = Math.Round(actualHours, 2);
+                item.ProgressPercent = progress;
+                item.Status = progress >= 100 ? ProjectEntityStatus.Completed : progress > 0 ? ProjectEntityStatus.InProgress : ProjectEntityStatus.NotStarted;
+                item.UpdatedAt = DateTimeOffset.UtcNow;
+                updatedWorkItems++;
+            }
+
+            var stageIds = canonicalItems.Select(x => x.StageId).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var stages = await db.ProjectStages.Where(x => x.TenantId == tenantId && stageIds.Contains(x.Id)).ToArrayAsync(cancellationToken);
+            foreach (var stage in stages)
+            {
+                var stageItems = canonicalItems.Where(x => string.Equals(x.StageId, stage.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (stageItems.Length == 0) continue;
+                stage.LaborCost = Math.Round(stageItems.Sum(x => x.LaborTotal), 2);
+                stage.MaterialCost = Math.Round(stageItems.Sum(x => x.MaterialTotal), 2);
+                stage.TotalCost = Math.Round(stageItems.Sum(x => x.TotalCost), 2);
+                stage.PlannedHours = Math.Round(stageItems.Sum(x => x.PlannedHours), 2);
+                stage.ActualHours = Math.Round(stageItems.Sum(x => x.ActualHours), 2);
+                var costWeighted = stageItems.Where(x => x.TotalCost > 0).ToArray();
+                var totalCost = costWeighted.Sum(x => x.TotalCost);
+                stage.ProgressPercent = totalCost > 0
+                    ? Math.Min(100m, Math.Round(costWeighted.Sum(x => x.TotalCost * x.ProgressPercent) / totalCost, 1))
+                    : stage.PlannedHours > 0
+                        ? Math.Min(100m, Math.Round(stageItems.Sum(x => x.PlannedHours * x.ProgressPercent) / stage.PlannedHours, 1))
+                        : stage.ProgressPercent;
+                stage.Status = stage.ProgressPercent >= 100 ? ProjectEntityStatus.Completed : stage.ProgressPercent > 0 ? ProjectEntityStatus.InProgress : ProjectEntityStatus.NotStarted;
+                stage.UpdatedAt = DateTimeOffset.UtcNow;
+                updatedStages++;
+            }
+        }
+
+        var workspace = await db.ProjectProgressWorkspaces.FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
+        var root = workspace is not null ? JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject() : null;
+        if (root?["workItems"] is not JsonArray workItems)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return new ProjectProgressRecalculationResult(
+                updatedWorkItems,
+                updatedStages,
+                approvedQuantityByWorkItemId.Values.Sum(),
+                sourceReportId);
+        }
+
+        updatedWorkItems = 0;
         foreach (var node in workItems)
         {
             if (node is not JsonObject workItem) continue;
@@ -147,9 +203,9 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
             updatedWorkItems++;
         }
 
-        var updatedStages = RecalculateStages(root["stages"] as JsonArray, workItems);
+        updatedStages = RecalculateStages(root["stages"] as JsonArray, workItems);
         root["workspaceTenantId"] = tenantId.ToString();
-        workspace.WorkspaceJson = root.ToJsonString(JsonOptions);
+        workspace!.WorkspaceJson = root.ToJsonString(JsonOptions);
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
 

@@ -1,4 +1,4 @@
-﻿using BuildTrack.Domain.Entities;
+using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -59,6 +59,13 @@ public sealed class BuildTrackDbContext : DbContext
     public DbSet<WarehouseIssueLine> WarehouseIssueLines => Set<WarehouseIssueLine>();
     public DbSet<SupplyNotification> SupplyNotifications => Set<SupplyNotification>();
     public DbSet<ProjectProgressWorkspace> ProjectProgressWorkspaces => Set<ProjectProgressWorkspace>();
+    public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
+    public DbSet<ProjectEstimateVersionRecord> ProjectEstimateVersions => Set<ProjectEstimateVersionRecord>();
+    public DbSet<ProjectSiteRecord> ProjectSites => Set<ProjectSiteRecord>();
+    public DbSet<ProjectStageRecord> ProjectStages => Set<ProjectStageRecord>();
+    public DbSet<ProjectWorkItemRecord> ProjectWorkItems => Set<ProjectWorkItemRecord>();
+    public DbSet<ProjectWorkItemMaterialRecord> ProjectWorkItemMaterials => Set<ProjectWorkItemMaterialRecord>();
+    public DbSet<ProjectCrewRecord> ProjectCrews => Set<ProjectCrewRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -834,6 +841,154 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => new { x.TenantId, x.UserId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.Audience, x.Status });
+        });
+
+        modelBuilder.Entity<ProjectRecord>(entity =>
+        {
+            entity.ToTable("projects");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Code).HasMaxLength(80);
+            entity.Property(x => x.Currency).HasMaxLength(10).IsRequired();
+            entity.Property(x => x.Location).HasMaxLength(300);
+            entity.Property(x => x.ClientName).HasMaxLength(180);
+            entity.Property(x => x.ActiveEstimateVersionId).HasMaxLength(160);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.Code }).IsUnique().HasFilter("\"Code\" IS NOT NULL");
+            entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectEstimateVersionRecord>(entity =>
+        {
+            entity.ToTable("project_estimate_versions");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId });
+            entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectSiteRecord>(entity =>
+        {
+            entity.ToTable("project_sites");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Zone).HasMaxLength(180);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.SiteId }).IsUnique();
+            entity.HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectStageRecord>(entity =>
+        {
+            entity.ToTable("project_stages");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.EstimateVersionId).HasMaxLength(160);
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Code).HasMaxLength(80);
+            entity.Property(x => x.TotalCost).HasPrecision(18, 2);
+            entity.Property(x => x.LaborCost).HasPrecision(18, 2);
+            entity.Property(x => x.MaterialCost).HasPrecision(18, 2);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.ProgressPercent).HasPrecision(8, 2);
+            entity.Property(x => x.AssignedCrewId).HasMaxLength(160);
+            entity.Property(x => x.PlannedHours).HasPrecision(18, 2);
+            entity.Property(x => x.ActualHours).HasPrecision(18, 2);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.SiteId, x.Name });
+        });
+
+        modelBuilder.Entity<ProjectWorkItemRecord>(entity =>
+        {
+            entity.ToTable("project_work_items");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.StageId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.EstimateVersionId).HasMaxLength(160);
+            entity.Property(x => x.Code).HasMaxLength(80);
+            entity.Property(x => x.Name).HasMaxLength(220).IsRequired();
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.CompletedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.UnitPrice).HasPrecision(18, 4);
+            entity.Property(x => x.LaborUnitPrice).HasPrecision(18, 4);
+            entity.Property(x => x.LaborTotal).HasPrecision(18, 2);
+            entity.Property(x => x.MaterialUnit).HasMaxLength(40);
+            entity.Property(x => x.MaterialQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.MaterialUnitPrice).HasPrecision(18, 4);
+            entity.Property(x => x.MaterialTotal).HasPrecision(18, 2);
+            entity.Property(x => x.TotalCost).HasPrecision(18, 2);
+            entity.Property(x => x.PlannedHours).HasPrecision(18, 2);
+            entity.Property(x => x.ActualHours).HasPrecision(18, 2);
+            entity.Property(x => x.AssignedCrewId).HasMaxLength(160);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            entity.Property(x => x.ProgressPercent).HasPrecision(8, 2);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.SiteId });
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.Code }).IsUnique().HasFilter("\"Code\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ProjectWorkItemMaterialRecord>(entity =>
+        {
+            entity.ToTable("project_work_item_materials");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.StageId).HasMaxLength(160);
+            entity.Property(x => x.WorkItemId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.CatalogItemId).HasMaxLength(160);
+            entity.Property(x => x.Category).HasMaxLength(100);
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.UsedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.RemainingQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.UnitPrice).HasPrecision(18, 4);
+            entity.Property(x => x.Supplier).HasMaxLength(180);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.WorkItemId });
+        });
+
+        modelBuilder.Entity<ProjectCrewRecord>(entity =>
+        {
+            entity.ToTable("project_crews");
+            entity.HasKey(x => x.Id);
+            entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
+            entity.Property(x => x.Id).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.ProjectId).HasMaxLength(160).IsRequired();
+            entity.Property(x => x.Name).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Type).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.ForemanName).HasMaxLength(180).IsRequired();
+            entity.Property(x => x.ActiveWorkStageId).HasMaxLength(160);
+            entity.Property(x => x.ActiveWorkItemId).HasMaxLength(160);
+            entity.Property(x => x.PlannedDailyHours).HasPrecision(18, 2);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(40);
+            entity.Property(x => x.ProgressPercent).HasPrecision(8, 2);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.SiteId, x.Name });
         });
         modelBuilder.Entity<DeviceConnectionLog>(entity =>
         {
