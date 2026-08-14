@@ -16,7 +16,7 @@ export const AppLayout = () => {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const location = useLocation()
   const objects = useProjectProgressStore((state) => state.objects)
-  const syncTenantSites = useProjectProgressStore((state) => state.syncTenantSites)
+  const hydrateTenantSitesFromBackend = useProjectProgressStore((state) => state.hydrateTenantSitesFromBackend)
   const loadProjectWorkspace = useProjectProgressStore((state) => state.loadFromBackend)
   const legacyLocalDataAvailable = useProjectProgressStore((state) => state.legacyLocalDataAvailable)
   const legacyLocalSummary = useProjectProgressStore((state) => state.legacyLocalSummary)
@@ -56,7 +56,7 @@ export const AppLayout = () => {
       if (loaded || cancelled) return
       try {
         const sites = await buildTrackBackendApi.getSites()
-        if (!cancelled) syncTenantSites(sites, 'replace')
+        if (!cancelled) hydrateTenantSitesFromBackend(sites, 'replace')
       } catch (error) {
         if (import.meta.env.DEV) console.warn('Tenant site sync failed', error)
       }
@@ -66,7 +66,7 @@ export const AppLayout = () => {
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated, tenant?.id, tenant?.code, loadProjectWorkspace, syncTenantSites])
+  }, [isAuthenticated, tenant?.id, tenant?.code, loadProjectWorkspace, hydrateTenantSitesFromBackend])
 
   if (!initialized && loading) {
     return (

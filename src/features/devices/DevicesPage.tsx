@@ -4,8 +4,6 @@ import type { TableColumnsType } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { ToolbarButton } from '../../components/ui/ToolbarButton'
-import { useAuthStore } from '../auth/authStore'
-import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import {
   BackendApiError,
   buildTrackBackendApi,
@@ -17,7 +15,6 @@ import {
   type ListenerStatus,
   type ActiveRegisterStatus,
 } from '../../services/api/buildTrackBackendApi'
-import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 type DeviceFormValues = {
   siteId: string
@@ -71,9 +68,6 @@ const getActionErrorMessage = (err: unknown) => {
 
 export const DevicesPage = () => {
   const [form] = Form.useForm<DeviceFormValues>()
-  const tenant = useAuthStore((state) => state.tenant)
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  const syncTenantSites = useProjectProgressStore((state) => state.syncTenantSites)
   const [sites, setSites] = useState<BackendSite[]>([])
   const [devices, setDevices] = useState<BackendDevice[]>([])
   const [connectionLogByDeviceId, setConnectionLogByDeviceId] = useState<Record<string, DeviceConnectionLog | undefined>>({})
@@ -81,7 +75,6 @@ export const DevicesPage = () => {
   const [activeRegisterStatus, setActiveRegisterStatus] = useState<ActiveRegisterStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const shouldSyncTenantSites = isAuthenticated && tenant?.code?.toUpperCase() !== 'DEMO'
 
   const loadData = async () => {
     setLoading(true)
@@ -94,7 +87,6 @@ export const DevicesPage = () => {
         buildTrackBackendApi.getActiveRegisterStatus(),
       ])
       setSites(siteRows)
-      if (shouldSyncTenantSites) syncTenantSites(siteRows, 'replace')
       setDevices(deviceRows)
       setListenerStatus(status)
       setActiveRegisterStatus(activeStatus)
@@ -128,9 +120,7 @@ export const DevicesPage = () => {
       }).format(new Date())
       const site = await buildTrackBackendApi.createSite({ name: `Yeni obyekt ${suffix}`, address: '', timeZone: 'Asia/Baku' })
       form.setFieldValue('siteId', site.id)
-      useProjectSelectionStore.getState().setSelectedProjectId(site.id)
-      if (shouldSyncTenantSites) syncTenantSites([site], 'merge')
-      message.success('Yeni obyekt yaradıldı və bütün modullar üçün aktiv edildi')
+      message.success('Yeni obyekt yaradıldı və kamera formasında seçildi')
       await loadData()
     } catch (err) {
       message.error(getActionErrorMessage(err))

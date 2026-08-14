@@ -188,6 +188,9 @@ public static class ProjectProgressEndpoints
     {
         var logger = loggerFactory.CreateLogger("ProjectProgressEndpoints");
         IDbContextTransaction? transaction = null;
+        var beforeFieldSmetaFingerprint = syncFieldSmeta
+            ? await GetFieldSmetaRelevantWorkspaceFingerprintAsync(db, tenantId, ct)
+            : null;
         if (db.Database.IsRelational())
         {
             transaction = await db.Database.BeginTransactionAsync(ct);
@@ -198,7 +201,15 @@ public static class ProjectProgressEndpoints
             var result = await mutateWorkspace();
             if (syncFieldSmeta)
             {
-                await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
+                var afterFieldSmetaFingerprint = await GetFieldSmetaRelevantWorkspaceFingerprintAsync(db, tenantId, ct);
+                if (!string.Equals(beforeFieldSmetaFingerprint, afterFieldSmetaFingerprint, StringComparison.Ordinal))
+                {
+                    await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
+                }
+                else
+                {
+                    logger.LogDebug("Project progress save skipped FieldSmeta sync because objects/stages/workItems fingerprint did not change. TenantId={TenantId}", tenantId);
+                }
             }
 
             await db.SaveChangesAsync(ct);
@@ -249,6 +260,26 @@ public static class ProjectProgressEndpoints
         {
             if (transaction is not null) await transaction.DisposeAsync();
         }
+    }
+
+    private static async Task<string> GetFieldSmetaRelevantWorkspaceFingerprintAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
+    {
+        var workspace = db.ProjectProgressWorkspaces.Local.FirstOrDefault(x => x.TenantId == tenantId)
+            ?? await db.ProjectProgressWorkspaces.FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
+        return BuildFieldSmetaRelevantWorkspaceFingerprint(workspace?.WorkspaceJson);
+    }
+
+    private static string BuildFieldSmetaRelevantWorkspaceFingerprint(string? workspaceJson)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceJson)) return "{}";
+        var root = JsonNode.Parse(workspaceJson)?.AsObject() ?? new JsonObject();
+        var relevant = new JsonObject
+        {
+            ["objects"] = root["objects"]?.DeepClone() ?? new JsonArray(),
+            ["stages"] = root["stages"]?.DeepClone() ?? new JsonArray(),
+            ["workItems"] = root["workItems"]?.DeepClone() ?? new JsonArray(),
+        };
+        return relevant.ToJsonString(JsonOptions);
     }
 
     private static async Task<ProjectProgressWorkspace> GetOrCreateWorkspaceAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)

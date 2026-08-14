@@ -9,6 +9,7 @@
     "i18n:audit": "node scripts/i18n-audit.mjs",
     "kpi-rendering:audit": "node scripts/kpi-rendering-audit.mjs",
     "project-state:audit": "node scripts/project-state-audit.mjs",
+    "project-progress:readonly-audit": "node scripts/project-progress-readonly-audit.mjs",
     "project-progress:persistence-audit": "node scripts/project-progress-persistence-audit.mjs",
     "lint": "eslint .",
     "preview": "vite preview"

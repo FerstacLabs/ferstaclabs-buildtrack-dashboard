@@ -18,12 +18,14 @@ import { projectProgressApi } from './projectProgressApi'
 import { ApiClientError } from '../../shared/api/client'
 
 type ServerSyncStatus = 'idle' | 'loading' | 'ready' | 'saving' | 'fallback' | 'error'
+type TenantSiteRow = { id: string; name: string; address?: string; createdAt?: string }
 
 interface ProjectProgressState extends ProjectProgressData {
   serverSyncStatus: ServerSyncStatus
   serverSyncError?: string
   serverPendingSave: boolean
   serverLastSavedAt?: string
+  serverLastSaveSource?: string
   legacyLocalDataAvailable: boolean
   legacyLocalSummary?: string
   legacyLocalSnapshot?: ProjectProgressData
@@ -33,7 +35,8 @@ interface ProjectProgressState extends ProjectProgressData {
   importLegacyLocalData: () => Promise<void>
   dismissLegacyLocalData: () => void
   applyBackendData: (data: Partial<ProjectProgressData>) => void
-  syncTenantSites: (sites: Array<{ id: string; name: string; address?: string; createdAt?: string }>, mode?: 'replace' | 'merge') => void
+  syncTenantSites: (sites: TenantSiteRow[], mode?: 'replace' | 'merge') => void
+  hydrateTenantSitesFromBackend: (sites: TenantSiteRow[], mode?: 'replace' | 'merge') => void
   refreshSeedData: () => void
   resetDemoData: () => void
   addObject: (object: Omit<ConstructionObject, 'id' | 'projectId' | 'status'> & Partial<Pick<ConstructionObject, 'projectId' | 'status'>>) => string
@@ -248,6 +251,7 @@ interface WorkspaceSaveJob {
   serialized: string
   workspace: ProjectProgressData
   retryCount: number
+  source: string
 }
 
 const PROJECT_PROGRESS_SAVE_DEBOUNCE_MS = 800
@@ -262,6 +266,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saveInFlight = false
 let pendingSaveJob: WorkspaceSaveJob | undefined
 let suppressWorkspacePersistence = false
+let currentProjectProgressMutationSource: string | undefined
 
 const isPersistableWorkspaceTenant = (tenantId?: string): tenantId is string =>
   Boolean(tenantId && tenantId !== 'anonymous' && tenantId !== 'legacy-browser')
@@ -323,6 +328,7 @@ const flushProjectWorkspaceSaveQueue = async () => {
           serverSyncStatus: 'saving',
           serverSyncError: undefined,
           serverPendingSave: true,
+          serverLastSaveSource: job.source,
         })
         await projectProgressApi.saveWorkspace(job.workspace)
       } catch (error) {
@@ -338,12 +344,14 @@ const flushProjectWorkspaceSaveQueue = async () => {
                 serialized: latestSerialized,
                 workspace: latest,
                 retryCount: 0,
+                source: currentProjectProgressMutationSource ?? job.source,
               }
 
           useProjectProgressStore.setState({
             serverSyncStatus: 'error',
             serverSyncError: formatSaveError(error),
             serverPendingSave: true,
+            serverLastSaveSource: job.source,
           })
           if (import.meta.env.DEV) console.warn('Project progress workspace save failed', error)
           if (shouldRetryWorkspaceSave(error, job.retryCount) && typeof window !== 'undefined') {
@@ -368,6 +376,7 @@ const flushProjectWorkspaceSaveQueue = async () => {
           serverSyncError: undefined,
           serverPendingSave: false,
           serverLastSavedAt: new Date().toISOString(),
+          serverLastSaveSource: job.source,
         })
       } else {
         pendingSaveJob = {
@@ -376,6 +385,7 @@ const flushProjectWorkspaceSaveQueue = async () => {
           serialized: latestSerialized,
           workspace: latest,
           retryCount: 0,
+          source: currentProjectProgressMutationSource ?? job.source,
         }
       }
     }
@@ -384,28 +394,33 @@ const flushProjectWorkspaceSaveQueue = async () => {
   }
 }
 
-const queueServerSave = (workspace: ProjectProgressData, options?: { immediate?: boolean }) => {
+const queueServerSave = (workspace: ProjectProgressData, options?: { immediate?: boolean; source?: string }) => {
   const tenantId = workspace.workspaceTenantId
   if (!isPersistableWorkspaceTenant(tenantId)) return
 
   const serialized = serializeWorkspace(workspace)
+  const source = options?.source ?? currentProjectProgressMutationSource ?? 'project-progress:unknown-business-mutation'
   if (serialized === lastServerSavedWorkspace && !pendingSaveJob) {
     useProjectProgressStore.setState({ serverSyncStatus: 'ready', serverSyncError: undefined, serverPendingSave: false })
+    if (import.meta.env.DEV) console.debug('[ProjectProgress] NO SAVE', { source, reason: 'workspace matches server fingerprint' })
     return
   }
 
+  if (import.meta.env.DEV) console.debug('[ProjectProgress] SAVE QUEUED', { source, tenantId })
   pendingSaveJob = {
     revision: ++saveRevision,
     tenantId,
     serialized,
     workspace,
     retryCount: 0,
+    source,
   }
 
   useProjectProgressStore.setState({
     serverSyncStatus: 'saving',
     serverSyncError: undefined,
     serverPendingSave: true,
+    serverLastSaveSource: source,
   })
 
   clearSaveTimer()
@@ -427,10 +442,53 @@ const queueServerSave = (workspace: ProjectProgressData, options?: { immediate?:
 const runWithoutWorkspacePersistence = (operation: () => void) => {
   suppressWorkspacePersistence = true
   try {
+    if (import.meta.env.DEV) console.debug('[ProjectProgress] NO SAVE', { source: currentProjectProgressMutationSource ?? 'backend-hydration', reason: 'persistence suppressed' })
     operation()
     resetWorkspacePersistenceForCurrentState()
   } finally {
     suppressWorkspacePersistence = false
+  }
+}
+
+const runBusinessMutation = (source: string, operation: () => void) => {
+  currentProjectProgressMutationSource = source
+  try {
+    operation()
+  } finally {
+    currentProjectProgressMutationSource = undefined
+  }
+}
+
+const applyTenantSites = (
+  state: ProjectProgressData,
+  sites: TenantSiteRow[],
+  mode: 'replace' | 'merge' = 'replace',
+) => {
+  const existingById = new Map(state.objects.map((object) => [object.id, object]))
+  const siteObjects = sites.map((site) => mapSiteToObject(site, state.activeProjectId, existingById.get(site.id)))
+  const objects = mode === 'merge'
+    ? [
+        ...state.objects.filter((object) => !sites.some((site) => site.id === object.id)),
+        ...siteObjects,
+      ]
+    : siteObjects
+  const objectIds = new Set(objects.map((object) => object.id))
+  useProjectSelectionStore.getState().ensureSelectedProjectId([...objectIds])
+
+  if (mode === 'merge') return { objects }
+
+  return {
+    objects,
+    stages: state.stages.filter(objectBelongsTo(objectIds)),
+    workItems: state.workItems.filter(objectBelongsTo(objectIds)),
+    crews: state.crews.filter(objectBelongsTo(objectIds)),
+    workerAssignments: state.workerAssignments.filter(objectBelongsTo(objectIds)),
+    materials: state.materials.filter(objectBelongsTo(objectIds)),
+    attendanceSessions: state.attendanceSessions.filter(objectBelongsTo(objectIds)),
+    workHourAllocations: state.workHourAllocations.filter(objectBelongsTo(objectIds)),
+    dailyReports: state.dailyReports.filter(objectBelongsTo(objectIds)),
+    issues: state.issues.filter(objectBelongsTo(objectIds)),
+    risks: state.risks.filter(objectBelongsTo(objectIds)),
   }
 }
 
@@ -498,6 +556,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
               serverSyncError: undefined,
               serverPendingSave: false,
               serverLastSavedAt: undefined,
+              serverLastSaveSource: undefined,
               legacyLocalDataAvailable: state.legacyLocalDataAvailable,
               legacyLocalSummary: state.legacyLocalSummary,
               legacyLocalSnapshot: state.legacyLocalSnapshot,
@@ -506,6 +565,8 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
         })
       },
         loadFromBackend: async () => {
+        const previousState = useProjectProgressStore.getState()
+        const previousSerialized = serializeWorkspace(toProjectProgressData(previousState))
         set({ serverSyncStatus: 'loading', serverSyncError: undefined, serverPendingSave: false })
         const data = await projectProgressApi.getWorkspace()
         if (!data) {
@@ -513,6 +574,19 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           return false
         }
         const normalizedData = normalizeProjectProgressData(data)
+        const serverSerialized = serializeWorkspace(normalizedData)
+        if (previousState.serverSyncStatus === 'error'
+          && previousState.serverPendingSave
+          && previousSerialized !== serverSerialized) {
+          set({
+            serverSyncStatus: 'error',
+            serverSyncError: previousState.serverSyncError,
+            serverPendingSave: true,
+            serverLastSaveSource: previousState.serverLastSaveSource,
+          })
+          if (import.meta.env.DEV) console.debug('[ProjectProgress] pending business diff preserved after backend load')
+          return true
+        }
 
         discardQueuedServerSaves()
         runWithoutWorkspacePersistence(() => {
@@ -523,6 +597,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
             serverSyncError: undefined,
             serverPendingSave: false,
             serverLastSavedAt: new Date().toISOString(),
+            serverLastSaveSource: undefined,
             workspaceTenantId: normalizedData.workspaceTenantId ?? state.workspaceTenantId,
             assistantMessages: [],
           }))
@@ -531,7 +606,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
       },
         saveToBackend: async () => {
         const current = toProjectProgressData(useProjectProgressStore.getState())
-        queueServerSave(current, { immediate: true })
+        queueServerSave(current, { immediate: true, source: 'project-progress:manual-save' })
         await flushProjectWorkspaceSaveQueue()
       },
         importLegacyLocalData: async () => {
@@ -554,6 +629,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
               serverSyncError: undefined,
               serverPendingSave: false,
               serverLastSavedAt: new Date().toISOString(),
+              serverLastSaveSource: 'project-progress:import-legacy',
             }))
           })
         } catch (error) {
@@ -561,66 +637,50 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
             serverSyncStatus: 'error',
             serverSyncError: formatSaveError(error),
             serverPendingSave: true,
+            serverLastSaveSource: 'project-progress:import-legacy',
           })
         }
       },
         dismissLegacyLocalData: () => set({ legacyLocalDataAvailable: false, legacyLocalSummary: undefined, legacyLocalSnapshot: undefined }),
-        applyBackendData: (data) => set((state) => {
-        const objects = data.objects?.length ? data.objects : state.objects
-        const merged = {
-          ...state,
-          project: data.project ?? state.project,
-          projects: data.projects?.length ? data.projects : state.projects,
-          activeProjectId: data.activeProjectId ?? state.activeProjectId,
-          objects,
-          estimateVersions: data.estimateVersions?.length ? data.estimateVersions : state.estimateVersions,
-          summary: data.summary ?? state.summary,
-          stages: data.stages?.length ? data.stages : state.stages,
-          workItems: data.workItems?.length ? data.workItems : state.workItems,
-          crews: data.crews?.length ? data.crews : state.crews,
-          workerAssignments: data.workerAssignments?.length ? data.workerAssignments : state.workerAssignments,
-          materials: data.materials?.length ? data.materials : state.materials,
-          attendanceSessions: data.attendanceSessions?.length ? data.attendanceSessions : state.attendanceSessions,
-          workHourAllocations: data.workHourAllocations?.length ? data.workHourAllocations : state.workHourAllocations,
-          dailyReports: data.dailyReports?.length ? data.dailyReports : state.dailyReports,
-          issues: data.issues?.length ? data.issues : state.issues,
-          risks: data.risks?.length ? data.risks : state.risks,
+        applyBackendData: (data) => runBusinessMutation('project-progress:apply-backend-data', () => set((state) => {
+          const objects = data.objects?.length ? data.objects : state.objects
+          const merged = {
+            ...state,
+            project: data.project ?? state.project,
+            projects: data.projects?.length ? data.projects : state.projects,
+            activeProjectId: data.activeProjectId ?? state.activeProjectId,
+            objects,
+            estimateVersions: data.estimateVersions?.length ? data.estimateVersions : state.estimateVersions,
+            summary: data.summary ?? state.summary,
+            stages: data.stages?.length ? data.stages : state.stages,
+            workItems: data.workItems?.length ? data.workItems : state.workItems,
+            crews: data.crews?.length ? data.crews : state.crews,
+            workerAssignments: data.workerAssignments?.length ? data.workerAssignments : state.workerAssignments,
+            materials: data.materials?.length ? data.materials : state.materials,
+            attendanceSessions: data.attendanceSessions?.length ? data.attendanceSessions : state.attendanceSessions,
+            workHourAllocations: data.workHourAllocations?.length ? data.workHourAllocations : state.workHourAllocations,
+            dailyReports: data.dailyReports?.length ? data.dailyReports : state.dailyReports,
+            issues: data.issues?.length ? data.issues : state.issues,
+            risks: data.risks?.length ? data.risks : state.risks,
+          }
+          return normalizeProjectProgressData(merged)
+        })),
+      syncTenantSites: (sites, mode = 'replace') => runBusinessMutation(`project-progress:sync-tenant-sites:${mode}`, () => set((state) => applyTenantSites(state, sites, mode))),
+      hydrateTenantSitesFromBackend: (sites, mode = 'replace') => {
+        currentProjectProgressMutationSource = `backend-hydration:tenant-sites:${mode}`
+        try {
+          runWithoutWorkspacePersistence(() => {
+            set((state) => applyTenantSites(state, sites, mode))
+          })
+        } finally {
+          currentProjectProgressMutationSource = undefined
         }
-        return normalizeProjectProgressData(merged)
-      }),
-      syncTenantSites: (sites, mode = 'replace') => set((state) => {
-        const existingById = new Map(state.objects.map((object) => [object.id, object]))
-        const siteObjects = sites.map((site) => mapSiteToObject(site, state.activeProjectId, existingById.get(site.id)))
-        const objects = mode === 'merge'
-          ? [
-              ...state.objects.filter((object) => !sites.some((site) => site.id === object.id)),
-              ...siteObjects,
-            ]
-          : siteObjects
-        const objectIds = new Set(objects.map((object) => object.id))
-        useProjectSelectionStore.getState().ensureSelectedProjectId([...objectIds])
-
-        if (mode === 'merge') return { objects }
-
-        return {
-          objects,
-          stages: state.stages.filter(objectBelongsTo(objectIds)),
-          workItems: state.workItems.filter(objectBelongsTo(objectIds)),
-          crews: state.crews.filter(objectBelongsTo(objectIds)),
-          workerAssignments: state.workerAssignments.filter(objectBelongsTo(objectIds)),
-          materials: state.materials.filter(objectBelongsTo(objectIds)),
-          attendanceSessions: state.attendanceSessions.filter(objectBelongsTo(objectIds)),
-          workHourAllocations: state.workHourAllocations.filter(objectBelongsTo(objectIds)),
-          dailyReports: state.dailyReports.filter(objectBelongsTo(objectIds)),
-          issues: state.issues.filter(objectBelongsTo(objectIds)),
-          risks: state.risks.filter(objectBelongsTo(objectIds)),
-        }
-      }),
-      refreshSeedData: () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId })),
-      resetDemoData: () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId })),
+      },
+      refreshSeedData: () => runBusinessMutation('project-progress:refresh-seed-data', () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId }))),
+      resetDemoData: () => runBusinessMutation('project-progress:reset-demo-data', () => set((state) => ({ ...projectProgressSeed, workspaceTenantId: state.workspaceTenantId }))),
       addObject: (object) => {
         const objectId = createId('object')
-        set((state) => ({
+        runBusinessMutation('project-progress:add-object', () => set((state) => ({
           objects: [
             ...state.objects,
             {
@@ -630,44 +690,44 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
               status: object.status ?? 'NotStarted',
             },
           ],
-        }))
+        })))
         useProjectSelectionStore.getState().setSelectedProjectId(objectId)
         return objectId
       },
-      addStage: (stage) => set((state) => ({
+      addStage: (stage) => runBusinessMutation('smeta:add-stage', () => set((state) => ({
         stages: [
           ...state.stages,
           { ...stage, id: createId('stage'), order: state.stages.length + 1 },
         ],
-      })),
-      updateStage: (stageId, patch) => set((state) => ({
+      }))),
+      updateStage: (stageId, patch) => runBusinessMutation('smeta:update-stage', () => set((state) => ({
         stages: state.stages.map((stage) => (stage.id === stageId ? { ...stage, ...patch } : stage)),
-      })),
-      deleteStage: (stageId) => set((state) => ({
+      }))),
+      deleteStage: (stageId) => runBusinessMutation('smeta:delete-stage', () => set((state) => ({
         stages: state.stages.filter((stage) => stage.id !== stageId),
         workItems: state.workItems.filter((item) => item.stageId !== stageId),
-      })),
+      }))),
       addWorkItem: (item) => {
         const itemId = createId('item')
-        set((state) => {
+        runBusinessMutation('smeta:add-work-item', () => set((state) => {
           const workItem = recalculateItemTotals({ ...item, id: itemId })
           const workItems = [...state.workItems, workItem]
           return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
-        })
+        }))
         return itemId
       },
-      updateWorkItem: (itemId, patch) => set((state) => {
+      updateWorkItem: (itemId, patch) => runBusinessMutation('smeta:update-work-item', () => set((state) => {
         const workItems = state.workItems.map((item) => (item.id === itemId ? recalculateItemTotals({ ...item, ...patch }) : item))
         return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
-      }),
-      deleteWorkItem: (itemId) => set((state) => {
+      })),
+      deleteWorkItem: (itemId) => runBusinessMutation('smeta:delete-work-item', () => set((state) => {
         const workItems = state.workItems.filter((item) => item.id !== itemId)
         return { workItems, stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)) }
-      }),
-      addCrew: (crew) => set((state) => ({
-        crews: [...state.crews, { ...crew, id: createId('crew') }],
       })),
-      updateCrew: (crewId, patch) => set((state) => ({
+      addCrew: (crew) => runBusinessMutation('crews:add-crew', () => set((state) => ({
+        crews: [...state.crews, { ...crew, id: createId('crew') }],
+      }))),
+      updateCrew: (crewId, patch) => runBusinessMutation('crews:update-crew', () => set((state) => ({
         crews: state.crews.map((crew) => (crew.id === crewId ? { ...crew, ...patch } : crew)),
         workerAssignments: state.workerAssignments.map((worker) => {
           if (worker.crewId !== crewId) return worker
@@ -678,21 +738,21 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
             activeStageId: activeItem?.stageId ?? patch.activeWorkStageId ?? worker.activeStageId,
           }
         }),
-      })),
-      deleteCrew: (crewId) => set((state) => ({
+      }))),
+      deleteCrew: (crewId) => runBusinessMutation('crews:delete-crew', () => set((state) => ({
         crews: state.crews.filter((crew) => crew.id !== crewId),
         workerAssignments: state.workerAssignments.map((worker) => (worker.crewId === crewId ? { ...worker, crewId: '' } : worker)),
-      })),
-      addWorker: (worker) => set((state) => ({
+      }))),
+      addWorker: (worker) => runBusinessMutation('workers:add-worker-assignment', () => set((state) => ({
         workerAssignments: [...state.workerAssignments, { ...worker, id: createId('worker') }],
-      })),
-      updateWorker: (workerId, patch) => set((state) => ({
+      }))),
+      updateWorker: (workerId, patch) => runBusinessMutation('workers:update-worker-assignment', () => set((state) => ({
         workerAssignments: state.workerAssignments.map((worker) => (worker.id === workerId ? { ...worker, ...patch } : worker)),
-      })),
-      deleteWorker: (workerId) => set((state) => ({
+      }))),
+      deleteWorker: (workerId) => runBusinessMutation('workers:delete-worker-assignment', () => set((state) => ({
         workerAssignments: state.workerAssignments.filter((worker) => worker.id !== workerId),
-      })),
-      addMaterial: (material) => set((state) => ({
+      }))),
+      addMaterial: (material) => runBusinessMutation('materials:add-material', () => set((state) => ({
         materials: [
           ...state.materials,
           {
@@ -701,18 +761,18 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
             remainingQuantity: Math.max(0, material.quantity - material.usedQuantity),
           },
         ],
-      })),
-      updateMaterial: (materialId, patch) => set((state) => ({
+      }))),
+      updateMaterial: (materialId, patch) => runBusinessMutation('materials:update-material', () => set((state) => ({
         materials: state.materials.map((material) => {
           if (material.id !== materialId) return material
           const next = { ...material, ...patch }
           return { ...next, remainingQuantity: Math.max(0, next.quantity - next.usedQuantity) }
         }),
-      })),
-      deleteMaterial: (materialId) => set((state) => ({
+      }))),
+      deleteMaterial: (materialId) => runBusinessMutation('materials:delete-material', () => set((state) => ({
         materials: state.materials.filter((material) => material.id !== materialId),
-      })),
-      addDailyReport: (report) => set((state) => {
+      }))),
+      addDailyReport: (report) => runBusinessMutation('daily-reports:add-report', () => set((state) => {
         const dailyReport: DailyForemanReport = {
           ...report,
           id: createId('report'),
@@ -724,13 +784,13 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           workItems,
           stages: state.stages.map((stage) => syncStageFromItems(stage, workItems)),
         }
-      }),
-      updateDailyReport: (reportId, patch) => set((state) => ({
+      })),
+      updateDailyReport: (reportId, patch) => runBusinessMutation('daily-reports:update-report', () => set((state) => ({
         dailyReports: state.dailyReports.map((report) => (report.id === reportId ? { ...report, ...patch } : report)),
-      })),
-      deleteDailyReport: (reportId) => set((state) => ({
+      }))),
+      deleteDailyReport: (reportId) => runBusinessMutation('daily-reports:delete-report', () => set((state) => ({
         dailyReports: state.dailyReports.filter((report) => report.id !== reportId),
-      })),
+      }))),
     }),
     {
       name: 'buildtrack-project-progress',
