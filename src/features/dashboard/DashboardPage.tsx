@@ -3,9 +3,10 @@ import {
   DollarCircleOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
-import { Progress, Table, Tag } from 'antd'
+import { Alert, Button, Progress, Skeleton, Table, Tag } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { ReactNode } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Bar,
@@ -23,13 +24,22 @@ import { WrappedAxisTick } from '../../components/charts/WrappedAxisTick'
 import { ProjectSelect } from '../../components/ProjectSelect'
 import { KpiCard } from '../../components/ui/KpiCard'
 import { PageTitle } from '../../components/ui/PageTitle'
+import { buildTrackBackendApi, type FieldDailyReport } from '../../services/api/buildTrackBackendApi'
+import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import type { WorkItem, WorkStage } from '../../types/projectProgress'
 import { compactName, formatCurrency, formatHours, formatNumber, formatPercent } from '../../utils/formatters'
+import {
+  dailyReportWorkSummary,
+  fieldDailyReportStatusColor,
+  fieldDailyReportStatusLabel,
+  managementVisibleReportStatuses,
+  sortFieldReportsNewestFirst,
+  totalDailyReportLineValue,
+} from '../dailyReports/dailyReportHelpers'
 import {
   getCrewActualHours,
   getCrewsByObject,
   getDashboardSummary,
-  getDailyReportsByObject,
   getEstimateRowsByObject,
   getMaterialsByObject,
   getStageActualHours,
@@ -37,7 +47,6 @@ import {
   getWorkItemActualHours,
 } from '../projectProgress/projectSelectors'
 import { calculateStageProgress, calculateWorkItemProgress, statusColor, statusLabel, useProjectProgressStore } from '../projectProgress/projectProgressStore'
-import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 
 const trendData = [
   { day: 'B.e', saat: 22 },
@@ -52,12 +61,15 @@ const trendData = [
 export const DashboardPage = () => {
   const data = useProjectProgressStore()
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
+  const [recentReports, setRecentReports] = useState<FieldDailyReport[]>([])
+  const [recentReportsLoading, setRecentReportsLoading] = useState(false)
+  const [recentReportsError, setRecentReportsError] = useState<string | null>(null)
   const metrics = getDashboardSummary(data, data.project.id, selectedObjectId)
   const scopedStages = getStagesByObject(data, selectedObjectId)
   const scopedWorkItems = getEstimateRowsByObject(data, selectedObjectId)
   const scopedCrews = getCrewsByObject(data, selectedObjectId)
   const scopedMaterials = getMaterialsByObject(data, selectedObjectId)
-  const scopedReports = getDailyReportsByObject(data, selectedObjectId)
+  const isAllProjectsScope = selectedObjectId === ALL_PROJECTS_ID
   const estimateTotals = {
     totalAmount: scopedStages.reduce((sum, stage) => sum + stage.totalCost, 0),
     laborAmount: scopedStages.reduce((sum, stage) => sum + stage.laborCost, 0),
@@ -114,6 +126,27 @@ export const DashboardPage = () => {
     plan: stage.plannedHours,
     faktiki: stage.derivedActualHours,
   }))
+
+  const loadRecentReports = useCallback(async () => {
+    setRecentReportsLoading(true)
+    setRecentReportsError(null)
+    try {
+      const siteId = selectedObjectId === ALL_PROJECTS_ID ? undefined : selectedObjectId
+      const reports = await buildTrackBackendApi.getManagementFieldReports(siteId)
+      setRecentReports(
+        sortFieldReportsNewestFirst(reports.filter((report) => managementVisibleReportStatuses.has(report.status))).slice(0, 4),
+      )
+    } catch (error) {
+      setRecentReports([])
+      setRecentReportsError(error instanceof Error ? error.message : 'Prorab gündəlikləri yüklənmədi.')
+    } finally {
+      setRecentReportsLoading(false)
+    }
+  }, [selectedObjectId])
+
+  useEffect(() => {
+    void loadRecentReports()
+  }, [loadRecentReports])
 
   const keepObjectContext = (_pageKey: string) => undefined
 
@@ -333,13 +366,34 @@ export const DashboardPage = () => {
             <Link className="muted-text" to="/daily-reports" onClick={keepObjectContext('dailyReports')}>Gündəliklərə keç</Link>
           </div>
           <div className="daily-report-feed">
-            {scopedReports.slice(0, 3).map((report) => (
-              <div className="report-feed-item" key={report.id}>
-                <strong>{report.date} · {report.foremanName}</strong>
-                <span>{report.todayNotes}</span>
-                <Tag color={report.status === 'Approved' ? 'green' : report.status === 'Submitted' ? 'blue' : 'default'}>{report.status}</Tag>
+            {recentReportsLoading ? (
+              <Skeleton active paragraph={{ rows: 5 }} title={false} />
+            ) : recentReportsError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="Prorab gündəlikləri yüklənmədi."
+                description={recentReportsError}
+                action={<Button size="small" onClick={() => void loadRecentReports()}>Yenilə</Button>}
+              />
+            ) : recentReports.length ? recentReports.map((report) => {
+              const workerCount = totalDailyReportLineValue(report.lines, 'workerCount')
+              const workHours = totalDailyReportLineValue(report.lines, 'workHours')
+              return (
+                <div className="report-feed-item" key={report.id} data-i18n-skip="true">
+                  <strong>{report.reportDate} · {report.supervisorName || 'Prorab qeyd edilməyib'}</strong>
+                  {isAllProjectsScope ? <span className="muted-text">{report.siteName || 'Layihə qeyd edilməyib'}</span> : null}
+                  <span>{dailyReportWorkSummary(report.lines)}</span>
+                  <span className="muted-text">{formatNumber(workerCount)} işçi · {formatNumber(workHours)} saat</span>
+                  {report.generalNote ? <span className="report-feed-note">{report.generalNote}</span> : null}
+                  <Tag color={fieldDailyReportStatusColor[report.status]}>{fieldDailyReportStatusLabel[report.status]}</Tag>
+                </div>
+              )
+            }) : (
+              <div className="empty-soft">
+                {isAllProjectsScope ? 'Hələ prorab gündəliyi daxil edilməyib.' : 'Seçilmiş layihə üzrə prorab gündəliyi yoxdur.'}
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>

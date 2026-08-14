@@ -112,6 +112,17 @@ if (!store.includes('[ProjectProgress] SAVE QUEUED') || !store.includes('[Projec
   findings.push('ProjectProgress store must keep save/no-save development diagnostics.')
 }
 
+const dashboard = read('src/features/dashboard/DashboardPage.tsx')
+if (!dashboard.includes('getManagementFieldReports')) {
+  findings.push('Dashboard recent prorab reports must use canonical getManagementFieldReports API.')
+}
+if (dashboard.includes('getDailyReportsByObject') || dashboard.includes('scopedReports')) {
+  findings.push('Dashboard recent prorab reports must not read legacy ProjectProgress dailyReports.')
+}
+if (!dashboard.includes('data-i18n-skip="true"')) {
+  findings.push('Dashboard recent prorab report dynamic business text must be protected from DOM auto-translation.')
+}
+
 console.log('ProjectProgress read-only route audit')
 if (findings.length) {
   findings.forEach((finding) => console.log(`FAIL ${finding}`))
@@ -121,3 +132,4 @@ if (findings.length) {
 console.log('PASS read-only route mounts do not reference ProjectProgress mutating actions.')
 console.log('PASS DevicesPage does not mutate ProjectProgress on load/reload/site fetch.')
 console.log('PASS AppLayout fallback uses non-persisting tenant site hydration.')
+console.log('PASS Dashboard recent prorab reports use canonical read-only management API.')

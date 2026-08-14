@@ -11,49 +11,16 @@ import { buildTrackBackendApi, type FieldDailyReport, type FieldDailyReportLine,
 import { formatNumber } from '../../utils/formatters'
 import { ALL_OBJECTS_ID } from '../projectProgress/projectSelectors'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import {
+  dailyReportQuantitySummary,
+  dailyReportWorkSummary,
+  fieldDailyReportStatusColor,
+  fieldDailyReportStatusLabel,
+  fieldDailyReportStatusOptions,
+  totalDailyReportLineValue,
+} from './dailyReportHelpers'
 
 const { RangePicker } = DatePicker
-
-const statusColor: Record<FieldDailyReportStatus, string> = {
-  Draft: 'default',
-  Submitted: 'blue',
-  Approved: 'green',
-  NeedsCorrection: 'orange',
-  Rejected: 'red',
-}
-
-const statusLabel: Record<FieldDailyReportStatus, string> = {
-  Draft: 'Qaralama',
-  Submitted: 'Təsdiq gözləyir',
-  Approved: 'Təsdiqlənib',
-  NeedsCorrection: 'Düzəliş tələb olunur',
-  Rejected: 'Rədd edilib',
-}
-
-const statusOptions = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
-
-const totalLineValue = (lines: FieldDailyReportLine[], key: 'workerCount' | 'workHours') =>
-  lines.reduce((sum, line) => sum + (Number(line[key]) || 0), 0)
-
-const quantitySummary = (lines: FieldDailyReportLine[]) => {
-  if (lines.length === 0) return '-'
-  const byUnit = lines.reduce<Record<string, number>>((acc, line) => {
-    const unit = line.unit || '-'
-    acc[unit] = (acc[unit] ?? 0) + (Number(line.reportedQuantity) || 0)
-    return acc
-  }, {})
-  return Object.entries(byUnit)
-    .map(([unit, value]) => `${formatNumber(value)} ${unit}`)
-    .join(', ')
-}
-
-const workSummary = (lines: FieldDailyReportLine[]) =>
-  lines.length === 0
-    ? '-'
-    : lines
-      .slice(0, 2)
-      .map((line) => line.workName)
-      .join(', ') + (lines.length > 2 ? ` +${lines.length - 2}` : '')
 
 export const DailyReportsPage = () => {
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
@@ -103,18 +70,18 @@ export const DailyReportsPage = () => {
   const submittedCount = filteredReports.filter((report) => report.status === 'Submitted').length
   const approvedCount = filteredReports.filter((report) => report.status === 'Approved').length
   const correctionCount = filteredReports.filter((report) => report.status === 'NeedsCorrection').length
-  const totalHours = filteredReports.reduce((sum, report) => sum + totalLineValue(report.lines, 'workHours'), 0)
+  const totalHours = filteredReports.reduce((sum, report) => sum + totalDailyReportLineValue(report.lines, 'workHours'), 0)
 
   const columns: TableColumnsType<FieldDailyReport> = [
     { title: 'Tarix', dataIndex: 'reportDate', sorter: (a, b) => a.reportDate.localeCompare(b.reportDate), width: 120 },
     { title: 'Layihə', dataIndex: 'siteName', sorter: (a, b) => (a.siteName || '').localeCompare(b.siteName || ''), width: 180 },
     { title: 'Prorab', dataIndex: 'supervisorName', sorter: (a, b) => (a.supervisorName || '').localeCompare(b.supervisorName || ''), width: 170 },
     { title: 'Hava', dataIndex: 'weatherCondition', width: 120, render: (value) => value || '-' },
-    { title: 'Görülən işlər', render: (_, row) => workSummary(row.lines), ellipsis: true },
-    { title: 'Miqdar', render: (_, row) => quantitySummary(row.lines), width: 170 },
-    { title: 'İşçi', align: 'right', width: 90, render: (_, row) => formatNumber(totalLineValue(row.lines, 'workerCount')) },
-    { title: 'İş saatı', align: 'right', width: 110, render: (_, row) => formatNumber(totalLineValue(row.lines, 'workHours')) },
-    { title: 'Status', dataIndex: 'status', width: 170, render: (value: FieldDailyReportStatus) => <Tag color={statusColor[value]}>{statusLabel[value]}</Tag> },
+    { title: 'Görülən işlər', render: (_, row) => dailyReportWorkSummary(row.lines), ellipsis: true },
+    { title: 'Miqdar', render: (_, row) => dailyReportQuantitySummary(row.lines), width: 170 },
+    { title: 'İşçi', align: 'right', width: 90, render: (_, row) => formatNumber(totalDailyReportLineValue(row.lines, 'workerCount')) },
+    { title: 'İş saatı', align: 'right', width: 110, render: (_, row) => formatNumber(totalDailyReportLineValue(row.lines, 'workHours')) },
+    { title: 'Status', dataIndex: 'status', width: 170, render: (value: FieldDailyReportStatus) => <Tag color={fieldDailyReportStatusColor[value]}>{fieldDailyReportStatusLabel[value]}</Tag> },
     {
       title: 'Əməliyyat',
       width: 90,
@@ -147,7 +114,7 @@ export const DailyReportsPage = () => {
         <Select
           value={statusFilter}
           onChange={setStatusFilter}
-          options={[{ value: 'all', label: 'Bütün statuslar' }, ...statusOptions]}
+          options={[{ value: 'all', label: 'Bütün statuslar' }, ...fieldDailyReportStatusOptions]}
           style={{ minWidth: 220 }}
         />
       </section>
@@ -184,7 +151,7 @@ export const DailyReportsPage = () => {
         {selectedReport && (
           <Space direction="vertical" size={18} style={{ width: '100%' }}>
             <Space wrap>
-              <Tag color={statusColor[selectedReport.status]}>{statusLabel[selectedReport.status]}</Tag>
+              <Tag color={fieldDailyReportStatusColor[selectedReport.status]}>{fieldDailyReportStatusLabel[selectedReport.status]}</Tag>
               <Typography.Text strong>{selectedReport.reportDate}</Typography.Text>
               <Typography.Text>{selectedReport.siteName}</Typography.Text>
               <Typography.Text>{selectedReport.supervisorName}</Typography.Text>

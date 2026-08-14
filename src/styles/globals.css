@@ -1315,6 +1315,12 @@ main,
   line-height: 1.45;
 }
 
+.report-feed-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-assistant-button {
   position: fixed;
   right: 24px;
