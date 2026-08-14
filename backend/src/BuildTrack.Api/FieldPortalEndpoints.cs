@@ -115,7 +115,7 @@ public static class FieldPortalEndpoints
             .Where(x => x.SiteId == siteId && x.IsActive)
             .OrderBy(x => x.StageName)
             .ThenBy(x => x.WorkName)
-            .Select(x => new FieldSmetaItemDto(x.Id, x.SiteId, x.StageName, x.WorkName, x.Unit, x.WorkCategory))
+            .Select(x => new FieldSmetaItemDto(x.Id, x.SiteId, x.StageName, x.WorkName, x.Unit, x.WorkCategory, x.ProjectWorkItemId))
             .ToListAsync(ct);
         return Results.Ok(rows);
     }
@@ -237,6 +237,7 @@ public static class FieldPortalEndpoints
             {
                 TenantId = tenantId,
                 SmetaItemId = line.SmetaItemId,
+                ProjectWorkItemId = items[line.SmetaItemId].ProjectWorkItemId,
                 ReportedQuantity = line.ReportedQuantity,
                 WorkerCount = line.WorkerCount,
                 WorkHours = line.WorkHours,
@@ -355,6 +356,7 @@ public static class FieldPortalEndpoints
 
             matchedExistingIds.Add(line.Id);
             line.SmetaItemId = requestLine.SmetaItemId;
+            line.ProjectWorkItemId = items[requestLine.SmetaItemId].ProjectWorkItemId;
             line.ReportedQuantity = requestLine.ReportedQuantity;
             line.WorkerCount = requestLine.WorkerCount;
             line.WorkHours = requestLine.WorkHours;
@@ -713,7 +715,13 @@ public static class FieldPortalEndpoints
         return Results.Ok(reports.Select(report => MapReport(report, report.ReviewedByUserId is Guid reviewerId ? reviewerNames.GetValueOrDefault(reviewerId) : null)));
     }
 
-    private static async Task<IResult> ReviewManagementFieldReportAsync(Guid id, ReviewFieldDailyReportRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
+    private static async Task<IResult> ReviewManagementFieldReportAsync(
+        Guid id,
+        ReviewFieldDailyReportRequest request,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IProjectProgressDailyReportSyncService dailyReportSync,
+        CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
         if (request.Status is not (FieldDailyReportStatus.Approved or FieldDailyReportStatus.NeedsCorrection or FieldDailyReportStatus.Rejected)) return Results.BadRequest(new { error = "Invalid review status" });
@@ -723,14 +731,43 @@ public static class FieldPortalEndpoints
         }
 
         var tenantId = RequireTenantId(tenantContext);
-        var report = await db.SupervisorDailyReports.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+        var report = await db.SupervisorDailyReports
+            .Include(x => x.Lines)
+            .ThenInclude(x => x.SmetaItem)
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
         if (report is null) return Results.NotFound();
+        if (report.Status != FieldDailyReportStatus.Submitted)
+        {
+            return Results.Conflict(new { error = $"Only submitted reports can be reviewed. Current status: {report.Status}" });
+        }
+
+        if (request.Status == FieldDailyReportStatus.Approved)
+        {
+            var validation = await dailyReportSync.ValidateApprovedReportAsync(tenantId, report, ct);
+            if (!validation.IsValid)
+            {
+                return Results.Conflict(new
+                {
+                    error = validation.Error,
+                    validation.ProjectWorkItemId,
+                    validation.PlannedQuantity,
+                    validation.CandidateApprovedQuantity,
+                });
+            }
+        }
+
         report.Status = request.Status;
         report.ReviewedAt = DateTimeOffset.UtcNow;
         report.ReviewedByUserId = tenantContext.UserId;
         report.ReviewNote = Clean(request.ReviewNote);
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, $"DailyReport{request.Status}", "SupervisorDailyReport", report.Id, request.Status == FieldDailyReportStatus.Rejected, BuildDailyReportReviewDescription(report.ReportDate, request.Status), ct);
+        if (request.Status == FieldDailyReportStatus.Approved)
+        {
+            var progress = await dailyReportSync.RecalculateApprovedDailyReportProgressAsync(tenantId, report.Id, ct);
+            await WriteAuditAsync(db, report.TenantId, report.SiteId, report.SupervisorUserId, "DailyReportProgressApplied", "SupervisorDailyReport", report.Id, false, $"{report.ReportDate:yyyy-MM-dd} reportu smeta progressinə tətbiq edildi: {progress.UpdatedWorkItems} iş sətri, {progress.UpdatedStages} mərhələ yeniləndi.", ct);
+        }
+
         return Results.Ok(await LoadReportDtoAsync(db, id, ct));
     }
 
@@ -923,7 +960,7 @@ public static class FieldPortalEndpoints
         report.Lines
             .OrderBy(x => x.SmetaItem?.StageName)
             .ThenBy(x => x.SmetaItem?.WorkName)
-            .Select(x => new FieldDailyReportLineDto(x.Id, x.SmetaItemId, x.SmetaItem?.StageName ?? string.Empty, x.SmetaItem?.WorkName ?? string.Empty, x.ReportedQuantity, x.WorkerCount, x.WorkHours, x.Unit, x.Note))
+            .Select(x => new FieldDailyReportLineDto(x.Id, x.SmetaItemId, x.ProjectWorkItemId ?? x.SmetaItem?.ProjectWorkItemId, x.SmetaItem?.StageName ?? string.Empty, x.SmetaItem?.WorkName ?? string.Empty, x.ReportedQuantity, x.WorkerCount, x.WorkHours, x.Unit, x.Note))
             .ToArray());
 
     private static async Task<IReadOnlyList<FieldWarehouseRequestDto>> LoadWarehouseRequestsAsync(BuildTrackDbContext db, IReadOnlyCollection<Guid> siteIds, CancellationToken ct)

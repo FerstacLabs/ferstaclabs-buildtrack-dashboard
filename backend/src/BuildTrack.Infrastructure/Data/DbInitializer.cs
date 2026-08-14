@@ -569,13 +569,18 @@ CREATE TABLE IF NOT EXISTS field_smeta_items (
     "WorkName" character varying(220) NOT NULL,
     "Unit" character varying(40) NOT NULL,
     "WorkCategory" character varying(100) NULL,
+    "ProjectWorkItemId" character varying(160) NULL,
+    "PlannedQuantity" numeric(18,3) NULL,
     "IsActive" boolean NOT NULL DEFAULT true,
     "CreatedAt" timestamp with time zone NOT NULL,
     "UpdatedAt" timestamp with time zone NULL
 );
+ALTER TABLE field_smeta_items ADD COLUMN IF NOT EXISTS "ProjectWorkItemId" character varying(160) NULL;
+ALTER TABLE field_smeta_items ADD COLUMN IF NOT EXISTS "PlannedQuantity" numeric(18,3) NULL;
 CREATE INDEX IF NOT EXISTS "IX_field_smeta_items_TenantId" ON field_smeta_items ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_field_smeta_items_SiteId" ON field_smeta_items ("SiteId");
 CREATE UNIQUE INDEX IF NOT EXISTS "UX_field_smeta_items_site_work" ON field_smeta_items ("TenantId", "SiteId", "WorkName");
+CREATE UNIQUE INDEX IF NOT EXISTS "UX_field_smeta_items_project_work" ON field_smeta_items ("TenantId", "SiteId", "ProjectWorkItemId") WHERE "ProjectWorkItemId" IS NOT NULL;
 CREATE TABLE IF NOT EXISTS supervisor_daily_reports (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
@@ -602,6 +607,7 @@ CREATE TABLE IF NOT EXISTS supervisor_daily_report_lines (
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,
     "ReportId" uuid NOT NULL REFERENCES supervisor_daily_reports("Id") ON DELETE CASCADE,
     "SmetaItemId" uuid NOT NULL REFERENCES field_smeta_items("Id") ON DELETE RESTRICT,
+    "ProjectWorkItemId" character varying(160) NULL,
     "ReportedQuantity" numeric(18,3) NOT NULL,
     "WorkerCount" integer NULL,
     "WorkHours" numeric(18,2) NULL,
@@ -611,9 +617,11 @@ CREATE TABLE IF NOT EXISTS supervisor_daily_report_lines (
 );
 ALTER TABLE supervisor_daily_report_lines ADD COLUMN IF NOT EXISTS "WorkerCount" integer NULL;
 ALTER TABLE supervisor_daily_report_lines ADD COLUMN IF NOT EXISTS "WorkHours" numeric(18,2) NULL;
+ALTER TABLE supervisor_daily_report_lines ADD COLUMN IF NOT EXISTS "ProjectWorkItemId" character varying(160) NULL;
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_TenantId" ON supervisor_daily_report_lines ("TenantId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_ReportId" ON supervisor_daily_report_lines ("ReportId");
 CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_SmetaItemId" ON supervisor_daily_report_lines ("SmetaItemId");
+CREATE INDEX IF NOT EXISTS "IX_supervisor_daily_report_lines_ProjectWorkItemId" ON supervisor_daily_report_lines ("ProjectWorkItemId");
 CREATE TABLE IF NOT EXISTS supervisor_site_notes (
     "Id" uuid NOT NULL PRIMARY KEY,
     "TenantId" uuid NOT NULL REFERENCES tenants("Id") ON DELETE CASCADE,

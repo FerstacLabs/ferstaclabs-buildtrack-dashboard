@@ -32,6 +32,12 @@ public sealed class BakinityDemoSeederTests
         Assert.Equal(10, await db.Users.CountAsync(x => x.TenantId == tenant.Id && x.Role == BuildTrackUserRole.Supervisor));
         Assert.Equal(3, await db.Users.CountAsync(x => x.TenantId == tenant.Id && x.Role == BuildTrackUserRole.ProcurementAgent));
         Assert.Equal(4, await db.Sites.CountAsync(x => x.TenantId == tenant.Id));
+        var constructionSiteIds = await db.Sites
+            .Where(x => x.TenantId == tenant.Id)
+            .OrderBy(x => x.Name)
+            .Take(3)
+            .Select(x => x.Id)
+            .ToArrayAsync();
         Assert.Equal(10, await db.SupervisorSiteAssignments.CountAsync(x => x.TenantId == tenant.Id && x.IsActive));
         Assert.Equal(48, await db.Workers.CountAsync(x => x.TenantId == tenant.Id));
         Assert.Equal(48, await db.WorkerSiteAssignments.CountAsync(x => x.TenantId == tenant.Id && x.Status == WorkerSiteAssignmentStatus.Active));
@@ -65,7 +71,22 @@ public sealed class BakinityDemoSeederTests
             Assert.Equal(session.WorkDate, DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.CheckInTime, bakuTimeZone).DateTime));
             Assert.Equal(session.WorkDate, DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(session.CheckOutTime!.Value, bakuTimeZone).DateTime));
         });
-        Assert.True(await db.FieldSmetaItems.CountAsync(x => x.TenantId == tenant.Id) >= 30);
+        var fieldSmetaItems = await db.FieldSmetaItems.Where(x => x.TenantId == tenant.Id).ToListAsync();
+        Assert.True(fieldSmetaItems.Count >= 30);
+        Assert.All(fieldSmetaItems.Where(x => constructionSiteIds.Contains(x.SiteId)), item =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(item.ProjectWorkItemId));
+            Assert.True(item.PlannedQuantity > 0);
+        });
+        var dailyReportStatuses = await db.SupervisorDailyReports
+            .Where(x => x.TenantId == tenant.Id)
+            .GroupBy(x => x.Status)
+            .Select(x => new { x.Key, Count = x.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+        Assert.Equal(5, dailyReportStatuses.GetValueOrDefault(FieldDailyReportStatus.Approved));
+        Assert.Equal(2, dailyReportStatuses.GetValueOrDefault(FieldDailyReportStatus.Submitted));
+        Assert.Equal(1, dailyReportStatuses.GetValueOrDefault(FieldDailyReportStatus.NeedsCorrection));
+        Assert.Equal(1, dailyReportStatuses.GetValueOrDefault(FieldDailyReportStatus.Rejected));
         Assert.True(await db.FieldWarehouseCatalogItems.CountAsync(x => x.TenantId == tenant.Id) >= DbInitializer.SupplyCatalogSeedItems.Count);
         Assert.True(await db.WarehouseStockMovements.CountAsync(x => x.TenantId == tenant.Id && x.ReferenceType == "BakinitySeedOpeningBalance") >= 10);
 
@@ -124,6 +145,7 @@ public sealed class BakinityDemoSeederTests
         Assert.Equal(10, document.RootElement.GetProperty("workItems").GetArrayLength());
         Assert.Equal(6, document.RootElement.GetProperty("crews").GetArrayLength());
         Assert.Equal(48, document.RootElement.GetProperty("workerAssignments").GetArrayLength());
+        Assert.Equal(0, document.RootElement.GetProperty("dailyReports").GetArrayLength());
 
         var workItems = document.RootElement.GetProperty("workItems").EnumerateArray()
             .ToDictionary(
@@ -133,7 +155,18 @@ public sealed class BakinityDemoSeederTests
                     ObjectId = item.GetProperty("objectId").GetString(),
                     StageId = item.GetProperty("stageId").GetString(),
                     MaterialUnitPrice = item.GetProperty("materialUnitPrice").GetDecimal(),
+                    CompletedQuantity = item.GetProperty("completedQuantity").GetDecimal(),
                 });
+        var approvedTotals = await db.SupervisorDailyReportLines
+            .Include(x => x.Report)
+            .Where(x => x.TenantId == tenant.Id && x.Report!.Status == FieldDailyReportStatus.Approved && x.ProjectWorkItemId != null)
+            .GroupBy(x => x.ProjectWorkItemId!)
+            .Select(x => new { WorkItemId = x.Key, Quantity = x.Sum(line => line.ReportedQuantity) })
+            .ToDictionaryAsync(x => x.WorkItemId, x => x.Quantity);
+        foreach (var approvedTotal in approvedTotals)
+        {
+            Assert.Equal(approvedTotal.Value, workItems[approvedTotal.Key].CompletedQuantity);
+        }
         var materials = document.RootElement.GetProperty("materials").EnumerateArray().ToArray();
         Assert.Equal(6, materials.Length);
         var materialCountsByObject = materials

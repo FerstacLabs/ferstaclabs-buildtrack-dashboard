@@ -95,6 +95,8 @@ public sealed class FieldSmetaItem
     public string WorkName { get; set; } = string.Empty;
     public string Unit { get; set; } = string.Empty;
     public string? WorkCategory { get; set; }
+    public string? ProjectWorkItemId { get; set; }
+    public decimal? PlannedQuantity { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAt { get; set; }
@@ -131,6 +133,7 @@ public sealed class SupervisorDailyReportLine
     public SupervisorDailyReport? Report { get; set; }
     public Guid SmetaItemId { get; set; }
     public FieldSmetaItem? SmetaItem { get; set; }
+    public string? ProjectWorkItemId { get; set; }
     public decimal ReportedQuantity { get; set; }
     public int? WorkerCount { get; set; }
     public decimal? WorkHours { get; set; }

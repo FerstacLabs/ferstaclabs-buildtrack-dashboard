@@ -479,11 +479,13 @@ export interface FieldSmetaItem {
   workName: string
   unit: string
   workCategory?: string
+  projectWorkItemId?: string
 }
 
 export interface FieldDailyReportLine {
   id: string
   smetaItemId: string
+  projectWorkItemId?: string
   stageName: string
   workName: string
   unit: string

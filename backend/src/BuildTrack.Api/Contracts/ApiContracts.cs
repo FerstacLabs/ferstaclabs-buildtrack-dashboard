@@ -442,11 +442,13 @@ public sealed record FieldSmetaItemDto(
     string StageName,
     string WorkName,
     string Unit,
-    string? WorkCategory);
+    string? WorkCategory,
+    string? ProjectWorkItemId);
 
 public sealed record FieldDailyReportLineDto(
     Guid Id,
     Guid SmetaItemId,
+    string? ProjectWorkItemId,
     string StageName,
     string WorkName,
     decimal ReportedQuantity,

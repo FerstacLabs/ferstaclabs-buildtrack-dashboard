@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Data;
+using BuildTrack.Infrastructure.Services;
 using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,12 +25,12 @@ public static class ProjectProgressEndpoints
             Results.Json(await GetWorkspacePropertyAsync(db, tenantContext, "workItems", ct)));
         app.MapGet("/api/project-progress/crews", async (BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
             Results.Json(await GetWorkspacePropertyAsync(db, tenantContext, "crews", ct)));
-        app.MapPut("/api/project-progress/stages/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "stages", body, db, tenantContext, ct));
-        app.MapPut("/api/project-progress/work-items/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "workItems", body, db, tenantContext, ct));
-        app.MapPut("/api/project-progress/crews/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "crews", body, db, tenantContext, ct));
+        app.MapPut("/api/project-progress/stages/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "stages", body, db, tenantContext, dailyReportSync, ct));
+        app.MapPut("/api/project-progress/work-items/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "workItems", body, db, tenantContext, dailyReportSync, ct));
+        app.MapPut("/api/project-progress/crews/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "crews", body, db, tenantContext, dailyReportSync, ct));
         return app;
     }
 
@@ -48,7 +49,7 @@ public static class ProjectProgressEndpoints
         return Results.Content(workspace.WorkspaceJson, "application/json");
     }
 
-    private static async Task<IResult> SaveWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
+    private static async Task<IResult> SaveWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
@@ -60,10 +61,11 @@ public static class ProjectProgressEndpoints
         workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
         return Results.Ok(new { saved = true, workspaceId = workspace.Id, updatedAt = workspace.UpdatedAt });
     }
 
-    private static async Task<IResult> ImportLegacyWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
+    private static async Task<IResult> ImportLegacyWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
@@ -75,6 +77,7 @@ public static class ProjectProgressEndpoints
         workspace.LegacyBrowserImportedAt = DateTimeOffset.UtcNow;
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
         return Results.Ok(new { imported = true, workspaceId = workspace.Id, legacyBrowserImportedAt = workspace.LegacyBrowserImportedAt });
     }
 
@@ -86,7 +89,7 @@ public static class ProjectProgressEndpoints
         return node[propertyName]?.DeepClone() ?? (propertyName == "summary" ? JsonSerializer.SerializeToNode(EmptySummary(), JsonOptions)! : new JsonArray());
     }
 
-    private static async Task<IResult> UpsertWorkspaceArrayItemAsync(string id, string arrayName, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
+    private static async Task<IResult> UpsertWorkspaceArrayItemAsync(string id, string arrayName, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
         var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
@@ -126,6 +129,10 @@ public static class ProjectProgressEndpoints
         workspace.WorkspaceJson = root.ToJsonString(JsonOptions);
         workspace.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
+        if (arrayName is "stages" or "workItems")
+        {
+            await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
+        }
         return Results.Json(item);
     }
 
@@ -210,20 +217,21 @@ public static class ProjectProgressEndpoints
             stages,
             workItems = smetaItems.Select((item, index) => new
             {
-                id = item.Id.ToString(),
+                id = string.IsNullOrWhiteSpace(item.ProjectWorkItemId) ? item.Id.ToString() : item.ProjectWorkItemId,
                 objectId = item.SiteId.ToString(),
                 stageId = stageMap.TryGetValue(item.StageName, out var stageId) ? stageId : SlugId("stage", item.StageName),
                 name = item.WorkName,
                 unit = item.Unit,
-                quantity = 0,
+                quantity = item.PlannedQuantity ?? 0,
                 laborUnitPrice = 0,
                 laborTotal = 0,
-                materialQuantity = 0,
+                materialQuantity = item.PlannedQuantity ?? 0,
                 materialUnitPrice = 0,
                 materialTotal = 0,
                 totalCost = 0,
                 plannedHours = 0,
                 actualHours = 0,
+                completedQuantity = 0,
                 status = "NotStarted",
                 progressPercent = 0,
                 notes = item.WorkCategory,

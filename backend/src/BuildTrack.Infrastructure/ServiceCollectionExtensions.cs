@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWorkerCameraIdentityResolver, WorkerCameraIdentityResolver>();
         services.AddScoped<IWorkerSiteAssignmentService, WorkerSiteAssignmentService>();
         services.AddScoped<IFieldAccessService, FieldAccessService>();
+        services.AddScoped<IProjectProgressDailyReportSyncService, ProjectProgressDailyReportSyncService>();
         services.AddScoped<IWarehouseAvailabilityService, WarehouseAvailabilityService>();
         services.AddScoped<IWarehouseUsagePolicyService, WarehouseUsagePolicyService>();
         services.AddScoped<ISupplyAttachmentStorage, SupplyAttachmentStorage>();

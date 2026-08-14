@@ -218,6 +218,13 @@ export const SupervisorsPage = () => {
     return true
   }), [auditAction, auditDateRange, auditEvents, auditSiteId, auditSupervisorId])
 
+  const prioritizedReports = useMemo(() => [...reports].sort((a, b) => {
+    const statusRank = (status: FieldDailyReportStatus) => status === 'Submitted' ? 0 : status === 'NeedsCorrection' ? 1 : status === 'Rejected' ? 2 : status === 'Approved' ? 3 : 4
+    const byStatus = statusRank(a.status) - statusRank(b.status)
+    if (byStatus !== 0) return byStatus
+    return (b.submittedAt || b.createdAt || b.reportDate).localeCompare(a.submittedAt || a.createdAt || a.reportDate)
+  }), [reports])
+
   const openNew = () => {
     setEditing(undefined)
     form.resetFields()
@@ -448,7 +455,7 @@ export const SupervisorsPage = () => {
         <Table
           rowKey="id"
           loading={loading}
-          dataSource={reports}
+          dataSource={prioritizedReports}
           pagination={{ pageSize: 5 }}
           columns={[
             { title: 'Tarix', dataIndex: 'reportDate' },

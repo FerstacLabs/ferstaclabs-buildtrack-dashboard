@@ -38,6 +38,7 @@ public sealed class FieldDailyReportDraftUpdateTests
         Assert.Equal(16, line.WorkerCount);
         Assert.Equal(9, line.WorkHours);
         Assert.Equal("updated", line.Note);
+        Assert.Equal(item.ProjectWorkItemId, line.ProjectWorkItemId);
     }
 
     [Fact]
@@ -242,6 +243,8 @@ public sealed class FieldDailyReportDraftUpdateTests
         StageName = "Etap",
         WorkName = Guid.NewGuid().ToString("N"),
         Unit = unit,
+        ProjectWorkItemId = Guid.NewGuid().ToString("N"),
+        PlannedQuantity = 100,
         IsActive = true,
     };
 }

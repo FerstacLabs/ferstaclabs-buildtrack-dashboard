@@ -376,9 +376,12 @@ public sealed class BuildTrackDbContext : DbContext
             entity.Property(x => x.WorkName).HasMaxLength(220).IsRequired();
             entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
             entity.Property(x => x.WorkCategory).HasMaxLength(100);
+            entity.Property(x => x.ProjectWorkItemId).HasMaxLength(160);
+            entity.Property(x => x.PlannedQuantity).HasPrecision(18, 3);
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => x.SiteId);
             entity.HasIndex(x => new { x.TenantId, x.SiteId, x.WorkName }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.SiteId, x.ProjectWorkItemId }).IsUnique().HasFilter("\"ProjectWorkItemId\" IS NOT NULL");
             entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Site).WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -411,9 +414,11 @@ public sealed class BuildTrackDbContext : DbContext
             entity.Property(x => x.WorkHours).HasPrecision(18, 2);
             entity.Property(x => x.Unit).HasMaxLength(40).IsRequired();
             entity.Property(x => x.Note).HasMaxLength(1000);
+            entity.Property(x => x.ProjectWorkItemId).HasMaxLength(160);
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => x.ReportId);
             entity.HasIndex(x => x.SmetaItemId);
+            entity.HasIndex(x => x.ProjectWorkItemId);
             entity.HasOne(x => x.Report).WithMany(x => x.Lines).HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.SmetaItem).WithMany().HasForeignKey(x => x.SmetaItemId).OnDelete(DeleteBehavior.Restrict);
         });

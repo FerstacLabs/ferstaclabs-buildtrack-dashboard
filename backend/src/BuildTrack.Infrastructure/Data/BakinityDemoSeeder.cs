@@ -49,8 +49,10 @@ internal static class BakinityDemoSeeder
         await UpsertAttendanceSeedAsync(db, tenant.Id, siteRows, workers, ct);
         await UpsertWarehouseWorkflowSeedAsync(db, tenant.Id, primarySite.Id, supervisors[0].Id, procurementUsers[0].Id, ct);
         await UpsertWorkspaceAsync(db, tenant.Id, siteRows, workers, ct);
-
         await db.SaveChangesAsync(ct);
+        await UpsertSupervisorDailyReportsAsync(db, tenant.Id, siteRows, supervisors, ct);
+        await db.SaveChangesAsync(ct);
+        await new ProjectProgressDailyReportSyncService(db).RecalculateApprovedDailyReportProgressAsync(tenant.Id, null, ct);
     }
 
     private static async Task<Tenant> UpsertTenantAsync(BuildTrackDbContext db, CancellationToken ct)
@@ -381,19 +383,145 @@ internal static class BakinityDemoSeeder
         var rows = BuildSmetaRows();
         foreach (var site in sites.Take(3))
         {
-            foreach (var row in rows)
+            foreach (var (row, index) in rows.Select((row, index) => (row, index)))
             {
-                if (await db.FieldSmetaItems.AnyAsync(x => x.TenantId == tenantId && x.SiteId == site.Id && x.StageName == row.Stage && x.WorkName == row.Work, ct)) continue;
-                db.FieldSmetaItems.Add(new FieldSmetaItem
+                var projectWorkItemId = StableGuid($"BAK-DEMO-WORK-{index + 1}").ToString();
+                var item = await db.FieldSmetaItems.FirstOrDefaultAsync(x =>
+                    x.TenantId == tenantId
+                    && x.SiteId == site.Id
+                    && (x.ProjectWorkItemId == projectWorkItemId || x.WorkName == row.Work),
+                    ct);
+                if (item is null)
                 {
+                    item = new FieldSmetaItem
+                    {
+                        TenantId = tenantId,
+                        SiteId = site.Id,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                    };
+                    db.FieldSmetaItems.Add(item);
+                }
+
+                item.StageName = row.Stage;
+                item.WorkName = row.Work;
+                item.Unit = row.Unit;
+                item.WorkCategory = row.Category;
+                item.ProjectWorkItemId = projectWorkItemId;
+                item.PlannedQuantity = row.Quantity;
+                item.IsActive = true;
+                item.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+    }
+
+    private static async Task UpsertSupervisorDailyReportsAsync(BuildTrackDbContext db, Guid tenantId, IReadOnlyList<Site> sites, IReadOnlyList<AppUser> supervisors, CancellationToken ct)
+    {
+        var constructionSites = sites.Take(3).ToArray();
+        if (constructionSites.Length == 0 || supervisors.Count == 0) return;
+
+        var ownerId = await db.Users
+            .Where(x => x.TenantId == tenantId && x.Role == BuildTrackUserRole.Owner)
+            .Select(x => (Guid?)x.Id)
+            .FirstOrDefaultAsync(ct);
+        var assignments = await db.SupervisorSiteAssignments
+            .AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.IsActive)
+            .ToListAsync(ct);
+        var supervisorBySite = constructionSites.ToDictionary(
+            site => site.Id,
+            site => assignments.FirstOrDefault(x => x.SiteId == site.Id)?.SupervisorUserId ?? supervisors.First().Id);
+
+        var smetaItems = await db.FieldSmetaItems
+            .Where(x => x.TenantId == tenantId && x.ProjectWorkItemId != null)
+            .ToListAsync(ct);
+        var smetaBySiteAndWorkId = smetaItems.ToDictionary(
+            x => $"{x.SiteId:N}|{x.ProjectWorkItemId}",
+            x => x,
+            StringComparer.OrdinalIgnoreCase);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(4));
+        var siteA = constructionSites[0];
+        var siteB = constructionSites.Length > 1 ? constructionSites[1] : constructionSites[0];
+        var siteC = constructionSites.Length > 2 ? constructionSites[2] : constructionSites[0];
+        var seedReports = new[]
+        {
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-001", siteA.Id, supervisorBySite[siteA.Id], today.AddDays(-8), FieldDailyReportStatus.Approved, "Günəşli", "Torpaq və hidroizolyasiya işləri plan üzrə tamamlandı.", "Plan üzrə qəbul edildi.", new[] { SeedLine(1, 340m, 8, 64m), SeedLine(4, 161.2m, 6, 48m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-002", siteB.Id, supervisorBySite[siteB.Id], today.AddDays(-7), FieldDailyReportStatus.Approved, "Küləkli", "Armatur karkası üzrə faktiki miqdar təsdiqləndi.", "Smeta progressinə tətbiq edildi.", new[] { SeedLine(2, 6.12m, 7, 56m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-003", siteC.Id, supervisorBySite[siteC.Id], today.AddDays(-6), FieldDailyReportStatus.Approved, "Günəşli", "Beton B25 və ikinci mərtəbə monolit işləri qəbul edildi.", "Smeta progressinə tətbiq edildi.", new[] { SeedLine(3, 60.2m, 9, 72m), SeedLine(6, 12.96m, 5, 40m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-004", siteB.Id, supervisorBySite[siteB.Id], today.AddDays(-5), FieldDailyReportStatus.Approved, "İsti", "Qəlib və hörgü miqdarları yoxlanıldı.", "Smeta progressinə tətbiq edildi.", new[] { SeedLine(5, 57.6m, 10, 80m), SeedLine(8, 431.8m, 12, 96m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-005", siteA.Id, supervisorBySite[siteA.Id], today.AddDays(-4), FieldDailyReportStatus.Approved, "Günəşli", "Suvaq işləri üzrə ilkin miqdar təsdiqləndi.", "Smeta progressinə tətbiq edildi.", new[] { SeedLine(10, 166.5m, 8, 64m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-006", siteC.Id, supervisorBySite[siteC.Id], today.AddDays(-1), FieldDailyReportStatus.Submitted, "Günəşli", "Beton B25 üçün əlavə 8 m3 iş görülüb, təsdiq gözləyir.", null, new[] { SeedLine(3, 8m, 6, 48m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-007", siteB.Id, supervisorBySite[siteB.Id], today, FieldDailyReportStatus.Submitted, "Günəşli", "Hörgü briqadası 40 m2 əlavə iş təqdim edib.", null, new[] { SeedLine(8, 40m, 7, 56m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-008", siteA.Id, supervisorBySite[siteA.Id], today.AddDays(-3), FieldDailyReportStatus.NeedsCorrection, "Yağışlı", "Suvaq miqdarında ölçü aktı əlavə olunmayıb.", "Miqdar üçün ölçü aktını əlavə edin.", new[] { SeedLine(10, 80m, 5, 35m) }),
+            new SeedDailyReport("BAK-DEMO-FIELD-REPORT-009", siteB.Id, supervisorBySite[siteB.Id], today.AddDays(-2), FieldDailyReportStatus.Rejected, "Küləkli", "Qəlib miqdarı təsdiq sənədi olmadan göndərilib.", "Təsdiq sənədi olmadığı üçün rədd edildi.", new[] { SeedLine(5, 12m, 4, 28m) }),
+        };
+
+        foreach (var seed in seedReports)
+        {
+            var reportId = StableGuid(seed.Code);
+            var report = await db.SupervisorDailyReports.Include(x => x.Lines).FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == reportId, ct);
+            if (report is null)
+            {
+                report = new SupervisorDailyReport
+                {
+                    Id = reportId,
                     TenantId = tenantId,
-                    SiteId = site.Id,
-                    StageName = row.Stage,
-                    WorkName = row.Work,
-                    Unit = row.Unit,
-                    WorkCategory = row.Category,
-                    IsActive = true,
-                });
+                    CreatedAt = DateTimeOffset.UtcNow,
+                };
+                db.SupervisorDailyReports.Add(report);
+            }
+
+            report.ProjectId = StableGuid("BAK-DEMO-PROJECT");
+            report.SiteId = seed.SiteId;
+            report.SupervisorUserId = seed.SupervisorUserId;
+            report.ReportDate = seed.ReportDate;
+            report.Shift = "Gündüz";
+            report.Status = seed.Status;
+            report.GeneralNote = seed.Note;
+            report.WeatherCondition = seed.Weather;
+            report.SubmittedAt = seed.Status == FieldDailyReportStatus.Draft ? null : new DateTimeOffset(seed.ReportDate.ToDateTime(TimeOnly.FromTimeSpan(TimeSpan.FromHours(18))), TimeSpan.FromHours(4)).ToUniversalTime();
+            report.ReviewedAt = seed.Status is FieldDailyReportStatus.Approved or FieldDailyReportStatus.NeedsCorrection or FieldDailyReportStatus.Rejected
+                ? report.SubmittedAt?.AddHours(2)
+                : null;
+            report.ReviewedByUserId = report.ReviewedAt is null ? null : ownerId;
+            report.ReviewNote = seed.ReviewNote;
+
+            var desiredLineIds = new HashSet<Guid>();
+            foreach (var (line, lineIndex) in seed.Lines.Select((line, lineIndex) => (line, lineIndex)))
+            {
+                var lineId = StableGuid($"{seed.Code}-LINE-{lineIndex + 1}");
+                desiredLineIds.Add(lineId);
+                var projectWorkItemId = StableGuid($"BAK-DEMO-WORK-{line.WorkItemNumber}").ToString();
+                if (!smetaBySiteAndWorkId.TryGetValue($"{seed.SiteId:N}|{projectWorkItemId}", out var smetaItem))
+                {
+                    continue;
+                }
+
+                var reportLine = report.Lines.FirstOrDefault(x => x.Id == lineId);
+                if (reportLine is null)
+                {
+                    reportLine = new SupervisorDailyReportLine
+                    {
+                        Id = lineId,
+                        TenantId = tenantId,
+                        CreatedAt = report.CreatedAt,
+                    };
+                    report.Lines.Add(reportLine);
+                }
+
+                reportLine.TenantId = tenantId;
+                reportLine.SmetaItemId = smetaItem.Id;
+                reportLine.ProjectWorkItemId = projectWorkItemId;
+                reportLine.ReportedQuantity = line.Quantity;
+                reportLine.WorkerCount = line.WorkerCount;
+                reportLine.WorkHours = line.WorkHours;
+                reportLine.Unit = smetaItem.Unit;
+                reportLine.Note = "BAK-DEMO canonical daily report line";
+            }
+
+            foreach (var staleLine in report.Lines.Where(x => !desiredLineIds.Contains(x.Id)).ToArray())
+            {
+                db.SupervisorDailyReportLines.Remove(staleLine);
             }
         }
     }
@@ -1192,6 +1320,22 @@ internal static class BakinityDemoSeeder
         supplier = "BAKİNİTY təchizat",
         notes = "Server seed material planı",
     };
+
+    private static SeedDailyReportLine SeedLine(int workItemNumber, decimal quantity, int workerCount, decimal workHours) =>
+        new(workItemNumber, quantity, workerCount, workHours);
+
+    private sealed record SeedDailyReport(
+        string Code,
+        Guid SiteId,
+        Guid SupervisorUserId,
+        DateOnly ReportDate,
+        FieldDailyReportStatus Status,
+        string Weather,
+        string Note,
+        string? ReviewNote,
+        IReadOnlyList<SeedDailyReportLine> Lines);
+
+    private sealed record SeedDailyReportLine(int WorkItemNumber, decimal Quantity, int WorkerCount, decimal WorkHours);
 
     private static (string Name, decimal Total, decimal Labor, decimal Material, int Progress, decimal PlannedHours)[] BuildStageRows() =>
     [
