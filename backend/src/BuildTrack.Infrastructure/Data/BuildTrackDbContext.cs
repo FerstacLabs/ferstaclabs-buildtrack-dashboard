@@ -355,6 +355,8 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasKey(x => x.Id);
             entity.HasQueryFilter(x => CurrentTenantId == null || x.TenantId == CurrentTenantId);
             entity.Property(x => x.WorkspaceJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.NormalizedMigrationStatus).HasMaxLength(60);
+            entity.Property(x => x.NormalizedMigrationError).HasMaxLength(1000);
             entity.HasIndex(x => x.TenantId).IsUnique();
             entity.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -1006,7 +1008,6 @@ public sealed class BuildTrackDbContext : DbContext
         });
     }
 }
-
 
 
 

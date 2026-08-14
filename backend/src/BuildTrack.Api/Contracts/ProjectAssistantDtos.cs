@@ -7,6 +7,7 @@ public sealed record AiChatMessageDto(string Role, string Content);
 
 public sealed record ProjectAssistantChatRequest(
     string Message,
+    string? SelectedProjectId,
     Guid? SelectedSiteId,
     JsonElement? Context,
     IReadOnlyList<AiChatMessageDto>? History);

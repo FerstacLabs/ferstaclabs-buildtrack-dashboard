@@ -5,9 +5,14 @@ import type { AiAssistantMessage } from '../../types/projectProgress'
 interface AiAssistantState {
   tenantId?: string
   userId?: string
+  selectedProjectId?: string | null
+  selectedSiteId?: string | null
+  contextTouched: boolean
   messages: AiAssistantMessage[]
   messagesByScope: Record<string, AiAssistantMessage[]>
   setScope: (tenantId?: string, userId?: string) => void
+  setContext: (selectedProjectId?: string | null, selectedSiteId?: string | null) => void
+  initializeContext: (selectedProjectId?: string | null, selectedSiteId?: string | null) => void
   addMessage: (message: Omit<AiAssistantMessage, 'id' | 'createdAt'>) => void
   clearMessages: () => void
   migrateLegacyProjectProgressMessages: () => void
@@ -44,6 +49,9 @@ export const useAiAssistantStore = create<AiAssistantState>()(
     (set, get) => ({
       tenantId: undefined,
       userId: undefined,
+      selectedProjectId: null,
+      selectedSiteId: null,
+      contextTouched: false,
       messages: [],
       messagesByScope: {},
       setScope: (tenantId, userId) => {
@@ -54,6 +62,18 @@ export const useAiAssistantStore = create<AiAssistantState>()(
           messages: state.messagesByScope[nextKey] ?? [],
         }))
       },
+      setContext: (selectedProjectId, selectedSiteId) => set({
+        selectedProjectId: selectedProjectId ?? null,
+        selectedSiteId: selectedSiteId ?? null,
+        contextTouched: true,
+      }),
+      initializeContext: (selectedProjectId, selectedSiteId) => set((state) => {
+        if (state.contextTouched) return state
+        return {
+          selectedProjectId: selectedProjectId ?? null,
+          selectedSiteId: selectedSiteId ?? null,
+        }
+      }),
       addMessage: (message) => set((state) => {
         const key = scopeKey(state.tenantId, state.userId)
         const nextMessages = [
@@ -106,6 +126,9 @@ export const useAiAssistantStore = create<AiAssistantState>()(
       partialize: (state) => ({
         tenantId: state.tenantId,
         userId: state.userId,
+        selectedProjectId: state.selectedProjectId,
+        selectedSiteId: state.selectedSiteId,
+        contextTouched: state.contextTouched,
         messagesByScope: state.messagesByScope,
       }),
       version: 1,

@@ -13,6 +13,7 @@ public interface IBuildTrackAiContextService
 {
     Task<BuildTrackAiContextResult> BuildContextAsync(
         string message,
+        string? selectedProjectId,
         Guid? selectedSiteId,
         CancellationToken cancellationToken);
 }
@@ -35,6 +36,7 @@ public sealed class BuildTrackAiContextService(
 
     public async Task<BuildTrackAiContextResult> BuildContextAsync(
         string message,
+        string? selectedProjectId,
         Guid? selectedSiteId,
         CancellationToken cancellationToken)
     {
@@ -74,6 +76,27 @@ public sealed class BuildTrackAiContextService(
             .Select(x => new { x.Id, x.Name, x.Address, x.TimeZone })
             .ToListAsync(cancellationToken);
 
+        await BuildTrack.Api.ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, cancellationToken);
+        var normalizedSelectedProjectId = string.IsNullOrWhiteSpace(selectedProjectId) ? null : selectedProjectId.Trim();
+        var projects = await db.Projects.AsNoTracking()
+            .Where(x => x.TenantId == tenantId)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+        var selectedProject = normalizedSelectedProjectId is null
+            ? null
+            : projects.FirstOrDefault(x => string.Equals(x.Id, normalizedSelectedProjectId, StringComparison.OrdinalIgnoreCase));
+        if (normalizedSelectedProjectId is not null && selectedProject is null)
+        {
+            stopwatch.Stop();
+            return new BuildTrackAiContextResult(
+                false,
+                StatusCodes.Status404NotFound,
+                "Seçilmiş layihə bu tenant üçün tapılmadı.",
+                new JsonObject(),
+                modules.ToArray(),
+                stopwatch.Elapsed);
+        }
+
         var selectedSite = selectedSiteId is null ? null : sites.FirstOrDefault(x => x.Id == selectedSiteId.Value);
         if (selectedSiteId is not null && selectedSite is null)
         {
@@ -87,9 +110,29 @@ public sealed class BuildTrackAiContextService(
                 stopwatch.Elapsed);
         }
 
-        var siteIds = selectedSite is null
-            ? sites.Select(x => x.Id).ToArray()
-            : new[] { selectedSite.Id };
+        var projectSiteIds = selectedProject is null
+            ? null
+            : await db.ProjectSites.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.ProjectId == selectedProject.Id)
+                .Select(x => x.SiteId)
+                .ToArrayAsync(cancellationToken);
+        if (selectedProject is not null && selectedSite is not null && !projectSiteIds!.Contains(selectedSite.Id))
+        {
+            stopwatch.Stop();
+            return new BuildTrackAiContextResult(
+                false,
+                StatusCodes.Status400BadRequest,
+                "Seçilmiş obyekt seçilmiş layihəyə aid deyil.",
+                new JsonObject(),
+                modules.ToArray(),
+                stopwatch.Elapsed);
+        }
+
+        var siteIds = selectedSite is not null
+            ? new[] { selectedSite.Id }
+            : selectedProject is not null
+                ? projectSiteIds!
+                : sites.Select(x => x.Id).ToArray();
         var siteIdSet = siteIds.ToHashSet();
         var selectedSiteFilterId = selectedSite?.Id;
         var timeZone = AttendanceSchedulePolicy.ResolveTimeZone(selectedSite?.TimeZone ?? "Asia/Baku");
@@ -132,9 +175,13 @@ public sealed class BuildTrackAiContextService(
             })
             .ToListAsync(cancellationToken);
 
-        var workspace = await db.ProjectProgressWorkspaces.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.TenantId == tenantId, cancellationToken);
-        var projectProgress = BuildProjectProgressContext(workspace?.WorkspaceJson, selectedSite?.Id, message);
+        var projectProgress = await BuildProjectProgressContextAsync(
+            db,
+            tenantId,
+            selectedProject?.Id,
+            selectedSite?.Id,
+            message,
+            cancellationToken);
 
         var dailyReports = await db.SupervisorDailyReports.AsNoTracking()
             .Include(x => x.SupervisorUser)
@@ -279,6 +326,8 @@ public sealed class BuildTrackAiContextService(
                 ["generatedAt"] = DateTimeOffset.UtcNow,
                 ["timezone"] = selectedSite?.TimeZone ?? "Asia/Baku",
                 ["workDate"] = today.ToString("yyyy-MM-dd"),
+                ["selectedProjectId"] = selectedProject?.Id,
+                ["selectedProjectName"] = selectedProject?.Name ?? "Bütün layihələr",
                 ["selectedSiteId"] = selectedSite?.Id,
                 ["selectedSiteName"] = selectedSite?.Name ?? "Bütün obyektlər",
                 ["role"] = role,
@@ -445,9 +494,10 @@ public sealed class BuildTrackAiContextService(
 
         stopwatch.Stop();
         logger.LogInformation(
-            "AI context built. TenantId={TenantId}; UserId={UserId}; SelectedSiteId={SelectedSiteId}; Modules={Modules}; DurationMs={DurationMs}; ContextChars={ContextChars}",
+            "AI context built. TenantId={TenantId}; UserId={UserId}; SelectedProjectId={SelectedProjectId}; SelectedSiteId={SelectedSiteId}; Modules={Modules}; DurationMs={DurationMs}; ContextChars={ContextChars}",
             tenantId,
             userId,
+            selectedProject?.Id,
             selectedSite?.Id,
             string.Join(',', modules.OrderBy(x => x)),
             stopwatch.ElapsedMilliseconds,
@@ -478,6 +528,151 @@ public sealed class BuildTrackAiContextService(
     private static bool ContainsAny(string value, params string[] tokens) => tokens.Any(value.Contains);
 
     private static string NormalizeText(string value) => value.Trim().ToLowerInvariant();
+
+    private static async Task<ProjectProgressAiContext> BuildProjectProgressContextAsync(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        string? selectedProjectId,
+        Guid? selectedSiteId,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        var projectQuery = db.Projects.AsNoTracking().Where(x => x.TenantId == tenantId);
+        if (!string.IsNullOrWhiteSpace(selectedProjectId))
+        {
+            projectQuery = projectQuery.Where(x => x.Id == selectedProjectId);
+        }
+
+        var projects = await projectQuery.OrderBy(x => x.CreatedAt).ToListAsync(cancellationToken);
+        var projectIds = projects.Select(x => x.Id).ToArray();
+        var projectSiteQuery = db.ProjectSites.AsNoTracking()
+            .Include(x => x.Site)
+            .Where(x => x.TenantId == tenantId && projectIds.Contains(x.ProjectId));
+        if (selectedSiteId is not null)
+        {
+            projectSiteQuery = projectSiteQuery.Where(x => x.SiteId == selectedSiteId.Value);
+        }
+
+        var projectSites = await projectSiteQuery.OrderBy(x => x.Site!.Name).ToListAsync(cancellationToken);
+        var scopedSiteIds = selectedSiteId is not null
+            ? new[] { selectedSiteId.Value }
+            : projectSites.Select(x => x.SiteId).Distinct().ToArray();
+
+        var stageQuery = db.ProjectStages.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive && projectIds.Contains(x.ProjectId));
+        var workItemQuery = db.ProjectWorkItems.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive && projectIds.Contains(x.ProjectId));
+        var crewQuery = db.ProjectCrews.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive && projectIds.Contains(x.ProjectId));
+        var materialQuery = db.ProjectWorkItemMaterials.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive && projectIds.Contains(x.ProjectId));
+        if (selectedSiteId is not null)
+        {
+            stageQuery = stageQuery.Where(x => x.SiteId == selectedSiteId.Value);
+            workItemQuery = workItemQuery.Where(x => x.SiteId == selectedSiteId.Value);
+            crewQuery = crewQuery.Where(x => x.SiteId == selectedSiteId.Value);
+            materialQuery = materialQuery.Where(x => x.SiteId == selectedSiteId.Value);
+        }
+        else if (!string.IsNullOrWhiteSpace(selectedProjectId))
+        {
+            stageQuery = stageQuery.Where(x => x.SiteId == null || scopedSiteIds.Contains(x.SiteId.Value));
+            workItemQuery = workItemQuery.Where(x => scopedSiteIds.Contains(x.SiteId));
+            crewQuery = crewQuery.Where(x => x.SiteId == null || scopedSiteIds.Contains(x.SiteId.Value));
+            materialQuery = materialQuery.Where(x => x.SiteId == null || scopedSiteIds.Contains(x.SiteId.Value));
+        }
+
+        var stages = await stageQuery.OrderBy(x => x.Order).ThenBy(x => x.Name).ToListAsync(cancellationToken);
+        var workItems = await workItemQuery.OrderByDescending(x => x.TotalCost).ThenBy(x => x.Name).ToListAsync(cancellationToken);
+        var crews = await crewQuery.OrderBy(x => x.Name).ToListAsync(cancellationToken);
+        var materials = await materialQuery.OrderBy(x => x.Name).ToListAsync(cancellationToken);
+
+        if (projects.Count == 0)
+        {
+            return new ProjectProgressAiContext(new JsonObject
+            {
+                ["summary"] = new JsonObject { ["available"] = false },
+            }, 0, 0, 0);
+        }
+
+        var workItemTotal = workItems.Sum(x => x.TotalCost);
+        var stageTotal = stages.Sum(x => x.TotalCost);
+        var totalCost = workItemTotal > 0 ? workItemTotal : stageTotal;
+        var weightedProgress = totalCost > 0
+            ? Math.Round(workItems.Count > 0
+                ? workItems.Sum(x => x.TotalCost * x.ProgressPercent) / totalCost
+                : stages.Sum(x => x.TotalCost * x.ProgressPercent) / totalCost, 1)
+            : Math.Round(stages.Select(x => x.ProgressPercent).DefaultIfEmpty(0).Average(), 1);
+        var relevantWorkItems = SelectRelevantWorkItems(workItems, message, DetailLimit);
+
+        var context = new JsonObject
+        {
+            ["summary"] = new JsonObject
+            {
+                ["available"] = true,
+                ["source"] = "normalized-project-tables",
+                ["projectCount"] = projects.Count,
+                ["objectCount"] = projectSites.Count,
+                ["stageCount"] = stages.Count,
+                ["workItemCount"] = workItems.Count,
+                ["crewCount"] = crews.Count,
+                ["materialPlanCount"] = materials.Count,
+                ["totalCost"] = Math.Round(totalCost, 2),
+                ["laborCost"] = Math.Round(workItems.Sum(x => x.LaborTotal), 2),
+                ["materialCost"] = Math.Round(workItems.Sum(x => x.MaterialTotal), 2),
+                ["plannedHours"] = Math.Round(workItems.Sum(x => x.PlannedHours), 2),
+                ["actualHours"] = Math.Round(workItems.Sum(x => x.ActualHours), 2),
+                ["progressPercent"] = weightedProgress,
+                ["delayedStages"] = stages.Count(x => x.Status == ProjectEntityStatus.Delayed),
+            },
+            ["projects"] = new JsonArray(projects.Take(DetailLimit).Select(project => new JsonObject
+            {
+                ["id"] = project.Id,
+                ["name"] = project.Name,
+                ["status"] = project.Status.ToString(),
+                ["activeEstimateVersionId"] = project.ActiveEstimateVersionId,
+            }).ToArray<JsonNode?>()),
+            ["objects"] = new JsonArray(projectSites.Take(DetailLimit).Select(projectSite => new JsonObject
+            {
+                ["id"] = projectSite.SiteId,
+                ["projectId"] = projectSite.ProjectId,
+                ["name"] = projectSite.Site?.Name,
+                ["status"] = projectSite.Status.ToString(),
+            }).ToArray<JsonNode?>()),
+            ["stages"] = new JsonArray(stages.OrderByDescending(x => x.TotalCost).Take(DetailLimit).Select(stage => new JsonObject
+            {
+                ["id"] = stage.Id,
+                ["objectId"] = stage.SiteId,
+                ["name"] = stage.Name,
+                ["status"] = stage.Status.ToString(),
+                ["progressPercent"] = stage.ProgressPercent,
+                ["totalCost"] = stage.TotalCost,
+                ["plannedHours"] = stage.PlannedHours,
+                ["actualHours"] = stage.ActualHours,
+            }).ToArray<JsonNode?>()),
+            ["relevantWorkItems"] = new JsonArray(relevantWorkItems.Select(item => new JsonObject
+            {
+                ["id"] = item.Id,
+                ["objectId"] = item.SiteId,
+                ["stageId"] = item.StageId,
+                ["name"] = item.Name,
+                ["unit"] = item.Unit,
+                ["quantity"] = item.Quantity,
+                ["completedQuantity"] = item.CompletedQuantity,
+                ["status"] = item.Status.ToString(),
+                ["progressPercent"] = item.ProgressPercent,
+                ["totalCost"] = item.TotalCost,
+            }).ToArray<JsonNode?>()),
+            ["crews"] = new JsonArray(crews.Take(DetailLimit).Select(crew => new JsonObject
+            {
+                ["id"] = crew.Id,
+                ["objectId"] = crew.SiteId,
+                ["name"] = crew.Name,
+                ["type"] = crew.Type,
+                ["foremanName"] = crew.ForemanName,
+                ["workerCount"] = crew.WorkerCount,
+                ["activeWorkStageId"] = crew.ActiveWorkStageId,
+                ["activeWorkItemId"] = crew.ActiveWorkItemId,
+            }).ToArray<JsonNode?>()),
+        };
+
+        return new ProjectProgressAiContext(context, stages.Count, workItems.Count, weightedProgress);
+    }
 
     private static ProjectProgressAiContext BuildProjectProgressContext(string? workspaceJson, Guid? selectedSiteId, string message)
     {
@@ -697,6 +892,18 @@ public sealed class BuildTrackAiContextService(
             if (row is not JsonObject obj) continue;
             if (selected is null || string.Equals(GetString(obj["id"]), selected, StringComparison.OrdinalIgnoreCase)) yield return obj.DeepClone();
         }
+    }
+
+    private static IReadOnlyList<ProjectWorkItemRecord> SelectRelevantWorkItems(IReadOnlyList<ProjectWorkItemRecord> rows, string message, int limit)
+    {
+        var normalizedMessage = NormalizeText(message);
+        var matching = rows
+            .Where(row => NormalizeText(row.Name)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Any(token => token.Length > 2 && normalizedMessage.Contains(token)))
+            .Take(limit)
+            .ToArray();
+        return matching.Length > 0 ? matching : rows.Take(limit).ToArray();
     }
 
     private static IReadOnlyList<JsonObject> SelectRelevantRows(IReadOnlyList<JsonObject> rows, string message, string propertyName, int limit)

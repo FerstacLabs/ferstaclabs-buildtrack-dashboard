@@ -13,6 +13,7 @@ namespace BuildTrack.Api;
 public static class ProjectProgressEndpoints
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    internal const int CurrentNormalizedMigrationVersion = 1;
 
     public static WebApplication MapProjectProgressEndpoints(this WebApplication app)
     {
@@ -87,6 +88,7 @@ public static class ProjectProgressEndpoints
                 workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
                 workspace.UpdatedAt = DateTimeOffset.UtcNow;
                 await ImportWorkspaceJsonIntoCanonicalAsync(db, tenantId, workspace.WorkspaceJson, ct);
+                MarkWorkspaceMigrationSucceeded(workspace, DateTimeOffset.UtcNow, "ManualWorkspaceSave");
                 return Results.Ok(new { saved = true, workspaceId = workspace.Id, updatedAt = workspace.UpdatedAt });
             },
             ct);
@@ -117,6 +119,7 @@ public static class ProjectProgressEndpoints
                 workspace.LegacyBrowserImportedAt = DateTimeOffset.UtcNow;
                 workspace.UpdatedAt = DateTimeOffset.UtcNow;
                 await ImportWorkspaceJsonIntoCanonicalAsync(db, tenantId, workspace.WorkspaceJson, ct);
+                MarkWorkspaceMigrationSucceeded(workspace, DateTimeOffset.UtcNow, "LegacyBrowserImport");
                 return Results.Ok(new { imported = true, workspaceId = workspace.Id, legacyBrowserImportedAt = workspace.LegacyBrowserImportedAt });
             },
             ct);
@@ -680,22 +683,36 @@ public static class ProjectProgressEndpoints
         ex.InnerException is PostgresException postgresException
         && postgresException.SqlState == PostgresErrorCodes.UniqueViolation;
 
-    private static async Task EnsureCanonicalProjectProgressAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
+    internal static async Task EnsureCanonicalProjectProgressAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
     {
         var hasProject = await db.Projects.AnyAsync(x => x.TenantId == tenantId, ct);
         var hasWorkItems = await db.ProjectWorkItems.AnyAsync(x => x.TenantId == tenantId, ct);
-        var workspace = await db.ProjectProgressWorkspaces.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
+        var workspace = db.ProjectProgressWorkspaces.Local.FirstOrDefault(x => x.TenantId == tenantId)
+            ?? await db.ProjectProgressWorkspaces.FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
 
-        if (workspace is not null && (!hasProject || !hasWorkItems))
+        if (workspace is not null && workspace.NormalizedMigrationVersion < CurrentNormalizedMigrationVersion)
         {
-            await ImportWorkspaceJsonIntoCanonicalAsync(db, tenantId, workspace.WorkspaceJson, ct);
-            await db.SaveChangesAsync(ct);
-            return;
+            if (ShouldRunLegacyWorkspaceMigration(workspace.WorkspaceJson, hasProject, hasWorkItems))
+            {
+                await RunLegacyWorkspaceMigrationTransactionAsync(db, tenantId, workspace, ct);
+                return;
+            }
+
+            if (hasProject)
+            {
+                MarkWorkspaceMigrationSucceeded(workspace, DateTimeOffset.UtcNow, "CanonicalDataAlreadyPresent");
+                await db.SaveChangesAsync(ct);
+                return;
+            }
         }
 
         if (!hasProject)
         {
             await CreateDefaultCanonicalProjectAsync(db, tenantId, ct);
+            if (workspace is not null)
+            {
+                MarkWorkspaceMigrationSucceeded(workspace, DateTimeOffset.UtcNow, "DefaultCanonicalProjectCreated");
+            }
             await db.SaveChangesAsync(ct);
             return;
         }
@@ -704,30 +721,131 @@ public static class ProjectProgressEndpoints
         await db.SaveChangesAsync(ct);
     }
 
+    private static bool ShouldRunLegacyWorkspaceMigration(string workspaceJson, bool hasProject, bool hasWorkItems)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceJson)) return false;
+        var root = JsonNode.Parse(workspaceJson)?.AsObject() ?? new JsonObject();
+        var hasLegacyProjects = root["projects"] is JsonArray projects && projects.Count > 0;
+        var hasLegacyWorkItems = root["workItems"] is JsonArray workItems && workItems.Count > 0;
+        var hasLegacyStages = root["stages"] is JsonArray stages && stages.Count > 0;
+        return (hasLegacyProjects || hasLegacyStages || hasLegacyWorkItems) && (!hasProject || !hasWorkItems);
+    }
+
+    private static async Task RunLegacyWorkspaceMigrationTransactionAsync(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        ProjectProgressWorkspace workspace,
+        CancellationToken ct)
+    {
+        IDbContextTransaction? transaction = null;
+        if (db.Database.IsRelational())
+        {
+            transaction = await db.Database.BeginTransactionAsync(ct);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        try
+        {
+            await ImportWorkspaceJsonIntoCanonicalAsync(db, tenantId, workspace.WorkspaceJson, ct);
+            MarkWorkspaceMigrationSucceeded(workspace, now, "LegacyWorkspaceInitialMigration");
+            workspace.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync(ct);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+    }
+
+    private static void MarkWorkspaceMigrationSucceeded(ProjectProgressWorkspace workspace, DateTimeOffset migratedAt, string status)
+    {
+        workspace.NormalizedMigrationVersion = CurrentNormalizedMigrationVersion;
+        workspace.NormalizedMigrationStatus = status;
+        workspace.NormalizedMigratedAt = migratedAt;
+        workspace.NormalizedMigrationError = null;
+    }
+
+    private static async Task<ProjectRecord?> FindProjectAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.Projects.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.Projects.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<ProjectEstimateVersionRecord?> FindEstimateVersionAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.ProjectEstimateVersions.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.ProjectEstimateVersions.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<ProjectSiteRecord?> FindProjectSiteAsync(BuildTrackDbContext db, Guid tenantId, string projectId, Guid siteId, CancellationToken ct) =>
+        db.ProjectSites.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.ProjectId, projectId, StringComparison.OrdinalIgnoreCase) && x.SiteId == siteId)
+        ?? await db.ProjectSites.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ProjectId == projectId && x.SiteId == siteId, ct);
+
+    private static async Task<ProjectStageRecord?> FindProjectStageAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.ProjectStages.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.ProjectStages.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<ProjectWorkItemRecord?> FindProjectWorkItemAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.ProjectWorkItems.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.ProjectWorkItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<ProjectCrewRecord?> FindProjectCrewAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.ProjectCrews.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.ProjectCrews.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<ProjectWorkItemMaterialRecord?> FindProjectMaterialAsync(BuildTrackDbContext db, Guid tenantId, string id, CancellationToken ct) =>
+        db.ProjectWorkItemMaterials.Local.FirstOrDefault(x => x.TenantId == tenantId && string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+        ?? await db.ProjectWorkItemMaterials.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+
+    private static async Task<FieldSmetaItem?> FindFieldSmetaByWorkItemAsync(BuildTrackDbContext db, Guid tenantId, Guid siteId, string workItemId, CancellationToken ct) =>
+        db.FieldSmetaItems.Local.FirstOrDefault(x => x.TenantId == tenantId && x.SiteId == siteId && string.Equals(x.ProjectWorkItemId, workItemId, StringComparison.OrdinalIgnoreCase))
+        ?? await db.FieldSmetaItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == siteId && x.ProjectWorkItemId == workItemId, ct);
+
+    private static async Task<FieldSmetaItem?> FindActiveFieldSmetaByNameAsync(BuildTrackDbContext db, Guid tenantId, Guid siteId, string workName, CancellationToken ct) =>
+        db.FieldSmetaItems.Local.FirstOrDefault(x => x.TenantId == tenantId && x.SiteId == siteId && x.IsActive && string.Equals(x.WorkName, workName, StringComparison.Ordinal))
+        ?? await db.FieldSmetaItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == siteId && x.IsActive && x.WorkName == workName, ct);
+
     private static async Task CreateDefaultCanonicalProjectAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
     {
         var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tenantId, ct);
         var projectId = tenantId.ToString();
         var estimateId = $"{tenantId:N}-estimate";
         var now = DateTimeOffset.UtcNow;
-        db.Projects.Add(new ProjectRecord
+        var project = await FindProjectAsync(db, tenantId, projectId, ct);
+        if (project is null)
         {
-            Id = projectId,
-            TenantId = tenantId,
-            Name = tenant?.CompanyName ?? "BuildTrack layihəsi",
-            Currency = "AZN",
-            ClientName = tenant?.CompanyName,
-            ActiveEstimateVersionId = estimateId,
-            CreatedAt = now,
-        });
-        db.ProjectEstimateVersions.Add(new ProjectEstimateVersionRecord
+            project = new ProjectRecord
+            {
+                Id = projectId,
+                TenantId = tenantId,
+                CreatedAt = now,
+            };
+            db.Projects.Add(project);
+        }
+
+        project.Name = tenant?.CompanyName ?? "BuildTrack layihəsi";
+        project.Currency = "AZN";
+        project.ClientName = tenant?.CompanyName;
+        project.ActiveEstimateVersionId = estimateId;
+        project.UpdatedAt = now;
+
+        var estimate = await FindEstimateVersionAsync(db, tenantId, estimateId, ct);
+        if (estimate is null)
         {
-            Id = estimateId,
-            TenantId = tenantId,
-            ProjectId = projectId,
-            Name = "Cari smeta",
-            CreatedAt = now,
-        });
+            estimate = new ProjectEstimateVersionRecord
+            {
+                Id = estimateId,
+                TenantId = tenantId,
+                CreatedAt = now,
+            };
+            db.ProjectEstimateVersions.Add(estimate);
+        }
+
+        estimate.ProjectId = projectId;
+        estimate.Name = "Cari smeta";
+        estimate.UpdatedAt = now;
         await EnsureProjectSitesFromTenantSitesAsync(db, tenantId, ct, projectId);
         await ImportFieldSmetaItemsIntoCanonicalAsync(db, tenantId, projectId, estimateId, ct);
     }
@@ -735,14 +853,23 @@ public static class ProjectProgressEndpoints
     private static async Task EnsureProjectSitesFromTenantSitesAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct, string? projectId = null)
     {
         var project = projectId is not null
-            ? await db.Projects.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == projectId, ct)
+            ? await FindProjectAsync(db, tenantId, projectId, ct)
             : await db.Projects.OrderBy(x => x.CreatedAt).FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
         if (project is null) return;
 
-        var existing = await db.ProjectSites
+        if (projectId is null)
+        {
+            var hasExplicitProjectSites = db.ProjectSites.Local.Any(x => x.TenantId == tenantId && x.ProjectId == project.Id)
+                || await db.ProjectSites.AnyAsync(x => x.TenantId == tenantId && x.ProjectId == project.Id, ct);
+            if (hasExplicitProjectSites) return;
+        }
+
+        var existing = (await db.ProjectSites
             .Where(x => x.TenantId == tenantId && x.ProjectId == project.Id)
             .Select(x => x.SiteId)
-            .ToListAsync(ct);
+            .ToListAsync(ct))
+            .Concat(db.ProjectSites.Local.Where(x => x.TenantId == tenantId && x.ProjectId == project.Id).Select(x => x.SiteId))
+            .ToArray();
         var existingSet = existing.ToHashSet();
         var sites = await db.Sites.Where(x => x.TenantId == tenantId).ToArrayAsync(ct);
         foreach (var site in sites.Where(site => !existingSet.Contains(site.Id)))
@@ -771,13 +898,16 @@ public static class ProjectProgressEndpoints
         if (smetaItems.Length == 0) return;
 
         var stageIdsByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var order = await db.ProjectStages.Where(x => x.TenantId == tenantId && x.ProjectId == projectId).Select(x => (int?)x.Order).MaxAsync(ct) ?? 0;
+        var order = Math.Max(
+            await db.ProjectStages.Where(x => x.TenantId == tenantId && x.ProjectId == projectId).Select(x => (int?)x.Order).MaxAsync(ct) ?? 0,
+            db.ProjectStages.Local.Where(x => x.TenantId == tenantId && x.ProjectId == projectId).Select(x => (int?)x.Order).Max() ?? 0);
         foreach (var group in smetaItems.GroupBy(x => x.StageName))
         {
             var first = group.First();
             var stageId = SlugId("stage", $"{first.SiteId:N}-{group.Key}");
             stageIdsByName[group.Key] = stageId;
-            if (await db.ProjectStages.AnyAsync(x => x.TenantId == tenantId && x.Id == stageId, ct)) continue;
+            var stage = await FindProjectStageAsync(db, tenantId, stageId, ct);
+            if (stage is not null) continue;
 
             db.ProjectStages.Add(new ProjectStageRecord
             {
@@ -796,7 +926,8 @@ public static class ProjectProgressEndpoints
         foreach (var smetaItem in smetaItems)
         {
             var workItemId = string.IsNullOrWhiteSpace(smetaItem.ProjectWorkItemId) ? smetaItem.Id.ToString() : smetaItem.ProjectWorkItemId!;
-            if (await db.ProjectWorkItems.AnyAsync(x => x.TenantId == tenantId && x.Id == workItemId, ct)) continue;
+            var workItem = await FindProjectWorkItemAsync(db, tenantId, workItemId, ct);
+            if (workItem is not null) continue;
 
             smetaItem.ProjectWorkItemId = workItemId;
             db.ProjectWorkItems.Add(new ProjectWorkItemRecord
@@ -831,7 +962,7 @@ public static class ProjectProgressEndpoints
             {
                 var id = CleanText(GetString(node["id"])) ?? tenantId.ToString();
                 projectIds.Add(id);
-                var project = await db.Projects.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+                var project = await FindProjectAsync(db, tenantId, id, ct);
                 if (project is null)
                 {
                     project = new ProjectRecord { Id = id, TenantId = tenantId, CreatedAt = now };
@@ -853,17 +984,19 @@ public static class ProjectProgressEndpoints
         }
 
         var defaultProjectId = CleanText(GetString(root["activeProjectId"])) ?? projectIds.First();
-        if (!await db.Projects.AnyAsync(x => x.TenantId == tenantId && x.Id == defaultProjectId, ct))
+        var defaultProject = await FindProjectAsync(db, tenantId, defaultProjectId, ct);
+        if (defaultProject is null)
         {
             var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == tenantId, ct);
-            db.Projects.Add(new ProjectRecord
+            defaultProject = new ProjectRecord
             {
                 Id = defaultProjectId,
                 TenantId = tenantId,
                 Name = tenant?.CompanyName ?? "BuildTrack layihəsi",
                 Currency = "AZN",
                 CreatedAt = now,
-            });
+            };
+            db.Projects.Add(defaultProject);
         }
 
         if (root["estimateVersions"] is JsonArray estimates)
@@ -872,7 +1005,7 @@ public static class ProjectProgressEndpoints
             {
                 var id = CleanText(GetString(node["id"]));
                 if (string.IsNullOrWhiteSpace(id)) continue;
-                var estimate = await db.ProjectEstimateVersions.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+                var estimate = await FindEstimateVersionAsync(db, tenantId, id, ct);
                 if (estimate is null)
                 {
                     estimate = new ProjectEstimateVersionRecord { Id = id, TenantId = tenantId, CreatedAt = now };
@@ -904,7 +1037,7 @@ public static class ProjectProgressEndpoints
             if (!await db.Sites.AnyAsync(x => x.TenantId == tenantId && x.Id == siteId, ct)) continue;
 
             var projectId = CleanText(GetString(node["projectId"])) ?? defaultProjectId;
-            var projectSite = await db.ProjectSites.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ProjectId == projectId && x.SiteId == siteId, ct);
+            var projectSite = await FindProjectSiteAsync(db, tenantId, projectId, siteId, ct);
             if (projectSite is null)
             {
                 projectSite = new ProjectSiteRecord
@@ -934,7 +1067,7 @@ public static class ProjectProgressEndpoints
         {
             var id = CleanText(GetString(node["id"]));
             if (string.IsNullOrWhiteSpace(id)) continue;
-            var stage = await db.ProjectStages.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+            var stage = await FindProjectStageAsync(db, tenantId, id, ct);
             if (stage is null)
             {
                 stage = new ProjectStageRecord { Id = id, TenantId = tenantId, ProjectId = defaultProjectId, CreatedAt = DateTimeOffset.UtcNow };
@@ -959,7 +1092,7 @@ public static class ProjectProgressEndpoints
             var siteId = await ResolveSiteIdAsync(db, tenantId, GetString(node["objectId"]), ct);
             if (siteId is null) continue;
 
-            var item = await db.ProjectWorkItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+            var item = await FindProjectWorkItemAsync(db, tenantId, id, ct);
             if (item is null)
             {
                 item = new ProjectWorkItemRecord
@@ -989,7 +1122,7 @@ public static class ProjectProgressEndpoints
         {
             var id = CleanText(GetString(node["id"]));
             if (string.IsNullOrWhiteSpace(id)) continue;
-            var crew = await db.ProjectCrews.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+            var crew = await FindProjectCrewAsync(db, tenantId, id, ct);
             if (crew is null)
             {
                 crew = new ProjectCrewRecord { Id = id, TenantId = tenantId, ProjectId = defaultProjectId, CreatedAt = DateTimeOffset.UtcNow };
@@ -1010,7 +1143,7 @@ public static class ProjectProgressEndpoints
         {
             var id = CleanText(GetString(node["id"]));
             if (string.IsNullOrWhiteSpace(id)) continue;
-            var material = await db.ProjectWorkItemMaterials.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+            var material = await FindProjectMaterialAsync(db, tenantId, id, ct);
             if (material is null)
             {
                 material = new ProjectWorkItemMaterialRecord { Id = id, TenantId = tenantId, ProjectId = defaultProjectId, CreatedAt = DateTimeOffset.UtcNow };
@@ -1291,26 +1424,30 @@ public static class ProjectProgressEndpoints
 
     private static async Task UpsertFieldSmetaItemForWorkItemAsync(BuildTrackDbContext db, Guid tenantId, ProjectWorkItemRecord item, CancellationToken ct)
     {
-        var stage = await db.ProjectStages.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == item.StageId, ct);
+        var stage = await FindProjectStageAsync(db, tenantId, item.StageId, ct);
         var stageName = stage?.Name ?? "Smeta";
-        var collision = await db.FieldSmetaItems.FirstOrDefaultAsync(x =>
-            x.TenantId == tenantId
-            && x.SiteId == item.SiteId
-            && x.IsActive
-            && x.WorkName == item.Name
-            && x.ProjectWorkItemId != item.Id,
-            ct);
-        if (collision is not null)
+        var smetaItem = await FindFieldSmetaByWorkItemAsync(db, tenantId, item.SiteId, item.Id, ct);
+        var sameNameRow = await FindActiveFieldSmetaByNameAsync(db, tenantId, item.SiteId, item.Name, ct);
+        if (sameNameRow is not null && !string.Equals(sameNameRow.ProjectWorkItemId, item.Id, StringComparison.OrdinalIgnoreCase))
         {
-            throw new ProjectProgressSmetaSyncException(
-                "FIELD_SMETA_DUPLICATE_WORK_NAME",
-                "Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
-                [
-                    new ProjectProgressSmetaSyncConflict(collision.Id, null, item.SiteId, item.Name, item.Id, collision.ProjectWorkItemId, "CanonicalWorkItemNameCollision"),
-                ]);
+            var linkedCanonicalItem = string.IsNullOrWhiteSpace(sameNameRow.ProjectWorkItemId)
+                ? null
+                : await FindProjectWorkItemAsync(db, tenantId, sameNameRow.ProjectWorkItemId!, ct);
+
+            if (linkedCanonicalItem is not null && !string.Equals(linkedCanonicalItem.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ProjectProgressSmetaSyncException(
+                    "FIELD_SMETA_DUPLICATE_WORK_NAME",
+                    "Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
+                    [
+                        new ProjectProgressSmetaSyncConflict(sameNameRow.Id, null, item.SiteId, item.Name, item.Id, sameNameRow.ProjectWorkItemId, "CanonicalWorkItemNameCollision"),
+                    ]);
+            }
+
+            smetaItem ??= sameNameRow;
+            smetaItem.ProjectWorkItemId = item.Id;
         }
 
-        var smetaItem = await db.FieldSmetaItems.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == item.SiteId && x.ProjectWorkItemId == item.Id, ct);
         if (smetaItem is null)
         {
             smetaItem = new FieldSmetaItem

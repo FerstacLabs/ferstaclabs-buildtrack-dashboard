@@ -117,6 +117,210 @@ public sealed class ProjectProgressWorkspacePersistenceTests
         Assert.Equal("object-b", document.RootElement.GetProperty("objects")[0].GetProperty("id").GetString());
     }
 
+    [Fact]
+    public async Task LegacyMigrationUsesTrackedProjectWhenActiveProjectMatchesProjectArray()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        await using var db = CreateDb(Guid.NewGuid().ToString("N"), new InMemoryDatabaseRoot(), tenantId);
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "TRACKER", CompanyName = "Tracker Tenant" });
+        db.Sites.Add(new Site { Id = siteId, TenantId = tenantId, Name = "Tracker Site", TimeZone = "Asia/Baku" });
+        db.ProjectProgressWorkspaces.Add(new ProjectProgressWorkspace
+        {
+            TenantId = tenantId,
+            WorkspaceJson = ProjectProgressEndpoints.NormalizeWorkspaceJsonForTenant(
+                CreateWorkspaceJson(tenantId.ToString(), siteId.ToString(), "stage-1", "work-1"),
+                tenantId),
+        });
+        await db.SaveChangesAsync();
+
+        await ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, CancellationToken.None);
+
+        Assert.Equal(1, await db.Projects.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal("project-1", (await db.Projects.SingleAsync(x => x.TenantId == tenantId)).Id);
+        Assert.Equal(ProjectProgressEndpoints.CurrentNormalizedMigrationVersion, (await db.ProjectProgressWorkspaces.SingleAsync(x => x.TenantId == tenantId)).NormalizedMigrationVersion);
+    }
+
+    [Fact]
+    public async Task LegacyMigrationRestoresBakDemoLikeWorkspaceCountsAndIsIdempotent()
+    {
+        var tenantId = Guid.Parse("ba100000-0000-4000-9000-000000000001");
+        var siteIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        await using var db = CreateDb(Guid.NewGuid().ToString("N"), new InMemoryDatabaseRoot(), tenantId);
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "BAK-DEMO", CompanyName = "BAKİNİTY MMC" });
+        foreach (var (siteId, index) in siteIds.Select((id, index) => (id, index)))
+        {
+            db.Sites.Add(new Site { Id = siteId, TenantId = tenantId, Name = $"BAK object {index + 1}", TimeZone = "Asia/Baku" });
+        }
+
+        db.ProjectProgressWorkspaces.Add(new ProjectProgressWorkspace
+        {
+            TenantId = tenantId,
+            WorkspaceJson = ProjectProgressEndpoints.NormalizeWorkspaceJsonForTenant(CreateBakDemoLikeWorkspaceJson(tenantId, siteIds), tenantId),
+        });
+        await db.SaveChangesAsync();
+
+        await ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, CancellationToken.None);
+
+        await AssertBakDemoLikeCountsAsync(db, tenantId, projects: 1, sites: 4, estimates: 1, stages: 9, workItems: 10, crews: 6, materials: 6);
+        var workspace = await db.ProjectProgressWorkspaces.SingleAsync(x => x.TenantId == tenantId);
+        Assert.Equal(ProjectProgressEndpoints.CurrentNormalizedMigrationVersion, workspace.NormalizedMigrationVersion);
+        Assert.NotNull(workspace.NormalizedMigratedAt);
+
+        await ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, CancellationToken.None);
+
+        await AssertBakDemoLikeCountsAsync(db, tenantId, projects: 1, sites: 4, estimates: 1, stages: 9, workItems: 10, crews: 6, materials: 6);
+    }
+
+    [Fact]
+    public async Task PostMigrationCanonicalEditIsNotOverwrittenByLegacyWorkspace()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        await using var db = CreateDb(Guid.NewGuid().ToString("N"), new InMemoryDatabaseRoot(), tenantId);
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "EDIT", CompanyName = "Edit Tenant" });
+        db.Sites.Add(new Site { Id = siteId, TenantId = tenantId, Name = "Edit Site", TimeZone = "Asia/Baku" });
+        db.ProjectProgressWorkspaces.Add(new ProjectProgressWorkspace
+        {
+            TenantId = tenantId,
+            WorkspaceJson = ProjectProgressEndpoints.NormalizeWorkspaceJsonForTenant(
+                CreateWorkspaceJson(tenantId.ToString(), siteId.ToString(), "stage-1", "work-1"),
+                tenantId),
+        });
+        await db.SaveChangesAsync();
+        await ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, CancellationToken.None);
+
+        var item = await db.ProjectWorkItems.SingleAsync(x => x.TenantId == tenantId && x.Id == "work-1");
+        item.Name = "Server canonical edit";
+        await db.SaveChangesAsync();
+
+        await ProjectProgressEndpoints.EnsureCanonicalProjectProgressAsync(db, tenantId, CancellationToken.None);
+
+        Assert.Equal("Server canonical edit", (await db.ProjectWorkItems.SingleAsync(x => x.TenantId == tenantId && x.Id == "work-1")).Name);
+    }
+
+    private static async Task AssertBakDemoLikeCountsAsync(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        int projects,
+        int sites,
+        int estimates,
+        int stages,
+        int workItems,
+        int crews,
+        int materials)
+    {
+        Assert.Equal(projects, await db.Projects.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(sites, await db.ProjectSites.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(estimates, await db.ProjectEstimateVersions.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(stages, await db.ProjectStages.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(workItems, await db.ProjectWorkItems.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(crews, await db.ProjectCrews.CountAsync(x => x.TenantId == tenantId));
+        Assert.Equal(materials, await db.ProjectWorkItemMaterials.CountAsync(x => x.TenantId == tenantId));
+    }
+
+    private static JsonElement CreateBakDemoLikeWorkspaceJson(Guid tenantId, Guid[] siteIds)
+    {
+        var projectId = "BAK-DEMO-PROJECT";
+        var estimateId = "BAK-DEMO-ESTIMATE-V1";
+        var stageIds = Enumerable.Range(1, 9).Select(index => $"bak-stage-{index}").ToArray();
+        var workItems = Enumerable.Range(1, 10)
+            .Select(index => new
+            {
+                id = $"bak-work-{index}",
+                objectId = siteIds[(index - 1) % siteIds.Length].ToString(),
+                projectId,
+                estimateVersionId = estimateId,
+                stageId = stageIds[(index - 1) % stageIds.Length],
+                name = $"BAK smeta işi {index}",
+                unit = "m2",
+                quantity = 100 + index,
+                completedQuantity = index,
+                laborUnitPrice = 5,
+                laborTotal = 500 + index,
+                materialUnit = "m2",
+                materialQuantity = 20 + index,
+                materialUnitPrice = 3,
+                materialTotal = 300 + index,
+                totalCost = 800 + index,
+                plannedHours = 40 + index,
+                actualHours = index,
+                assignedCrewId = $"bak-crew-{((index - 1) % 6) + 1}",
+                status = "InProgress",
+                progressPercent = 10 + index,
+                plannedStartDate = "2026-08-01",
+                plannedEndDate = "2026-08-30",
+                notes = $"Qeyd {index}",
+            })
+            .ToArray();
+
+        return JsonSerializer.SerializeToElement(new
+        {
+            workspaceTenantId = tenantId.ToString(),
+            projects = new[] { new { id = projectId, name = "BAKİNİTY Residence", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = estimateId } },
+            activeProjectId = projectId,
+            objects = siteIds.Select((siteId, index) => new { id = siteId.ToString(), name = $"BAK object {index + 1}", projectId, status = "InProgress", plannedStartDate = "2026-08-01" }).ToArray(),
+            project = new { id = projectId, name = "BAKİNİTY Residence", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = estimateId },
+            estimateVersions = new[] { new { id = estimateId, projectId, name = "BAKİNİTY demo smeta v1", createdAt = DateTimeOffset.UtcNow, totalAmount = 316822.70m, notes = "BAK demo" } },
+            summary = new { totalAmount = 316822.70m, laborAmount = 69717.50m, materialAmount = 205730.50m, hiddenCostAmount = 41324.70m, currency = "AZN" },
+            stages = stageIds.Select((stageId, index) => new
+            {
+                id = stageId,
+                objectId = siteIds[index % siteIds.Length].ToString(),
+                projectId,
+                estimateVersionId = estimateId,
+                name = $"BAK etap {index + 1}",
+                order = index + 1,
+                totalCost = 1000 + index,
+                laborCost = 400 + index,
+                materialCost = 600 + index,
+                plannedStartDate = "2026-08-01",
+                plannedEndDate = "2026-08-30",
+                status = "InProgress",
+                progressPercent = 20 + index,
+                plannedHours = 80 + index,
+                actualHours = 10 + index,
+            }).ToArray(),
+            workItems,
+            crews = Enumerable.Range(1, 6).Select(index => new
+            {
+                id = $"bak-crew-{index}",
+                objectId = siteIds[(index - 1) % siteIds.Length].ToString(),
+                projectId,
+                name = $"BAK briqada {index}",
+                type = "Tikinti",
+                foremanName = $"Prorab {index}",
+                workerCount = 5 + index,
+                plannedDailyHours = 8,
+                activeWorkStageId = stageIds[(index - 1) % stageIds.Length],
+                activeWorkItemId = $"bak-work-{index}",
+                status = "InProgress",
+                progressPercent = 15 + index,
+            }).ToArray(),
+            workerAssignments = Array.Empty<object>(),
+            materials = Enumerable.Range(1, 6).Select(index => new
+            {
+                id = $"bak-material-{index}",
+                objectId = siteIds[(index - 1) % siteIds.Length].ToString(),
+                projectId,
+                name = $"BAK material {index}",
+                unit = "ədəd",
+                quantity = 10 + index,
+                usedQuantity = index,
+                remainingQuantity = 10,
+                unitPrice = 2,
+                linkedStageId = stageIds[(index - 1) % stageIds.Length],
+                linkedWorkItemId = $"bak-work-{index}",
+            }).ToArray(),
+            attendanceSessions = Array.Empty<object>(),
+            workHourAllocations = Array.Empty<object>(),
+            dailyReports = Array.Empty<object>(),
+            issues = Array.Empty<object>(),
+            risks = Array.Empty<object>(),
+            assistantMessages = Array.Empty<object>(),
+        });
+    }
+
     private static JsonElement CreateWorkspaceJson(string workspaceTenantId, string objectId, string stageId, string workItemId) =>
         JsonSerializer.SerializeToElement(new
         {

@@ -377,7 +377,7 @@ app.MapPost("/api/ai/project-assistant/chat", async (
     AiOptions options,
     CancellationToken ct) =>
 {
-    var context = await contextService.BuildContextAsync(request.Message, request.SelectedSiteId, ct);
+    var context = await contextService.BuildContextAsync(request.Message, request.SelectedProjectId, request.SelectedSiteId, ct);
     if (!context.Success)
     {
         return Results.Json(

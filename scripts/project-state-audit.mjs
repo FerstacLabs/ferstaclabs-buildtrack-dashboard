@@ -9,6 +9,8 @@ const allowedFiles = new Set([
   path.normalize('src/components/filters/ObjectFilter.tsx'),
   path.normalize('src/stores/projectSelectionStore.ts'),
   path.normalize('src/features/projectProgress/projectProgressStore.ts'),
+  path.normalize('src/features/aiAssistant/AiAssistant.tsx'),
+  path.normalize('src/features/aiAssistant/aiAssistantStore.ts'),
 ])
 
 const patterns = [

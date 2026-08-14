@@ -1,6 +1,6 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
-import { Button, Drawer, Input, Tag, Tooltip } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { Button, Drawer, Input, Select, Tag, Tooltip } from 'antd'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { tryApiRequest } from '../../shared/api/client'
 import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { useAuthStore } from '../auth/authStore'
@@ -71,15 +71,24 @@ const sourceLabel = (source?: string) => {
   return 'Yerli xülasə'
 }
 
+const AI_ALL_PROJECTS_VALUE = '__ai_all_projects__'
+const AI_ALL_SITES_VALUE = '__ai_all_sites__'
+
 export const AiAssistant = () => {
   const tenantId = useAuthStore((state) => state.tenant?.id)
   const userId = useAuthStore((state) => state.user?.id)
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
-  const selectedObjectName = useProjectProgressStore((state) => state.objects.find((object) => object.id === selectedObjectId)?.name)
+  const projects = useProjectProgressStore((state) => state.projects)
+  const objects = useProjectProgressStore((state) => state.objects)
+  const selectedObject = useProjectProgressStore((state) => state.objects.find((object) => object.id === selectedObjectId))
   const messages = useAiAssistantStore((state) => state.messages)
+  const aiSelectedProjectId = useAiAssistantStore((state) => state.selectedProjectId)
+  const aiSelectedSiteId = useAiAssistantStore((state) => state.selectedSiteId)
   const addAssistantMessage = useAiAssistantStore((state) => state.addMessage)
   const clearAssistantMessages = useAiAssistantStore((state) => state.clearMessages)
   const setAssistantScope = useAiAssistantStore((state) => state.setScope)
+  const setAiContext = useAiAssistantStore((state) => state.setContext)
+  const initializeAiContext = useAiAssistantStore((state) => state.initializeContext)
   const migrateLegacyProjectProgressMessages = useAiAssistantStore((state) => state.migrateLegacyProjectProgressMessages)
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -92,8 +101,20 @@ export const AiAssistant = () => {
   const audioUrlRef = useRef<string | null>(null)
   const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
-  const selectedSiteId = selectedObjectId !== ALL_PROJECTS_ID ? selectedObjectId : undefined
-  const contextLabel = selectedObjectName ?? 'Bütün obyektlər'
+  const selectedSiteId = aiSelectedSiteId ?? undefined
+  const contextProject = aiSelectedProjectId ? projects.find((project) => project.id === aiSelectedProjectId) : undefined
+  const contextSite = aiSelectedSiteId ? objects.find((object) => object.id === aiSelectedSiteId) : undefined
+  const contextLabel = `${contextProject?.name ?? 'Bütün layihələr'} / ${contextSite?.name ?? 'Bütün obyektlər'}`
+  const objectOptions = useMemo(
+    () => objects
+      .filter((object) => !aiSelectedProjectId || object.projectId === aiSelectedProjectId)
+      .map((object) => ({ value: object.id, label: object.name })),
+    [aiSelectedProjectId, objects],
+  )
+  const projectOptions = useMemo(
+    () => projects.map((project) => ({ value: project.id, label: project.name })),
+    [projects],
+  )
 
   const cleanupAudioUrl = () => {
     if (audioRef.current) {
@@ -131,6 +152,18 @@ export const AiAssistant = () => {
     migrateLegacyProjectProgressMessages()
   }, [migrateLegacyProjectProgressMessages, setAssistantScope, tenantId, userId])
 
+  useEffect(() => {
+    const initialSiteId = selectedObjectId !== ALL_PROJECTS_ID ? selectedObjectId : null
+    const initialProjectId = initialSiteId ? selectedObject?.projectId ?? null : null
+    initializeAiContext(initialProjectId, initialSiteId)
+  }, [initializeAiContext, selectedObject?.projectId, selectedObjectId])
+
+  useEffect(() => {
+    if (!aiSelectedSiteId) return
+    if (objectOptions.some((option) => option.value === aiSelectedSiteId)) return
+    setAiContext(aiSelectedProjectId ?? null, null)
+  }, [aiSelectedProjectId, aiSelectedSiteId, objectOptions, setAiContext])
+
   const closeDrawer = () => {
     cleanupAudioUrl()
     setOpen(false)
@@ -154,6 +187,7 @@ export const AiAssistant = () => {
       method: 'POST',
       body: JSON.stringify({
         message: trimmed,
+        selectedProjectId: aiSelectedProjectId ?? null,
         selectedSiteId: selectedSiteId ?? null,
         history,
       }),
@@ -300,6 +334,33 @@ export const AiAssistant = () => {
         extra={<Button icon={<CloseOutlined />} onClick={closeDrawer} />}
       >
         <div className="assistant-panel">
+          <div className="assistant-context-controls">
+            <label>
+              <span>Layihə</span>
+              <Select
+                value={aiSelectedProjectId ?? AI_ALL_PROJECTS_VALUE}
+                options={[
+                  { value: AI_ALL_PROJECTS_VALUE, label: 'Bütün layihələr' },
+                  ...projectOptions,
+                ]}
+                onChange={(value) => {
+                  const nextProjectId = value === AI_ALL_PROJECTS_VALUE ? null : value
+                  setAiContext(nextProjectId, null)
+                }}
+              />
+            </label>
+            <label>
+              <span>Obyekt</span>
+              <Select
+                value={aiSelectedSiteId ?? AI_ALL_SITES_VALUE}
+                options={[
+                  { value: AI_ALL_SITES_VALUE, label: 'Bütün obyektlər' },
+                  ...objectOptions,
+                ]}
+                onChange={(value) => setAiContext(aiSelectedProjectId ?? null, value === AI_ALL_SITES_VALUE ? null : value)}
+              />
+            </label>
+          </div>
           <div className="assistant-context-line">Kontekst: <strong>{contextLabel}</strong></div>
           <div className="assistant-prompts">
             {quickPrompts.map((prompt) => (

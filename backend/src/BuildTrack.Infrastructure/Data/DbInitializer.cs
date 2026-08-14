@@ -869,9 +869,17 @@ CREATE TABLE IF NOT EXISTS project_progress_workspaces (
     "WorkspaceJson" jsonb NOT NULL,
     "LegacyBrowserImportCompleted" boolean NOT NULL DEFAULT false,
     "LegacyBrowserImportedAt" timestamp with time zone NULL,
+    "NormalizedMigrationVersion" integer NOT NULL DEFAULT 0,
+    "NormalizedMigrationStatus" character varying(60) NULL,
+    "NormalizedMigratedAt" timestamp with time zone NULL,
+    "NormalizedMigrationError" character varying(1000) NULL,
     "CreatedAt" timestamp with time zone NOT NULL,
     "UpdatedAt" timestamp with time zone NOT NULL
 );
+ALTER TABLE project_progress_workspaces ADD COLUMN IF NOT EXISTS "NormalizedMigrationVersion" integer NOT NULL DEFAULT 0;
+ALTER TABLE project_progress_workspaces ADD COLUMN IF NOT EXISTS "NormalizedMigrationStatus" character varying(60) NULL;
+ALTER TABLE project_progress_workspaces ADD COLUMN IF NOT EXISTS "NormalizedMigratedAt" timestamp with time zone NULL;
+ALTER TABLE project_progress_workspaces ADD COLUMN IF NOT EXISTS "NormalizedMigrationError" character varying(1000) NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "UX_project_progress_workspaces_TenantId" ON project_progress_workspaces ("TenantId");
 """, cancellationToken);
         await EnsureSupplyChainSchemaAsync(db, cancellationToken);
@@ -1716,7 +1724,6 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
             || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
     }
 }
-
 
 
 
