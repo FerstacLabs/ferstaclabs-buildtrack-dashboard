@@ -5,6 +5,8 @@ using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Services;
 using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Npgsql;
 
 namespace BuildTrack.Api;
 
@@ -25,12 +27,12 @@ public static class ProjectProgressEndpoints
             Results.Json(await GetWorkspacePropertyAsync(db, tenantContext, "workItems", ct)));
         app.MapGet("/api/project-progress/crews", async (BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
             Results.Json(await GetWorkspacePropertyAsync(db, tenantContext, "crews", ct)));
-        app.MapPut("/api/project-progress/stages/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "stages", body, db, tenantContext, dailyReportSync, ct));
-        app.MapPut("/api/project-progress/work-items/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "workItems", body, db, tenantContext, dailyReportSync, ct));
-        app.MapPut("/api/project-progress/crews/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct) =>
-            await UpsertWorkspaceArrayItemAsync(id, "crews", body, db, tenantContext, dailyReportSync, ct));
+        app.MapPut("/api/project-progress/stages/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, ILoggerFactory loggerFactory, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "stages", body, db, tenantContext, dailyReportSync, loggerFactory, ct));
+        app.MapPut("/api/project-progress/work-items/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, ILoggerFactory loggerFactory, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "workItems", body, db, tenantContext, dailyReportSync, loggerFactory, ct));
+        app.MapPut("/api/project-progress/crews/{id}", async (string id, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, ILoggerFactory loggerFactory, CancellationToken ct) =>
+            await UpsertWorkspaceArrayItemAsync(id, "crews", body, db, tenantContext, dailyReportSync, loggerFactory, ct));
         return app;
     }
 
@@ -49,36 +51,62 @@ public static class ProjectProgressEndpoints
         return Results.Content(workspace.WorkspaceJson, "application/json");
     }
 
-    private static async Task<IResult> SaveWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
+    private static async Task<IResult> SaveWorkspaceAsync(
+        JsonElement body,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IProjectProgressDailyReportSyncService dailyReportSync,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
-        var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
         var validation = ValidateWorkspace(body);
         if (validation is not null) return Results.BadRequest(new { error = validation });
         var tenantValidation = ValidateWorkspaceTenant(body, tenantId, allowLegacyImport: false);
         if (tenantValidation is not null) return Results.BadRequest(new { error = tenantValidation });
 
-        workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
-        workspace.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
-        await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
-        return Results.Ok(new { saved = true, workspaceId = workspace.Id, updatedAt = workspace.UpdatedAt });
+        return await SaveWorkspaceWithFieldSmetaSyncAsync(
+            db,
+            tenantId,
+            dailyReportSync,
+            loggerFactory,
+            async () =>
+            {
+                var workspace = await GetOrCreateWorkspaceForWriteAsync(db, tenantId, ct);
+                workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
+                workspace.UpdatedAt = DateTimeOffset.UtcNow;
+                return Results.Ok(new { saved = true, workspaceId = workspace.Id, updatedAt = workspace.UpdatedAt });
+            },
+            ct);
     }
 
-    private static async Task<IResult> ImportLegacyWorkspaceAsync(JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
+    private static async Task<IResult> ImportLegacyWorkspaceAsync(
+        JsonElement body,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IProjectProgressDailyReportSyncService dailyReportSync,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
-        var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
         var validation = ValidateWorkspace(body);
         if (validation is not null) return Results.BadRequest(new { error = validation });
 
-        workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
-        workspace.LegacyBrowserImportCompleted = true;
-        workspace.LegacyBrowserImportedAt = DateTimeOffset.UtcNow;
-        workspace.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
-        await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
-        return Results.Ok(new { imported = true, workspaceId = workspace.Id, legacyBrowserImportedAt = workspace.LegacyBrowserImportedAt });
+        return await SaveWorkspaceWithFieldSmetaSyncAsync(
+            db,
+            tenantId,
+            dailyReportSync,
+            loggerFactory,
+            async () =>
+            {
+                var workspace = await GetOrCreateWorkspaceForWriteAsync(db, tenantId, ct);
+                workspace.WorkspaceJson = NormalizeWorkspaceJsonForTenant(body, tenantId);
+                workspace.LegacyBrowserImportCompleted = true;
+                workspace.LegacyBrowserImportedAt = DateTimeOffset.UtcNow;
+                workspace.UpdatedAt = DateTimeOffset.UtcNow;
+                return Results.Ok(new { imported = true, workspaceId = workspace.Id, legacyBrowserImportedAt = workspace.LegacyBrowserImportedAt });
+            },
+            ct);
     }
 
     private static async Task<JsonNode> GetWorkspacePropertyAsync(BuildTrackDbContext db, ITenantContext tenantContext, string propertyName, CancellationToken ct)
@@ -89,51 +117,138 @@ public static class ProjectProgressEndpoints
         return node[propertyName]?.DeepClone() ?? (propertyName == "summary" ? JsonSerializer.SerializeToNode(EmptySummary(), JsonOptions)! : new JsonArray());
     }
 
-    private static async Task<IResult> UpsertWorkspaceArrayItemAsync(string id, string arrayName, JsonElement body, BuildTrackDbContext db, ITenantContext tenantContext, IProjectProgressDailyReportSyncService dailyReportSync, CancellationToken ct)
+    private static async Task<IResult> UpsertWorkspaceArrayItemAsync(
+        string id,
+        string arrayName,
+        JsonElement body,
+        BuildTrackDbContext db,
+        ITenantContext tenantContext,
+        IProjectProgressDailyReportSyncService dailyReportSync,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
     {
         var tenantId = RequireTenantId(tenantContext);
-        var workspace = await GetOrCreateWorkspaceAsync(db, tenantId, ct);
-        var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
-        root["workspaceTenantId"] = tenantId.ToString();
-        var item = JsonNode.Parse(body.GetRawText())?.AsObject();
-        if (item is null) return Results.BadRequest(new { error = "Invalid JSON object" });
-        item["id"] = id;
-
-        var array = root[arrayName] as JsonArray;
-        if (array is null)
-        {
-            array = new JsonArray();
-            root[arrayName] = array;
-        }
-
-        var existingIndex = -1;
-        for (var i = 0; i < array.Count; i++)
-        {
-            if (array[i]?["id"]?.GetValue<string>() == id)
+        return await SaveWorkspaceWithFieldSmetaSyncAsync(
+            db,
+            tenantId,
+            dailyReportSync,
+            loggerFactory,
+            async () =>
             {
-                existingIndex = i;
-                break;
+                var workspace = await GetOrCreateWorkspaceForWriteAsync(db, tenantId, ct);
+                var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject() ?? new JsonObject();
+                root["workspaceTenantId"] = tenantId.ToString();
+                var item = JsonNode.Parse(body.GetRawText())?.AsObject();
+                if (item is null) return Results.BadRequest(new { error = "Invalid JSON object" });
+                item["id"] = id;
+
+                var array = root[arrayName] as JsonArray;
+                if (array is null)
+                {
+                    array = new JsonArray();
+                    root[arrayName] = array;
+                }
+
+                var existingIndex = -1;
+                for (var i = 0; i < array.Count; i++)
+                {
+                    if (array[i]?["id"]?.GetValue<string>() == id)
+                    {
+                        existingIndex = i;
+                        break;
+                    }
+                }
+
+                if (existingIndex >= 0)
+                {
+                    array[existingIndex] = item;
+                }
+                else
+                {
+                    array.Add(item);
+                }
+
+                NormalizeWorkspaceRoot(root, tenantId);
+                workspace.WorkspaceJson = root.ToJsonString(JsonOptions);
+                workspace.UpdatedAt = DateTimeOffset.UtcNow;
+                return Results.Json(item);
+            },
+            ct,
+            syncFieldSmeta: arrayName is "stages" or "workItems");
+    }
+
+    private static async Task<IResult> SaveWorkspaceWithFieldSmetaSyncAsync(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        IProjectProgressDailyReportSyncService dailyReportSync,
+        ILoggerFactory loggerFactory,
+        Func<Task<IResult>> mutateWorkspace,
+        CancellationToken ct,
+        bool syncFieldSmeta = true)
+    {
+        var logger = loggerFactory.CreateLogger("ProjectProgressEndpoints");
+        IDbContextTransaction? transaction = null;
+        if (db.Database.IsRelational())
+        {
+            transaction = await db.Database.BeginTransactionAsync(ct);
+        }
+
+        try
+        {
+            var result = await mutateWorkspace();
+            if (syncFieldSmeta)
+            {
+                await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
             }
-        }
 
-        if (existingIndex >= 0)
-        {
-            array[existingIndex] = item;
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return result;
         }
-        else
+        catch (ProjectProgressSmetaSyncException ex)
         {
-            array.Add(item);
+            if (transaction is not null) await transaction.RollbackAsync(ct);
+            logger.LogWarning("Project progress field smeta sync conflict for tenant {TenantId}. Code={Code}; Conflicts={Conflicts}", tenantId, ex.Code, ex.Conflicts.Count);
+            var error = ex.Code switch
+            {
+                "FIELD_SMETA_DUPLICATE_WORK_NAME" => "Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
+                _ => "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+            };
+            return Results.Conflict(new
+            {
+                error,
+                code = ex.Code,
+                conflicts = ex.Conflicts,
+            });
         }
-
-        NormalizeWorkspaceRoot(root, tenantId);
-        workspace.WorkspaceJson = root.ToJsonString(JsonOptions);
-        workspace.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
-        if (arrayName is "stages" or "workItems")
+        catch (DbUpdateException ex) when (IsFieldSmetaUniqueConflict(ex))
         {
-            await dailyReportSync.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, ct);
+            if (transaction is not null) await transaction.RollbackAsync(ct);
+            logger.LogWarning(ex, "Project progress field smeta database unique conflict for tenant {TenantId}", tenantId);
+            return Results.Conflict(new
+            {
+                error = "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+                code = "FIELD_SMETA_IDENTITY_CONFLICT",
+            });
         }
-        return Results.Json(item);
+        catch (Exception ex)
+        {
+            if (transaction is not null) await transaction.RollbackAsync(ct);
+            var correlationId = Guid.NewGuid().ToString("N");
+            logger.LogError(ex, "Project progress workspace save failed. CorrelationId={CorrelationId}; TenantId={TenantId}", correlationId, tenantId);
+            return Results.Json(
+                new
+                {
+                    error = "Layihə məlumatları serverdə saxlanarkən xəta baş verdi.",
+                    code = "PROJECT_PROGRESS_SAVE_FAILED",
+                    correlationId,
+                },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
     }
 
     private static async Task<ProjectProgressWorkspace> GetOrCreateWorkspaceAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
@@ -150,6 +265,25 @@ public static class ProjectProgressEndpoints
         await db.SaveChangesAsync(ct);
         return workspace;
     }
+
+    private static async Task<ProjectProgressWorkspace> GetOrCreateWorkspaceForWriteAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
+    {
+        var workspace = await db.ProjectProgressWorkspaces.FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
+        if (workspace is not null) return workspace;
+
+        workspace = new ProjectProgressWorkspace
+        {
+            TenantId = tenantId,
+            WorkspaceJson = await BuildWorkspaceFromCanonicalDataAsync(db, tenantId, ct),
+        };
+        db.ProjectProgressWorkspaces.Add(workspace);
+        return workspace;
+    }
+
+    private static bool IsFieldSmetaUniqueConflict(DbUpdateException ex) =>
+        ex.InnerException is PostgresException postgresException
+        && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+        && string.Equals(postgresException.ConstraintName, "UX_field_smeta_items_site_work", StringComparison.Ordinal);
 
     private static async Task<string> BuildWorkspaceFromCanonicalDataAsync(BuildTrackDbContext db, Guid tenantId, CancellationToken ct)
     {

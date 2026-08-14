@@ -37,6 +37,24 @@ const parseBody = (text: string) => {
   }
 }
 
+const extractErrorMessage = (parsed: unknown, status: number) => {
+  if (typeof parsed === 'string') {
+    const message = parsed.trim()
+    return message || `HTTP ${status} - server boş xəta cavabı qaytardı.`
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>
+    for (const key of ['error', 'message', 'title']) {
+      const value = record[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    return JSON.stringify(parsed)
+  }
+
+  return `HTTP ${status} - server boş xəta cavabı qaytardı.`
+}
+
 export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const url = `${API_BASE_URL}${path}`
   const headers = new Headers(init?.headers)
@@ -51,7 +69,7 @@ export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T
 
   if (!response.ok) {
     console.warn('BuildTrack API request failed', { url, status: response.status, parsed })
-    throw new ApiClientError(typeof parsed === 'string' ? parsed : JSON.stringify(parsed ?? ''), url, response.status, text)
+    throw new ApiClientError(extractErrorMessage(parsed, response.status), url, response.status, text)
   }
 
   return parsed as T

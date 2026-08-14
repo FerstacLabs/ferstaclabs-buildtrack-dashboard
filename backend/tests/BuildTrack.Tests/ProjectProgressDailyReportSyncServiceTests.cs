@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using BuildTrack.Domain.Entities;
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Services;
@@ -74,12 +75,177 @@ public sealed class ProjectProgressDailyReportSyncServiceTests
 
         var service = new ProjectProgressDailyReportSyncService(db);
         await service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None);
+        await db.SaveChangesAsync();
 
         var item = await db.FieldSmetaItems.SingleAsync(x => x.TenantId == tenantId && x.ProjectWorkItemId == "work-a");
         Assert.Equal(siteId, item.SiteId);
         Assert.Equal("Beton işi", item.WorkName);
         Assert.Equal("Monolit", item.StageName);
         Assert.Equal(42, item.PlannedQuantity);
+    }
+
+    [Fact]
+    public async Task SyncFieldSmetaItemsAdoptsLegacySameSiteWorkRowWithoutDuplicate()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        var legacyId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        SeedWorkspace(db, tenantId, siteId, quantity: 12);
+        await db.SaveChangesAsync();
+        ReplaceWorkspaceWorkItems(db, tenantId, siteId, [
+            ("work-a", "Concrete Work", 12m),
+        ]);
+        db.FieldSmetaItems.Add(new FieldSmetaItem
+        {
+            Id = legacyId,
+            TenantId = tenantId,
+            SiteId = siteId,
+            StageName = "Old stage",
+            WorkName = "Concrete Work",
+            Unit = "m3",
+            ProjectWorkItemId = null,
+            PlannedQuantity = 1,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = new ProjectProgressDailyReportSyncService(db);
+        await service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var items = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId).ToArrayAsync();
+        Assert.Single(items);
+        Assert.Equal(legacyId, items[0].Id);
+        Assert.Equal("work-a", items[0].ProjectWorkItemId);
+        Assert.Equal(12, items[0].PlannedQuantity);
+    }
+
+    [Fact]
+    public async Task SyncFieldSmetaItemsAdoptsStaleSameSiteWorkRowWithoutDuplicate()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        var staleId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        SeedWorkspace(db, tenantId, siteId, quantity: 12);
+        await db.SaveChangesAsync();
+        ReplaceWorkspaceWorkItems(db, tenantId, siteId, [
+            ("work-a", "Concrete Work", 12m),
+        ]);
+        db.FieldSmetaItems.Add(new FieldSmetaItem
+        {
+            Id = staleId,
+            TenantId = tenantId,
+            SiteId = siteId,
+            StageName = "Old stage",
+            WorkName = "Concrete Work",
+            Unit = "m3",
+            ProjectWorkItemId = "legacy-work-a",
+            PlannedQuantity = 1,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = new ProjectProgressDailyReportSyncService(db);
+        await service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var items = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId).ToArrayAsync();
+        Assert.Single(items);
+        Assert.Equal(staleId, items[0].Id);
+        Assert.Equal("work-a", items[0].ProjectWorkItemId);
+    }
+
+    [Fact]
+    public async Task SyncFieldSmetaItemsRejectsDuplicateWorkspaceNamesForSameSite()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        SeedWorkspace(db, tenantId, siteId, quantity: 10);
+        ReplaceWorkspaceWorkItems(db, tenantId, siteId, [
+            ("work-a", "Concrete Work", 10m),
+            ("work-b", "  Concrete   Work  ", 20m),
+        ]);
+        await db.SaveChangesAsync();
+
+        var service = new ProjectProgressDailyReportSyncService(db);
+        var ex = await Assert.ThrowsAsync<ProjectProgressSmetaSyncException>(() =>
+            service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None));
+
+        Assert.Equal("FIELD_SMETA_DUPLICATE_WORK_NAME", ex.Code);
+        Assert.Equal(2, ex.Conflicts.Count);
+    }
+
+    [Fact]
+    public async Task SyncFieldSmetaItemsRejectsRenameIntoExistingSiteWorkUniqueKey()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        SeedWorkspace(db, tenantId, siteId, quantity: 12);
+        ReplaceWorkspaceWorkItems(db, tenantId, siteId, [
+            ("work-a", "Rebar Work", 12m),
+        ]);
+        db.FieldSmetaItems.Add(new FieldSmetaItem
+        {
+            TenantId = tenantId,
+            SiteId = siteId,
+            StageName = "Monolit",
+            WorkName = "Concrete Work",
+            Unit = "m3",
+            ProjectWorkItemId = "work-a",
+            PlannedQuantity = 10,
+            IsActive = true,
+        });
+        db.FieldSmetaItems.Add(new FieldSmetaItem
+        {
+            TenantId = tenantId,
+            SiteId = siteId,
+            StageName = "Monolit",
+            WorkName = "Rebar Work",
+            Unit = "ton",
+            ProjectWorkItemId = "work-b",
+            PlannedQuantity = 3,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = new ProjectProgressDailyReportSyncService(db);
+        var ex = await Assert.ThrowsAsync<ProjectProgressSmetaSyncException>(() =>
+            service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None));
+
+        Assert.Equal("FIELD_SMETA_IDENTITY_CONFLICT", ex.Code);
+        Assert.Contains(ex.Conflicts, x => x.Reason == "RenameOrMoveWouldCollide");
+    }
+
+    [Fact]
+    public async Task SyncFieldSmetaItemsIsIdempotentAndPreservesHistoricalReportLinks()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        SeedWorkspace(db, tenantId, siteId, quantity: 42);
+        var smeta = SeedSmetaItem(db, tenantId, siteId, "work-a", 10);
+        var report = SeedReport(db, tenantId, siteId, FieldDailyReportStatus.Approved, smeta, 5, 2);
+        await db.SaveChangesAsync();
+        var smetaId = smeta.Id;
+        var lineId = report.Lines.First().Id;
+
+        var service = new ProjectProgressDailyReportSyncService(db);
+        await service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None);
+        await db.SaveChangesAsync();
+        await service.SyncFieldSmetaItemsFromWorkspaceAsync(tenantId, CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var items = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId).ToArrayAsync();
+        Assert.Single(items);
+        Assert.Equal(smetaId, items[0].Id);
+        Assert.Equal(42, items[0].PlannedQuantity);
+
+        var line = await db.SupervisorDailyReportLines.SingleAsync(x => x.Id == lineId);
+        Assert.Equal(smetaId, line.SmetaItemId);
     }
 
     private static BuildTrackDbContext CreateDb(Guid tenantId)
@@ -162,6 +328,46 @@ public sealed class ProjectProgressDailyReportSyncServiceTests
         db.SupervisorDailyReports.Add(report);
         return report;
     }
+
+    private static void ReplaceWorkspaceWorkItems(
+        BuildTrackDbContext db,
+        Guid tenantId,
+        Guid siteId,
+        IReadOnlyList<(string Id, string Name, decimal Quantity)> workItems)
+    {
+        var workspace = db.ProjectProgressWorkspaces.Local.FirstOrDefault(x => x.TenantId == tenantId)
+            ?? db.ProjectProgressWorkspaces.Single(x => x.TenantId == tenantId);
+        var root = JsonNode.Parse(workspace.WorkspaceJson)!.AsObject();
+        var array = new JsonArray();
+        foreach (var item in workItems)
+        {
+            array.Add(CreateWorkItemNode(siteId, item.Id, item.Name, item.Quantity));
+        }
+
+        root["workItems"] = array;
+        workspace.WorkspaceJson = root.ToJsonString();
+    }
+
+    private static JsonObject CreateWorkItemNode(Guid siteId, string id, string name, decimal quantity) => new()
+    {
+        ["id"] = id,
+        ["objectId"] = siteId.ToString(),
+        ["stageId"] = "stage-a",
+        ["name"] = name,
+        ["unit"] = "m3",
+        ["quantity"] = quantity,
+        ["laborUnitPrice"] = 40,
+        ["laborTotal"] = 40,
+        ["materialQuantity"] = quantity,
+        ["materialUnitPrice"] = 60,
+        ["materialTotal"] = 60,
+        ["totalCost"] = 100,
+        ["plannedHours"] = 10,
+        ["actualHours"] = 0,
+        ["completedQuantity"] = 0,
+        ["status"] = "NotStarted",
+        ["progressPercent"] = 0,
+    };
 
     private static JsonElement ReadFirstWorkItem(ProjectProgressWorkspace workspace)
     {

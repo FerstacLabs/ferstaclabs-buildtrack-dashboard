@@ -16,64 +16,53 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
         if (workspace is null) return;
 
         var root = JsonNode.Parse(workspace.WorkspaceJson)?.AsObject();
-        if (root?["workItems"] is not JsonArray workItems || workItems.Count == 0) return;
+        if (root?["workItems"] is not JsonArray workItems) return;
 
         var stageNamesById = BuildStageNamesById(root["stages"] as JsonArray);
+        var incomingRows = BuildIncomingWorkItems(workItems, stageNamesById);
         var existing = await db.FieldSmetaItems.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
-        var byProjectWorkItemId = existing
-            .Where(x => !string.IsNullOrWhiteSpace(x.ProjectWorkItemId))
-            .GroupBy(x => x.ProjectWorkItemId!, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
-        var bySiteAndName = existing
-            .GroupBy(x => $"{x.SiteId:N}|{x.WorkName}", StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
-
-        var now = DateTimeOffset.UtcNow;
-        foreach (var node in workItems)
+        if (incomingRows.Count == 0)
         {
-            if (node is not JsonObject workItem) continue;
-            var projectWorkItemId = GetString(workItem["id"]);
-            var siteIdText = GetString(workItem["objectId"]);
-            var workName = GetString(workItem["name"]);
-            if (string.IsNullOrWhiteSpace(projectWorkItemId)
-                || string.IsNullOrWhiteSpace(siteIdText)
-                || !Guid.TryParse(siteIdText, out var siteId)
-                || string.IsNullOrWhiteSpace(workName))
-            {
-                continue;
-            }
+            DeactivateMissingProjectProgressRows(existing, new HashSet<string>(StringComparer.OrdinalIgnoreCase), DateTimeOffset.UtcNow);
+            return;
+        }
 
-            var siteAndNameKey = $"{siteId:N}|{workName}";
-            if (!byProjectWorkItemId.TryGetValue(projectWorkItemId, out var item)
-                && !bySiteAndName.TryGetValue(siteAndNameKey, out item))
-            {
-                item = new FieldSmetaItem
+        var snapshots = existing.Select(ExistingFieldSmetaSnapshot.FromEntity).ToArray();
+        var incomingProjectWorkItemIds = incomingRows.Select(x => x.ProjectWorkItemId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var plans = BuildReconciliationPlan(incomingRows, snapshots, incomingProjectWorkItemIds);
+        ValidateFinalUniqueKeys(snapshots, plans);
+
+        var existingById = existing.ToDictionary(x => x.Id);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var plan in plans)
+        {
+            var item = plan.ExistingFieldSmetaItemId is Guid existingId
+                ? existingById[existingId]
+                : new FieldSmetaItem
                 {
                     TenantId = tenantId,
-                    SiteId = siteId,
                     CreatedAt = now,
-                    IsActive = true,
                 };
+
+            if (plan.ExistingFieldSmetaItemId is null)
+            {
                 db.FieldSmetaItems.Add(item);
-                byProjectWorkItemId[projectWorkItemId] = item;
-                bySiteAndName[siteAndNameKey] = item;
             }
 
-            var stageId = GetString(workItem["stageId"]);
-            item.ProjectWorkItemId = projectWorkItemId;
-            item.SiteId = siteId;
-            item.StageName = !string.IsNullOrWhiteSpace(stageId) && stageNamesById.TryGetValue(stageId, out var stageName)
-                ? stageName
-                : GetString(workItem["stageName"]) ?? "Smeta";
-            item.WorkName = workName;
-            item.Unit = GetString(workItem["unit"]) ?? item.Unit;
-            item.WorkCategory = GetString(workItem["notes"]) ?? GetString(workItem["category"]) ?? item.WorkCategory;
-            item.PlannedQuantity = GetDecimal(workItem["quantity"]);
+            item.TenantId = tenantId;
+            item.ProjectWorkItemId = plan.Incoming.ProjectWorkItemId;
+            item.SiteId = plan.Incoming.SiteId;
+            item.StageName = plan.Incoming.StageName;
+            item.WorkName = plan.Incoming.WorkName;
+            item.Unit = plan.Incoming.Unit;
+            item.WorkCategory = plan.Incoming.WorkCategory;
+            item.PlannedQuantity = plan.Incoming.PlannedQuantity;
             item.IsActive = true;
             item.UpdatedAt = now;
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        var touchedIds = plans.Select(x => x.ExistingFieldSmetaItemId).OfType<Guid>().ToHashSet();
+        DeactivateMissingProjectProgressRows(existing.Where(x => !touchedIds.Contains(x.Id)), incomingProjectWorkItemIds, now);
     }
 
     public async Task<ProjectProgressApprovalValidationResult> ValidateApprovedReportAsync(
@@ -169,6 +158,215 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
             updatedStages,
             approvedQuantityByWorkItemId.Values.Sum(),
             sourceReportId);
+    }
+
+    private static IReadOnlyList<IncomingWorkspaceWorkItem> BuildIncomingWorkItems(JsonArray workItems, IReadOnlyDictionary<string, string> stageNamesById)
+    {
+        var rows = new List<IncomingWorkspaceWorkItem>();
+        foreach (var node in workItems)
+        {
+            if (node is not JsonObject workItem) continue;
+            var projectWorkItemId = CleanText(GetString(workItem["id"]));
+            var siteIdText = CleanText(GetString(workItem["objectId"]));
+            var workName = CleanText(GetString(workItem["name"]));
+            if (string.IsNullOrWhiteSpace(projectWorkItemId)
+                || string.IsNullOrWhiteSpace(siteIdText)
+                || !Guid.TryParse(siteIdText, out var siteId)
+                || string.IsNullOrWhiteSpace(workName))
+            {
+                continue;
+            }
+
+            var stageId = CleanText(GetString(workItem["stageId"]));
+            var stageName = !string.IsNullOrWhiteSpace(stageId) && stageNamesById.TryGetValue(stageId, out var mappedStageName)
+                ? mappedStageName
+                : CleanText(GetString(workItem["stageName"])) ?? "Smeta";
+
+            rows.Add(new IncomingWorkspaceWorkItem(
+                projectWorkItemId,
+                siteId,
+                workName,
+                NormalizeWorkName(workName),
+                stageName,
+                CleanText(GetString(workItem["unit"])) ?? string.Empty,
+                CleanText(GetString(workItem["notes"])) ?? CleanText(GetString(workItem["category"])),
+                GetDecimal(workItem["quantity"])));
+        }
+
+        var duplicate = rows
+            .GroupBy(x => x.NormalizedSiteWorkKey, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Select(x => x.ProjectWorkItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1);
+        if (duplicate is not null)
+        {
+            var first = duplicate.First();
+            throw new ProjectProgressSmetaSyncException(
+                "FIELD_SMETA_DUPLICATE_WORK_NAME",
+                $"Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz: {first.WorkName}.",
+                duplicate.Select(row => new ProjectProgressSmetaSyncConflict(
+                    null,
+                    null,
+                    row.SiteId,
+                    row.WorkName,
+                    row.ProjectWorkItemId,
+                    null,
+                    "IncomingWorkspaceDuplicate")).ToArray());
+        }
+
+        return rows;
+    }
+
+    private static IReadOnlyList<FieldSmetaReconciliationPlan> BuildReconciliationPlan(
+        IReadOnlyList<IncomingWorkspaceWorkItem> incomingRows,
+        IReadOnlyList<ExistingFieldSmetaSnapshot> snapshots,
+        IReadOnlySet<string> incomingProjectWorkItemIds)
+    {
+        var plans = new List<FieldSmetaReconciliationPlan>();
+        var plannedExistingIds = new Dictionary<Guid, IncomingWorkspaceWorkItem>();
+
+        foreach (var incoming in incomingRows)
+        {
+            var sameProject = snapshots.FirstOrDefault(x => string.Equals(x.ProjectWorkItemId, incoming.ProjectWorkItemId, StringComparison.OrdinalIgnoreCase));
+            var sameExactSiteWork = snapshots.FirstOrDefault(x => string.Equals(x.ExactSiteWorkKey, incoming.ExactSiteWorkKey, StringComparison.Ordinal));
+            var sameNormalizedSiteWork = snapshots.FirstOrDefault(x => string.Equals(x.NormalizedSiteWorkKey, incoming.NormalizedSiteWorkKey, StringComparison.OrdinalIgnoreCase));
+            ExistingFieldSmetaSnapshot? target = null;
+
+            if (sameProject is not null)
+            {
+                target = sameProject;
+                var nameOccupier = sameExactSiteWork ?? sameNormalizedSiteWork;
+                if (nameOccupier is not null && nameOccupier.Id != target.Id)
+                {
+                    throw BuildIdentityConflict(target, nameOccupier, incoming, "RenameOrMoveWouldCollide");
+                }
+            }
+            else
+            {
+                var adoptCandidate = sameExactSiteWork ?? sameNormalizedSiteWork;
+                if (adoptCandidate is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(adoptCandidate.ProjectWorkItemId)
+                        && incomingProjectWorkItemIds.Contains(adoptCandidate.ProjectWorkItemId))
+                    {
+                        throw BuildIdentityConflict(adoptCandidate, adoptCandidate, incoming, "SiteWorkNameBelongsToAnotherActiveWorkItem");
+                    }
+
+                    target = adoptCandidate;
+                }
+            }
+
+            if (target is not null)
+            {
+                if (plannedExistingIds.TryGetValue(target.Id, out var previousIncoming)
+                    && !string.Equals(previousIncoming.ProjectWorkItemId, incoming.ProjectWorkItemId, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ProjectProgressSmetaSyncException(
+                        "FIELD_SMETA_IDENTITY_CONFLICT",
+                        "Smeta sinxronizasiyası zamanı eyni Field Smeta sətri iki fərqli ProjectProgress işi ilə uyğunlaşdı.",
+                        [
+                            new ProjectProgressSmetaSyncConflict(
+                                target.Id,
+                                target.Id,
+                                incoming.SiteId,
+                                incoming.WorkName,
+                                incoming.ProjectWorkItemId,
+                                previousIncoming.ProjectWorkItemId,
+                                "DuplicateTargetResolution"),
+                        ]);
+                }
+
+                plannedExistingIds[target.Id] = incoming;
+            }
+
+            plans.Add(new FieldSmetaReconciliationPlan(target?.Id, incoming));
+        }
+
+        return plans;
+    }
+
+    private static void ValidateFinalUniqueKeys(
+        IReadOnlyList<ExistingFieldSmetaSnapshot> snapshots,
+        IReadOnlyList<FieldSmetaReconciliationPlan> plans)
+    {
+        var plansByExistingId = plans
+            .Where(x => x.ExistingFieldSmetaItemId is not null)
+            .ToDictionary(x => x.ExistingFieldSmetaItemId!.Value);
+        var finalOwnersByExactKey = new Dictionary<string, FinalFieldSmetaOwner>(StringComparer.Ordinal);
+
+        foreach (var snapshot in snapshots)
+        {
+            var planned = plansByExistingId.GetValueOrDefault(snapshot.Id);
+            var exactKey = planned?.Incoming.ExactSiteWorkKey ?? snapshot.ExactSiteWorkKey;
+            AddFinalOwner(finalOwnersByExactKey, exactKey, new FinalFieldSmetaOwner(snapshot.Id, planned?.Incoming.ProjectWorkItemId ?? snapshot.ProjectWorkItemId, snapshot.SiteId, planned?.Incoming.WorkName ?? snapshot.WorkName));
+        }
+
+        var createIndex = 0;
+        foreach (var plan in plans.Where(x => x.ExistingFieldSmetaItemId is null))
+        {
+            AddFinalOwner(finalOwnersByExactKey, plan.Incoming.ExactSiteWorkKey, new FinalFieldSmetaOwner(Guid.Empty, plan.Incoming.ProjectWorkItemId, plan.Incoming.SiteId, plan.Incoming.WorkName, $"new-{++createIndex}"));
+        }
+    }
+
+    private static void AddFinalOwner(Dictionary<string, FinalFieldSmetaOwner> owners, string key, FinalFieldSmetaOwner owner)
+    {
+        if (!owners.TryGetValue(key, out var existing))
+        {
+            owners[key] = owner;
+            return;
+        }
+
+        var samePersistedRow = owner.Id != Guid.Empty && owner.Id == existing.Id;
+        var sameNewRow = owner.NewRowKey is not null && owner.NewRowKey == existing.NewRowKey;
+        if (samePersistedRow || sameNewRow) return;
+
+        throw new ProjectProgressSmetaSyncException(
+            "FIELD_SMETA_IDENTITY_CONFLICT",
+            "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+            [
+                new ProjectProgressSmetaSyncConflict(
+                    existing.Id == Guid.Empty ? null : existing.Id,
+                    owner.Id == Guid.Empty ? null : owner.Id,
+                    owner.SiteId,
+                    owner.WorkName,
+                    owner.ProjectWorkItemId,
+                    existing.ProjectWorkItemId,
+                    "FinalUniqueKeyCollision"),
+            ]);
+    }
+
+    private static ProjectProgressSmetaSyncException BuildIdentityConflict(
+        ExistingFieldSmetaSnapshot target,
+        ExistingFieldSmetaSnapshot occupier,
+        IncomingWorkspaceWorkItem incoming,
+        string reason) =>
+        new(
+            "FIELD_SMETA_IDENTITY_CONFLICT",
+            "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+            [
+                new ProjectProgressSmetaSyncConflict(
+                    target.Id,
+                    occupier.Id,
+                    incoming.SiteId,
+                    incoming.WorkName,
+                    incoming.ProjectWorkItemId,
+                    occupier.ProjectWorkItemId,
+                    reason),
+            ]);
+
+    private static void DeactivateMissingProjectProgressRows(
+        IEnumerable<FieldSmetaItem> existing,
+        IReadOnlySet<string> incomingProjectWorkItemIds,
+        DateTimeOffset now)
+    {
+        foreach (var item in existing)
+        {
+            if (!string.IsNullOrWhiteSpace(item.ProjectWorkItemId)
+                && !incomingProjectWorkItemIds.Contains(item.ProjectWorkItemId)
+                && item.IsActive)
+            {
+                item.IsActive = false;
+                item.UpdatedAt = now;
+            }
+        }
     }
 
     private async Task<Dictionary<string, decimal>> LoadApprovedLineTotalsAsync(Guid tenantId, Guid excludeReportId, CancellationToken cancellationToken)
@@ -315,6 +513,55 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
             return null;
         }
     }
+
+    private static string? CleanText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return string.Join(' ', value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string NormalizeWorkName(string value) =>
+        string.Join(' ', value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
+
+    private sealed record IncomingWorkspaceWorkItem(
+        string ProjectWorkItemId,
+        Guid SiteId,
+        string WorkName,
+        string NormalizedWorkName,
+        string StageName,
+        string Unit,
+        string? WorkCategory,
+        decimal? PlannedQuantity)
+    {
+        public string ExactSiteWorkKey => $"{SiteId:N}|{WorkName}";
+        public string NormalizedSiteWorkKey => $"{SiteId:N}|{NormalizedWorkName}";
+    }
+
+    private sealed record ExistingFieldSmetaSnapshot(
+        Guid Id,
+        Guid SiteId,
+        string WorkName,
+        string NormalizedWorkName,
+        string? ProjectWorkItemId)
+    {
+        public string ExactSiteWorkKey => $"{SiteId:N}|{WorkName}";
+        public string NormalizedSiteWorkKey => $"{SiteId:N}|{NormalizedWorkName}";
+
+        public static ExistingFieldSmetaSnapshot FromEntity(FieldSmetaItem item)
+        {
+            var workName = CleanText(item.WorkName) ?? string.Empty;
+            return new ExistingFieldSmetaSnapshot(
+                item.Id,
+                item.SiteId,
+                workName,
+                NormalizeWorkName(workName),
+                CleanText(item.ProjectWorkItemId));
+        }
+    }
+
+    private sealed record FieldSmetaReconciliationPlan(Guid? ExistingFieldSmetaItemId, IncomingWorkspaceWorkItem Incoming);
+
+    private sealed record FinalFieldSmetaOwner(Guid Id, string? ProjectWorkItemId, Guid SiteId, string WorkName, string? NewRowKey = null);
 
     private sealed record ApprovedReportLine(Guid ReportId, string ProjectWorkItemId, decimal ReportedQuantity, decimal? WorkHours);
 }

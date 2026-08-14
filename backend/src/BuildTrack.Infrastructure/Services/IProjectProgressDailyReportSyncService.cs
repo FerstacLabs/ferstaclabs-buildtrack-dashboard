@@ -29,3 +29,21 @@ public sealed record ProjectProgressRecalculationResult(
     int UpdatedStages,
     decimal TotalApprovedQuantity,
     Guid? SourceReportId);
+
+public sealed class ProjectProgressSmetaSyncException(
+    string code,
+    string message,
+    IReadOnlyList<ProjectProgressSmetaSyncConflict>? conflicts = null) : Exception(message)
+{
+    public string Code { get; } = code;
+    public IReadOnlyList<ProjectProgressSmetaSyncConflict> Conflicts { get; } = conflicts ?? Array.Empty<ProjectProgressSmetaSyncConflict>();
+}
+
+public sealed record ProjectProgressSmetaSyncConflict(
+    Guid? ExistingFieldSmetaItemId,
+    Guid? ConflictingFieldSmetaItemId,
+    Guid SiteId,
+    string WorkName,
+    string? ProjectWorkItemId,
+    string? ConflictingProjectWorkItemId,
+    string Reason);

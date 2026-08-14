@@ -16,6 +16,7 @@ import type {
 import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { createEmptyProjectProgressData, projectProgressSeed } from './projectProgressSeed'
 import { projectProgressApi } from './projectProgressApi'
+import { ApiClientError } from '../../shared/api/client'
 
 type ServerSyncStatus = 'idle' | 'loading' | 'ready' | 'saving' | 'fallback' | 'error'
 
@@ -249,10 +250,12 @@ interface WorkspaceSaveJob {
   tenantId: string
   serialized: string
   workspace: ProjectProgressData
+  retryCount: number
 }
 
 const PROJECT_PROGRESS_SAVE_DEBOUNCE_MS = 800
 const PROJECT_PROGRESS_SAVE_RETRY_MS = 8000
+const PROJECT_PROGRESS_SAVE_MAX_SERVER_RETRIES = 2
 const PROJECT_PROGRESS_SAVE_ERROR = 'Layihə dəyişiklikləri serverdə saxlanmadı. Bağlantını yoxlayın və yenidən cəhd edin.'
 
 let lastObservedWorkspace = ''
@@ -294,6 +297,19 @@ const formatSaveError = (error: unknown) => {
   return PROJECT_PROGRESS_SAVE_ERROR
 }
 
+const isPermanentSaveStatus = (status: number) => [400, 401, 403, 404, 409, 422].includes(status)
+
+const shouldRetryWorkspaceSave = (error: unknown, retryCount: number) => {
+  if (error instanceof ApiClientError) {
+    if (isPermanentSaveStatus(error.status)) return false
+    if ([502, 503, 504].includes(error.status)) return true
+    if (error.status >= 500) return retryCount < PROJECT_PROGRESS_SAVE_MAX_SERVER_RETRIES
+    return false
+  }
+
+  return true
+}
+
 const flushProjectWorkspaceSaveQueue = async () => {
   if (saveInFlight) return
   saveInFlight = true
@@ -316,13 +332,15 @@ const flushProjectWorkspaceSaveQueue = async () => {
         const latest = currentWorkspace()
         if (latest.workspaceTenantId === job.tenantId) {
           const latestSerialized = serializeWorkspace(latest)
+          const nextRetryCount = job.retryCount + 1
           pendingSaveJob = latestSerialized === job.serialized
-            ? job
+            ? { ...job, retryCount: nextRetryCount }
             : {
                 revision: ++saveRevision,
                 tenantId: job.tenantId,
                 serialized: latestSerialized,
                 workspace: latest,
+                retryCount: 0,
               }
 
           useProjectProgressStore.setState({
@@ -331,7 +349,7 @@ const flushProjectWorkspaceSaveQueue = async () => {
             serverPendingSave: true,
           })
           if (import.meta.env.DEV) console.warn('Project progress workspace save failed', error)
-          if (typeof window !== 'undefined') {
+          if (shouldRetryWorkspaceSave(error, job.retryCount) && typeof window !== 'undefined') {
             clearSaveTimer()
             saveTimer = window.setTimeout(() => {
               saveTimer = undefined
@@ -360,6 +378,7 @@ const flushProjectWorkspaceSaveQueue = async () => {
           tenantId: job.tenantId,
           serialized: latestSerialized,
           workspace: latest,
+          retryCount: 0,
         }
       }
     }
@@ -383,6 +402,7 @@ const queueServerSave = (workspace: ProjectProgressData, options?: { immediate?:
     tenantId,
     serialized,
     workspace,
+    retryCount: 0,
   }
 
   useProjectProgressStore.setState({
