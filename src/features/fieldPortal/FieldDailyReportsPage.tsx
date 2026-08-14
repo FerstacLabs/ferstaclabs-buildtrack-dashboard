@@ -201,7 +201,7 @@ export const FieldDailyReportsPage = () => {
     }
   }
 
-  if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
+  if (!selectedSiteId) return <Alert type="info" showIcon message="Layihə seçin" />
 
   return (
     <div className="field-page">
@@ -222,7 +222,7 @@ export const FieldDailyReportsPage = () => {
           pagination={{ pageSize: 8 }}
           columns={[
             { title: 'Tarix', dataIndex: 'reportDate' },
-            { title: 'Obyekt', dataIndex: 'siteName' },
+            { title: 'Layihə', dataIndex: 'siteName' },
             { title: 'Sətir sayı', render: (_, row) => row.lines.length },
             {
               title: 'İş saatı',

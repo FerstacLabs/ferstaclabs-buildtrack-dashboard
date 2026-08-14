@@ -277,7 +277,7 @@ export const WorkersPage = () => {
         : assignedSiteIds[0]
       const siteId = primarySiteId ?? editingWorker?.siteId ?? sites[0].id
       if (assignedSiteIds.length === 0) {
-        void message.warning('Obyekt təyinatı seçilməyib. Bu işçi yalnız “Bütün obyektlər” görünüşündə qalacaq.')
+        void message.warning('Layihə təyinatı seçilməyib. Bu işçi yalnız “Bütün layihələr” görünüşündə qalacaq.')
       }
       if (values.attendanceSource === 'Manual' && hasCameraIdentity(values)) {
         void message.warning('Kamera identifikasiyası daxil edilib, amma saat mənbəyi Manual seçilib.')
@@ -378,7 +378,7 @@ export const WorkersPage = () => {
   const columns: TableColumnsType<WorkerRow> = [
     { title: 'İşçi', dataIndex: 'workerName', render: (value, row) => <strong>{value}<br /><span className="muted-text">İşçi kodu: {row.workerExternalId}</span></strong> },
     { title: 'Briqada', dataIndex: 'crewName' },
-    { title: 'Obyekt təyinatı', render: (_, row) => row.assignedSiteNames?.length ? row.assignedSiteNames.join(', ') : <Tag>Təyin edilməyib</Tag> },
+    { title: 'Layihə təyinatı', render: (_, row) => row.assignedSiteNames?.length ? row.assignedSiteNames.join(', ') : <Tag>Təyin edilməyib</Tag> },
     { title: 'Rol', dataIndex: 'role' },
     { title: 'Kamera identifikasiyası', render: (_, row) => row.dahuaCardName || row.dahuaUserId ? <span>Dahua CardName: {row.dahuaCardName || '-'}<br /><span className="muted-text">UserID: {row.dahuaUserId || '-'} | {row.cameraDeviceName || 'Bütün kameralar'}</span></span> : <Tag>Bağlanmayıb</Tag> },
     { title: 'Saat mənbəyi', dataIndex: 'attendanceSource', render: (value: AttendanceSource) => sourceLabel[value] },
@@ -459,19 +459,19 @@ export const WorkersPage = () => {
           <Form.Item name="attendanceSource" label="Kamera mənbəyi"><Select options={[{ value: 'Camera', label: 'Kamera' }, { value: 'Manual', label: 'Manual' }, { value: 'ForemanTablet', label: 'Qarışıq / Prorab tablet' }]} /></Form.Item>
           <Form.Item name="status" label="Status"><Select options={[{ value: 'active', label: 'Aktiv' }, { value: 'inactive', label: 'Passiv' }]} /></Form.Item>
 
-          <Divider>Obyekt təyinatı</Divider>
+          <Divider>Layihə təyinatı</Divider>
           <Typography.Paragraph type="secondary">
-            İşçi seçilmiş obyektlərdə görünəcək. Təyinat boş saxlanarsa, işçi yalnız “Bütün obyektlər” görünüşündə göstərilir.
+            İşçi seçilmiş layihələrdə görünəcək. Təyinat boş saxlanarsa, işçi yalnız “Bütün layihələr” görünüşündə göstərilir.
           </Typography.Paragraph>
-          <Form.Item name="assignedSiteIds" label="Obyektlər">
-            <Select mode="multiple" allowClear showSearch options={siteOptions} placeholder="Obyekt seçin" />
+          <Form.Item name="assignedSiteIds" label="Layihələr">
+            <Select mode="multiple" allowClear showSearch options={siteOptions} placeholder="Layihə seçin" />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, current) => prev.assignedSiteIds !== current.assignedSiteIds} noStyle>
             {({ getFieldValue }) => {
               const assignedSiteIds = getFieldValue('assignedSiteIds') ?? []
               return (
-                <Form.Item name="primarySiteId" label="Əsas obyekt">
-                  <Select allowClear options={siteOptions.filter((site) => assignedSiteIds.includes(site.value))} placeholder="Əsas obyekti seçin" />
+                <Form.Item name="primarySiteId" label="Əsas layihə">
+                  <Select allowClear options={siteOptions.filter((site) => assignedSiteIds.includes(site.value))} placeholder="Əsas layihəsi seçin" />
                 </Form.Item>
               )
             }}

@@ -115,7 +115,7 @@ export const parseExcelFile = async (file: File): Promise<ExcelImportResult> => 
   )
 
   if (company.length === 0) warnings.push('Company sheet-ində ən azı 1 sətir olmalıdır.')
-  if (sites.length === 0) warnings.push('Sites sheet-ində ən azı 1 obyekt olmalıdır.')
+  if (sites.length === 0) warnings.push('Sites sheet-ində ən azı 1 layihə olmalıdır.')
   if (workers.length === 0) warnings.push('Workers sheet-ində ən azı 1 işçi olmalıdır.')
 
   return {

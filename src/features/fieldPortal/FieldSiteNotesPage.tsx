@@ -51,7 +51,7 @@ export const FieldSiteNotesPage = () => {
     await load()
   }
 
-  if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
+  if (!selectedSiteId) return <Alert type="info" showIcon message="Layihə seçin" />
 
   return (
     <div className="field-page">

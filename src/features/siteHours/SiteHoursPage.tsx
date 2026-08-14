@@ -65,7 +65,7 @@ export const SiteHoursPage = () => {
   const chartData = rows.map((row) => ({ name: row.objectName, plan: row.normalHours + row.overtimeHours + row.riskyHours, faktiki: row.normalHours + row.overtimeHours }))
 
   const columns: TableColumnsType<SiteHoursPanelRow> = [
-    { title: 'Obyekt', dataIndex: 'objectName', sorter: (a, b) => a.objectName.localeCompare(b.objectName) },
+    { title: 'Layihə', dataIndex: 'objectName', sorter: (a, b) => a.objectName.localeCompare(b.objectName) },
     { title: 'Plan İşçi', dataIndex: 'plannedWorkers', sorter: (a, b) => a.plannedWorkers - b.plannedWorkers },
     { title: 'Faktiki İşçi', dataIndex: 'actualWorkers', sorter: (a, b) => a.actualWorkers - b.actualWorkers },
     { title: 'Gəlməyən', dataIndex: 'absentWorkers' },
@@ -79,7 +79,7 @@ export const SiteHoursPage = () => {
 
   return (
     <div className="page-stack">
-      <PageTitle title="2. Obyekt Üzrə İş Saatı və Əmək Yükü" extra={<ProjectSelect pageKey="siteHours" />} />
+      <PageTitle title="2. Layihə Üzrə İş Saatı və Əmək Yükü" extra={<ProjectSelect pageKey="siteHours" />} />
 
       <section className="kpi-grid">
         <KpiCard icon={<TeamOutlined />} title="Plan İşçi" value={formatNumber(totals.planned)} trend="central worker planı" tone="green" />
@@ -89,13 +89,13 @@ export const SiteHoursPage = () => {
       </section>
 
       <DataTable
-        title="Obyektlər üzrə iş saatı və əmək yükü"
+        title="Layihələr üzrə iş saatı və əmək yükü"
         columns={columns}
         data={rows}
         extra={
           <div className="table-actions">
-            <ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('obyekt-saatlari', rows)}>Excel Export</ToolbarButton>
-            <ToolbarButton icon={<DownloadOutlined />} tone="purple" onClick={() => exportRowsToCsv('obyekt-saatlari', rows)}>CSV Export</ToolbarButton>
+            <ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('layihə-saatlari', rows)}>Excel Export</ToolbarButton>
+            <ToolbarButton icon={<DownloadOutlined />} tone="purple" onClick={() => exportRowsToCsv('layihə-saatlari', rows)}>CSV Export</ToolbarButton>
           </div>
         }
       />
@@ -118,8 +118,8 @@ export const SiteHoursPage = () => {
         </ExplanationCard>
         <ExplanationCard icon={<ClockCircleOutlined />} title="Nə üçün istifadə olunur?">
           <ul>
-            <li>Obyektlər üzrə işçi sayı və iş saatlarının monitorinqi.</li>
-            <li>Əmək xərclərinin obyektlər üzrə təhlili.</li>
+            <li>Layihələr üzrə işçi sayı və iş saatlarının monitorinqi.</li>
+            <li>Əmək xərclərinin layihələr üzrə təhlili.</li>
             <li>Qərarverməni məlumat əsaslı və sürətli etmək.</li>
           </ul>
         </ExplanationCard>

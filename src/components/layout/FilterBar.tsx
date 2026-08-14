@@ -54,7 +54,7 @@ export const FilterBar = ({
   showMonth,
   showReportType,
   advancedFields,
-  sitePlaceholder = 'Bütün Obyektlər',
+  sitePlaceholder = 'Bütün Layihələr',
   brigadePlaceholder = 'Bütün Briqadalar',
 }: FilterBarProps) => {
   const { filters, setFilter } = useBuildTrackStore()

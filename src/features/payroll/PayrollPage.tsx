@@ -116,7 +116,7 @@ export const PayrollPage = () => {
 
   const columns: TableColumnsType<ProjectPayrollRow> = [
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName), render: (value, row) => <strong>{value}<br /><span className="muted-text">{row.workerExternalId}</span></strong> },
-    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Layihə', dataIndex: 'objectName' },
     { title: 'Briqada', dataIndex: 'crewName', filters: crewOptions.map((option) => ({ text: option.label, value: option.value })), onFilter: (value, row) => row.crewName === value },
     { title: 'Rol', dataIndex: 'role' },
     { title: 'Tarif', dataIndex: 'hourlyRate', align: 'right', render: (value) => `${formatCurrency(Number(value))}/saat` },

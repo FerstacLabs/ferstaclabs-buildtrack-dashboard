@@ -91,7 +91,7 @@ export const FieldLayout = () => {
           <Select
             className="field-site-select"
             value={selectedSiteId}
-            placeholder="Obyekt seçin"
+            placeholder="Layihə seçin"
             options={assignments.map((assignment) => ({ value: assignment.siteId, label: assignment.siteName }))}
             onChange={setSelectedSiteId}
           />
@@ -102,8 +102,8 @@ export const FieldLayout = () => {
           <Alert
             type="warning"
             showIcon
-            message="Sizə hələ obyekt təyin edilməyib"
-            description="Admin panelindən prorab üçün aktiv obyekt təyinatı yaradılmalıdır."
+            message="Sizə hələ layihə təyin edilməyib"
+            description="Admin panelindən prorab üçün aktiv layihə təyinatı yaradılmalıdır."
           />
         ) : <Outlet />}
       </main>

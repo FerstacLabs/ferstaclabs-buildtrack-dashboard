@@ -259,7 +259,7 @@ public sealed class ProjectProgressDailyReportSyncServiceTests
     private static void SeedWorkspace(BuildTrackDbContext db, Guid tenantId, Guid siteId, decimal quantity)
     {
         db.Tenants.Add(new Tenant { Id = tenantId, Code = "TENANT", CompanyName = "Tenant" });
-        db.Sites.Add(new Site { Id = siteId, TenantId = tenantId, Name = "Obyekt", Address = "Bakı", TimeZone = "Asia/Baku" });
+        db.Sites.Add(new Site { Id = siteId, TenantId = tenantId, Name = "Layihə", Address = "Bakı", TimeZone = "Asia/Baku" });
         db.ProjectProgressWorkspaces.Add(new ProjectProgressWorkspace
         {
             TenantId = tenantId,
@@ -268,7 +268,7 @@ public sealed class ProjectProgressDailyReportSyncServiceTests
                 workspaceTenantId = tenantId.ToString(),
                 projects = new[] { new { id = "project-a", name = "Project", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = "estimate-a" } },
                 activeProjectId = "project-a",
-                objects = new[] { new { id = siteId.ToString(), name = "Obyekt", projectId = "project-a", status = "InProgress" } },
+                objects = new[] { new { id = siteId.ToString(), name = "Layihə", projectId = "project-a", status = "InProgress" } },
                 project = new { id = "project-a", name = "Project", currency = "AZN", createdAt = DateTimeOffset.UtcNow, activeEstimateVersionId = "estimate-a" },
                 estimateVersions = Array.Empty<object>(),
                 summary = new { totalAmount = 100, laborAmount = 40, materialAmount = 60, hiddenCostAmount = 0, currency = "AZN" },

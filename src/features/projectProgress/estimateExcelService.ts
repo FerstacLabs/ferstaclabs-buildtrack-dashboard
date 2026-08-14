@@ -378,8 +378,8 @@ export const exportEstimateWorkbook = ({
 
   appendJsonSheet(workbook, [
     {
-      Layihə: projectName,
-      Obyekt: objectName,
+      'Smeta adı': projectName,
+      Layihə: objectName,
       Versiya: estimateVersionName,
       Valyuta: summary.currency,
       'Yekun smeta': summary.totalAmount,

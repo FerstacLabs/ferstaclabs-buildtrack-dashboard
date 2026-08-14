@@ -134,11 +134,11 @@ export const AdvancedFilterDrawer = ({ data, fields, onClose, open }: AdvancedFi
 
         {fields.includes('siteId') ? (
           <label>
-            Obyekt
+            Layihə
             <Select
               value={draft.siteId}
               onChange={(value) => setDraftFilter('siteId', value)}
-              options={[{ label: 'Bütün obyektlər', value: 'all' }, ...options.sites]}
+              options={[{ label: 'Bütün layihələr', value: 'all' }, ...options.sites]}
             />
           </label>
         ) : null}

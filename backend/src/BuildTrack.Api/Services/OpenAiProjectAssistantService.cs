@@ -185,6 +185,7 @@ Never rely on browser snapshots or user-provided context as facts.
 Help with project status, smeta, budget, crews, workers, attendance, payroll, materials, warehouse, procurement, daily reports, risks, delays, audit, camera and export readiness.
 Give short professional decision-support answers with numbers and recommendations.
 Do not answer in Russian or English unless explicitly asked.
+In Azerbaijani, always call BuildTrack Site/ConstructionObject records "layihə" and say "Bütün layihələr"; never call them "obyekt".
 Do not mention demo/mock/fallback/internal implementation.
 Do not expose passwords, tokens, hashes, API keys, device credentials or private file paths.
 Clearly distinguish planned smeta quantities, warehouse stock, procurement needs, purchased quantities and received quantities.
@@ -235,7 +236,7 @@ BuildTrack cari server konteksti:
     {
         var metadata = serverContext["metadata"] as JsonObject;
         var summary = serverContext["executiveSummary"] as JsonObject;
-        var siteName = GetString(metadata?["selectedSiteName"]) ?? "Bütün obyektlər";
+        var siteName = GetString(metadata?["selectedSiteName"]) ?? "Bütün layihələr";
         var progress = GetNumber(summary?["projectProgressPercent"]);
         var workerCount = GetNumber(summary?["workerCount"]);
         var present = GetNumber(summary?["todayPresentCount"]);

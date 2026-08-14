@@ -82,7 +82,7 @@ const asEntity = (type: string, id: string, name: string): AiRelatedEntity => ({
 const list = (items: string[]) => items.filter(Boolean).map((item, index) => `${index + 1}. ${item}`).join('\n')
 
 const objectLabel = (context: AiProjectContext) =>
-  context.selectedObject?.name ?? `${formatNumber(context.objects.length)} obyekt`
+  context.selectedObject?.name ?? `${formatNumber(context.objects.length)} layihə`
 
 const topBy = <T,>(items: T[], selector: (item: T) => number, count = 3) =>
   items.slice().sort((a, b) => selector(b) - selector(a)).slice(0, count)
@@ -143,7 +143,7 @@ export const answerOverallStatus = (context: AiProjectContext): AiAnswer => {
     relatedEntities: topDelay ? [asEntity('stage', topDelay.id, topDelay.name)] : undefined,
     suggestedQuestions: ['Hansı işlər gecikir?', 'Büdcə vəziyyəti necədir?', 'Bu gün nəyə baxmalıyam?'],
     answer: `Hazırda ${objectLabel(context)} üzrə vəziyyət ${summary.delayedStagesCount > 0 || summary.materialCriticalCount > 0 ? 'nəzarət tələb edir' : 'nəzarət altındadır'}.\n${list([
-      `Ümumi icra göstəricisi ${formatPercent(summary.overallProgressPercent, 1)}-dir; ${formatNumber(summary.activeObjectCount)} aktiv obyekt izlənir.`,
+      `Ümumi icra göstəricisi ${formatPercent(summary.overallProgressPercent, 1)}-dir; ${formatNumber(summary.activeObjectCount)} aktiv layihə izlənir.`,
       `Plan/fakt saat: ${formatHours(summary.totalPlannedHours, 0)} / ${formatHours(summary.totalActualHours, 0)}; qalan saat ${formatHours(summary.remainingHours, 0)}.`,
       `Gecikən etap: ${formatNumber(summary.delayedStagesCount)}, dayandırılmış etap: ${formatNumber(summary.pausedStagesCount)}, riskli işçi: ${formatNumber(summary.riskWorkersCount)}.`,
       `Kritik material qalığı: ${formatNumber(summary.materialCriticalCount)}, cari payroll yükü: ${formatCurrency(summary.payrollFinalTotal)}.`,
@@ -217,7 +217,7 @@ export const answerWorkforce = (context: AiProjectContext, query: string): AiAns
       relatedEntities: [asEntity('worker', worker.id, worker.workerName)],
       suggestedQuestions: ['Bu işçinin maaşı nə qədərdir?', 'Hansı briqada gecikir?'],
       answer: `${worker.workerName} üzrə vəziyyət:\n${list([
-        `Obyekt: ${worker.objectName}; briqada: ${worker.crewName}; rol: ${worker.role}.`,
+        `Layihə: ${worker.objectName}; briqada: ${worker.crewName}; rol: ${worker.role}.`,
         `Təsdiqli saat: ${formatHours(worker.approvedHours, 1)}, overtime: ${formatHours(worker.overtimeHours, 1)}.`,
         `Cari payroll məbləği: ${formatCurrency(worker.payrollAmount)}; risk balı: ${formatNumber(worker.riskScore)}.`,
         worker.riskScore >= 60 ? 'Tövsiyə: davamiyyət və prorab təsdiqləri ayrıca yoxlanmalıdır.' : 'Tövsiyə: cari göstəricilər normal görünür.',
@@ -326,7 +326,7 @@ export const answerObjectStatus = (context: AiProjectContext, objectName?: strin
     intent: 'OBJECT_STATUS',
     confidence: object ? 0.94 : 0.78,
     relatedEntities: object ? [asEntity('object', object.id, object.name)] : undefined,
-    suggestedQuestions: ['Bu obyekt üzrə hansı etap gecikir?', 'Bu obyektin briqadaları necədir?', 'Material riski var?'],
+    suggestedQuestions: ['Bu layihə üzrə hansı etap gecikir?', 'Bu layihəsin briqadaları necədir?', 'Material riski var?'],
     answer: `${object?.name ?? objectLabel(context)} üzrə vəziyyət:\n${list([
       `Smeta məbləği: ${formatCurrency(total)}, icra göstəricisi ${formatPercent(progress, 1)}.`,
       `Plan/fakt saat: ${formatHours(plannedHours, 0)} / ${formatHours(actualHours, 0)}.`,
@@ -361,7 +361,7 @@ export const answerCrewStatus = (context: AiProjectContext, query: string): AiAn
       confidence: 0.88,
       relatedEntities: relatedMatches.map((item) => asEntity('crew', item.id, item.name)),
       suggestedQuestions: [`${crew.objectName} üzrə ${crew.name} necədir?`, 'Hansı briqada gecikir?'],
-      answer: `Sorğuda bir neçə uyğun briqada tapıldı. Ümumi Monolit/Hörgü tipli xülasə:\n${list(relatedMatches.map((item) => `${item.objectName}: ${item.name}, prorab ${item.foremanName}, işçi ${formatNumber(item.workerCount)}, gedişat ${formatPercent(item.progressPercent ?? 0, 1)}, plan/fakt saat fərqi ${formatHours(Math.max(0, item.planFactGapHours), 0)}.`))}\nTövsiyə: konkret obyekt adı ilə soruşsanız, daha dəqiq qərar xülasəsi verə bilərəm.`,
+      answer: `Sorğuda bir neçə uyğun briqada tapıldı. Ümumi Monolit/Hörgü tipli xülasə:\n${list(relatedMatches.map((item) => `${item.objectName}: ${item.name}, prorab ${item.foremanName}, işçi ${formatNumber(item.workerCount)}, gedişat ${formatPercent(item.progressPercent ?? 0, 1)}, plan/fakt saat fərqi ${formatHours(Math.max(0, item.planFactGapHours), 0)}.`))}\nTövsiyə: konkret layihə adı ilə soruşsanız, daha dəqiq qərar xülasəsi verə bilərəm.`,
     }
   }
 
@@ -371,7 +371,7 @@ export const answerCrewStatus = (context: AiProjectContext, query: string): AiAn
     relatedEntities: [asEntity('crew', crew.id, crew.name)],
     suggestedQuestions: ['Bu briqadanın işçiləri kimlərdir?', 'Bu briqadada risk varmı?', 'Aktiv iş hansıdır?'],
     answer: `${crew.name} üzrə vəziyyət:\n${list([
-      `Obyekt: ${crew.objectName}; prorab: ${crew.foremanName}; işçi sayı: ${formatNumber(crew.workerCount)}.`,
+      `Layihə: ${crew.objectName}; prorab: ${crew.foremanName}; işçi sayı: ${formatNumber(crew.workerCount)}.`,
       `Aktiv iş: ${crew.activeWorkItemName ?? crew.activeStageName ?? 'təyin edilməyib'}.`,
       `Gedişat: ${formatPercent(crew.progressPercent ?? 0, 1)}; plan/fakt saat: ${formatHours(crew.plannedHours, 0)} / ${formatHours(crew.actualHoursDerived, 0)}.`,
       crew.planFactGapHours > 40 ? `Risk: plan/fakt fərqi ${formatHours(crew.planFactGapHours, 0)}-dır.` : 'Risk: ciddi saat fərqi görünmür.',
@@ -389,7 +389,7 @@ export const answerMaterials = (context: AiProjectContext, query: string): AiAns
       relatedEntities: [asEntity('material', material.id, material.name)],
       suggestedQuestions: ['Hansı material azalır?', 'Bu material hansı etapla bağlıdır?'],
       answer: `${material.name} üzrə vəziyyət:\n${list([
-        `Obyekt: ${material.objectName}; bağlı etap: ${material.stageName ?? 'qeyd edilməyib'}.`,
+        `Layihə: ${material.objectName}; bağlı etap: ${material.stageName ?? 'qeyd edilməyib'}.`,
         `Plan miqdar: ${formatNumber(material.quantity, 1)} ${material.unit}; istifadə: ${formatNumber(material.usedQuantity, 1)} ${material.unit} (${formatPercent(material.usedPercent, 1)}).`,
         `Qalıq: ${formatNumber(material.remainingQuantity, 1)} ${material.unit} (${formatPercent(material.remainingPercent, 1)}).`,
         `Təchizatçı: ${material.supplier ?? 'qeyd edilməyib'}; təxmini dəyər: ${formatCurrency(material.totalValue)}.`,
@@ -438,7 +438,7 @@ export const answerPayroll = (context: AiProjectContext, query: string): AiAnswe
       relatedEntities: [asEntity('worker', worker.id, worker.workerName)],
       suggestedQuestions: ['Bu işçinin saatları necədir?', 'Export hazırdır?'],
       answer: `${worker.workerName} üçün maaş hesabı:\n${list([
-        `Obyekt: ${worker.objectName}; briqada: ${worker.crewName}; rol: ${worker.role}.`,
+        `Layihə: ${worker.objectName}; briqada: ${worker.crewName}; rol: ${worker.role}.`,
         `Təsdiqli saat: ${formatHours(worker.approvedHours, 1)}, overtime: ${formatHours(worker.overtimeHours, 1)}.`,
         `Saatlıq tarif: ${formatCurrency(worker.hourlyRate)}; yekun məbləğ: ${formatCurrency(worker.payrollAmount)}.`,
         worker.riskScore >= 60 ? 'Tövsiyə: risk balı yüksək olduğu üçün təsdiqli saatlar ayrıca yoxlanmalıdır.' : 'Tövsiyə: payroll sətiri normal görünür.',
@@ -466,7 +466,7 @@ export const answerHelp = (): AiAnswer => ({
   confidence: 0.98,
   suggestedQuestions: executiveSuggestions,
   answer: `Mən BuildTrack üzrə rəhbər köməkçisi kimi bu mövzularda cavab verə bilirəm:\n${list([
-    'Ümumi layihə və obyekt statusu.',
+    'Ümumi layihə və layihə statusu.',
     'Gecikən etaplar, riskli işçilər və prorab qeydləri.',
     'Büdcə, smeta, payroll və export vəziyyəti.',
     'Briqada, işçi saatları və plan/fakt fərqləri.',

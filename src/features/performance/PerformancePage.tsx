@@ -27,7 +27,7 @@ export const PerformancePage = () => {
   const columns: TableColumnsType<PerformanceRow> = [
     { title: 'İşçi adı', dataIndex: 'full_name', sorter: (a, b) => a.full_name.localeCompare(b.full_name) },
     { title: 'Vəzifə', dataIndex: 'position' },
-    { title: 'Obyekt/Briqada', dataIndex: 'site_brigade' },
+    { title: 'Layihə/Briqada', dataIndex: 'site_brigade' },
     { title: 'Period', dataIndex: 'period' },
     { title: 'Davamiyyət %', dataIndex: 'attendance_percent', render: (value) => formatPercent(value) },
     { title: 'Orta Gecikmə', dataIndex: 'average_late', render: (value) => `${formatNumber(value)} dəq` },

@@ -243,7 +243,7 @@ const hasBusinessCollections = (data: Partial<ProjectProgressData>) =>
   )
 
 const legacySummary = (data: Partial<ProjectProgressData>) =>
-  `Layihə: ${data.projects?.length ?? 0}, obyekt: ${data.objects?.length ?? 0}, smeta sətri: ${data.workItems?.length ?? 0}, briqada: ${data.crews?.length ?? 0}, işçi: ${data.workerAssignments?.length ?? 0}`
+  `Layihə: ${data.projects?.length ?? 0}, layihə: ${data.objects?.length ?? 0}, smeta sətri: ${data.workItems?.length ?? 0}, briqada: ${data.crews?.length ?? 0}, işçi: ${data.workerAssignments?.length ?? 0}`
 
 interface WorkspaceSaveJob {
   revision: number

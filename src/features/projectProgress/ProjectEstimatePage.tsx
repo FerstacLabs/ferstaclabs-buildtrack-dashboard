@@ -400,7 +400,7 @@ export const ProjectEstimatePage = () => {
       useProjectSelectionStore.getState().setSelectedProjectId(site.id)
       projectForm.resetFields()
       setProjectModalOpen(false)
-      void message.success('Yeni layihə yaradıldı və bütün modullarda obyekt kimi göründü')
+      void message.success('Yeni layihə yaradıldı və bütün modullarda layihə kimi göründü')
       return
     } catch (error) {
       console.warn('Backend site creation failed; local project object fallback will be used', error)
@@ -409,7 +409,7 @@ export const ProjectEstimatePage = () => {
     const objectId = addObject({
       name,
       address: values.address?.trim(),
-      zone: values.address?.trim() || 'Yeni obyekt',
+      zone: values.address?.trim() || 'Yeni layihə',
       plannedStartDate: toDateString(values.plannedStartDate),
       plannedEndDate: toDateString(values.plannedEndDate),
       clientName: values.clientName?.trim(),
@@ -419,7 +419,7 @@ export const ProjectEstimatePage = () => {
 
     projectForm.resetFields()
     setProjectModalOpen(false)
-    void message.success('Yeni layihə yaradıldı və obyekt filterlərinə əlavə olundu')
+    void message.success('Yeni layihə yaradıldı və layihə filterlərinə əlavə olundu')
 
     useProjectSelectionStore.getState().setSelectedProjectId(objectId)
   }
@@ -493,7 +493,7 @@ export const ProjectEstimatePage = () => {
         createdCrews: 0,
         createdMaterials: 0,
         skippedRows: rows.length + invalidRows.length,
-        invalidRows: [...invalidRows, { rowNumber: 0, reason: 'Aktiv obyekt tapılmadı' }],
+        invalidRows: [...invalidRows, { rowNumber: 0, reason: 'Aktiv layihə tapılmadı' }],
       }
     }
 
@@ -883,9 +883,9 @@ export const ProjectEstimatePage = () => {
         </Form>
       </Drawer>
 
-      <Modal title="Yeni layihə / obyekt" open={projectModalOpen} onCancel={() => setProjectModalOpen(false)} onOk={() => projectForm.submit()} okText="Yarat" cancelText="İmtina">
+      <Modal title="Yeni layihə" open={projectModalOpen} onCancel={() => setProjectModalOpen(false)} onOk={() => projectForm.submit()} okText="Yarat" cancelText="İmtina">
         <Form form={projectForm} layout="vertical" onFinish={createProjectObject}>
-          <Form.Item name="name" label="Layihə / obyekt adı" rules={[{ required: true, message: 'Obyekt adı yazın' }]}><Input placeholder="Məsələn: Villa B blok" /></Form.Item>
+          <Form.Item name="name" label="Layihə adı" rules={[{ required: true, message: 'Layihə adı yazın' }]}><Input placeholder="Məsələn: Villa B blok" /></Form.Item>
           <Form.Item name="address" label="Ünvan"><Input /></Form.Item>
           <Space.Compact block>
             <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = projectForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) projectForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>

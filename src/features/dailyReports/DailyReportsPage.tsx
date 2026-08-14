@@ -107,7 +107,7 @@ export const DailyReportsPage = () => {
 
   const columns: TableColumnsType<FieldDailyReport> = [
     { title: 'Tarix', dataIndex: 'reportDate', sorter: (a, b) => a.reportDate.localeCompare(b.reportDate), width: 120 },
-    { title: 'Obyekt', dataIndex: 'siteName', sorter: (a, b) => (a.siteName || '').localeCompare(b.siteName || ''), width: 180 },
+    { title: 'Layihə', dataIndex: 'siteName', sorter: (a, b) => (a.siteName || '').localeCompare(b.siteName || ''), width: 180 },
     { title: 'Prorab', dataIndex: 'supervisorName', sorter: (a, b) => (a.supervisorName || '').localeCompare(b.supervisorName || ''), width: 170 },
     { title: 'Hava', dataIndex: 'weatherCondition', width: 120, render: (value) => value || '-' },
     { title: 'Görülən işlər', render: (_, row) => workSummary(row.lines), ellipsis: true },

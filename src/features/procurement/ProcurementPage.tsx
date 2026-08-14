@@ -202,7 +202,7 @@ export const ProcurementPage = () => {
                   ) }}
                   columns={[
                     { title: 'Kod', dataIndex: 'code' },
-                    { title: 'Obyekt', dataIndex: 'siteName' },
+                    { title: 'Layihə', dataIndex: 'siteName' },
                     { title: 'Prorab', dataIndex: 'supervisorName' },
                     { title: 'Təcillik', dataIndex: 'urgency', render: (value) => priorityLabel(value) },
                     { title: 'Status', render: (_, row) => <WarehouseRequestStatusTag status={row.status} /> },
@@ -423,7 +423,7 @@ export const ProcurementPage = () => {
           <Space direction="vertical" size="middle" className="full-width">
             <div>
               <strong>{handoverRequest.code}</strong>
-              <div className="muted-text">{handoverRequest.siteName || 'Obyekt'} / {handoverRequest.supervisorName || 'Prorab'}</div>
+              <div className="muted-text">{handoverRequest.siteName || 'Layihə'} / {handoverRequest.supervisorName || 'Prorab'}</div>
             </div>
             <Table
               size="small"

@@ -122,7 +122,7 @@ export const SecurityEventsPage = () => {
       const initialSiteId = resolveInitialSiteId(siteRows, siteId)
       if (initialSiteId && initialSiteId !== siteId) setSiteId(initialSiteId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Obyekt siyahısı yüklənmədi')
+      setError(err instanceof Error ? err.message : 'Layihə siyahısı yüklənmədi')
     }
   }
 
@@ -257,7 +257,7 @@ export const SecurityEventsPage = () => {
       />
 
       <section className="filter-bar live-filter-bar">
-        <Select value={siteId} onChange={setSiteId} options={siteOptions} placeholder="Obyekt seçin" />
+        <Select value={siteId} onChange={setSiteId} options={siteOptions} placeholder="Layihə seçin" />
         <input className="ant-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} style={{ maxWidth: 180 }} />
         <Select value={statusFilter} onChange={setStatusFilter} options={statusFilterOptions} style={{ minWidth: 180 }} />
         <ToolbarButton icon={<ReloadOutlined />} onClick={() => loadEvents()}>Yenilə</ToolbarButton>

@@ -45,7 +45,7 @@ public sealed class TenantAccessPolicyTests
 
         tenantContext.TenantId = ids.DemoTenantId;
 
-        Assert.Equal(["API Test Obyekti"], await db.Sites.OrderBy(x => x.Name).Select(x => x.Name).ToArrayAsync());
+        Assert.Equal(["API Test Layihəsi"], await db.Sites.OrderBy(x => x.Name).Select(x => x.Name).ToArrayAsync());
         Assert.Equal(["API TEST TERMINAL"], await db.Devices.OrderBy(x => x.Name).Select(x => x.Name).ToArrayAsync());
         Assert.Equal(["demo worker"], await db.AttendanceEvents.OrderBy(x => x.WorkerName).Select(x => x.WorkerName!).ToArrayAsync());
         Assert.Equal(["demo worker"], await db.AttendanceSessions.OrderBy(x => x.WorkerName).Select(x => x.WorkerName!).ToArrayAsync());
@@ -79,7 +79,7 @@ public sealed class TenantAccessPolicyTests
             new Tenant { Id = goldTenantId, CompanyName = "GOLD MMC", Code = "GOLDMMC", Status = TenantStatus.Active });
 
         db.Sites.AddRange(
-            new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Obyekti" },
+            new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Layihəsi" },
             new Site { Id = goldSiteId, TenantId = goldTenantId, Name = "GOLD PALACE" });
 
         db.Devices.AddRange(

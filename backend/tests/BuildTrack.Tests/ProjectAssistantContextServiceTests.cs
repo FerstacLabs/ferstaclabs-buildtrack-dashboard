@@ -93,10 +93,97 @@ public sealed class ProjectAssistantContextServiceTests
         await db.SaveChangesAsync();
 
         var service = new BuildTrackAiContextService(db, tenantContext, NullLogger<BuildTrackAiContextService>.Instance);
-        var result = await service.BuildContextAsync("obyekt xülasəsi", null, siteB, CancellationToken.None);
+        var result = await service.BuildContextAsync("layihə xülasəsi", null, siteB, CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal(404, result.StatusCode);
+        Assert.Contains("layihə", result.Error ?? string.Empty);
+        Assert.DoesNotContain("obyekt", result.Error ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildContext_FiltersNormalizedProjectDataBySelectedSiteOnly()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteA = Guid.NewGuid();
+        var siteB = Guid.NewGuid();
+        var tenantContext = new TenantContext { TenantId = tenantId, Role = BuildTrackUserRole.Manager.ToString() };
+        await using var db = CreateDbContext(tenantContext);
+
+        db.Tenants.Add(new Tenant { Id = tenantId, CompanyName = "Tenant MMC", Code = "TEN" });
+        db.Sites.AddRange(
+            new Site { Id = siteA, TenantId = tenantId, Name = "Blok A", TimeZone = "Asia/Baku" },
+            new Site { Id = siteB, TenantId = tenantId, Name = "Blok B", TimeZone = "Asia/Baku" });
+        db.Projects.Add(new ProjectRecord { Id = "tenant-project", TenantId = tenantId, Name = "Residence", CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectSites.AddRange(
+            new ProjectSiteRecord { Id = "site-a-link", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectSiteRecord { Id = "site-b-link", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectStages.AddRange(
+            new ProjectStageRecord { Id = "stage-a", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, Name = "Block A stage", TotalCost = 1000, CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectStageRecord { Id = "stage-b", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, Name = "Block B stage", TotalCost = 2000, CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectWorkItems.AddRange(
+            new ProjectWorkItemRecord { Id = "work-a", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, StageId = "stage-a", Name = "Block A concrete work", Unit = "m3", Quantity = 1, TotalCost = 1000, CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectWorkItemRecord { Id = "work-b", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, StageId = "stage-b", Name = "Block B plaster work", Unit = "m2", Quantity = 1, TotalCost = 2000, CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectCrews.AddRange(
+            new ProjectCrewRecord { Id = "crew-a", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, Name = "Block A crew", Type = "Monolit", ForemanName = "Prorab A", CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectCrewRecord { Id = "crew-b", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, Name = "Block B crew", Type = "Suvaq", ForemanName = "Prorab B", CreatedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+
+        var service = new BuildTrackAiContextService(db, tenantContext, NullLogger<BuildTrackAiContextService>.Instance);
+        var result = await service.BuildContextAsync("layihə üzrə status", null, siteA, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var json = result.Context.ToJsonString();
+        Assert.Contains("Block A concrete work", json);
+        Assert.Contains("Block A crew", json);
+        Assert.DoesNotContain("Block B plaster work", json);
+        Assert.DoesNotContain("Block B crew", json);
+
+        var metadata = result.Context["metadata"]!.AsObject();
+        Assert.Equal(siteA, metadata["selectedSiteId"]!.GetValue<Guid>());
+        Assert.Equal("Blok A", metadata["selectedSiteName"]!.GetValue<string>());
+
+        var summary = result.Context["projectProgress"]!["summary"]!.AsObject();
+        Assert.Equal(1, summary["workItemCount"]!.GetValue<int>());
+        Assert.Equal(1, summary["crewCount"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task BuildContext_AllProjectsUsesTenantWideScopeWhenSelectedSiteIsNull()
+    {
+        var tenantId = Guid.NewGuid();
+        var siteA = Guid.NewGuid();
+        var siteB = Guid.NewGuid();
+        var tenantContext = new TenantContext { TenantId = tenantId, Role = BuildTrackUserRole.Manager.ToString() };
+        await using var db = CreateDbContext(tenantContext);
+
+        db.Tenants.Add(new Tenant { Id = tenantId, CompanyName = "Tenant MMC", Code = "TEN" });
+        db.Sites.AddRange(
+            new Site { Id = siteA, TenantId = tenantId, Name = "Blok A", TimeZone = "Asia/Baku" },
+            new Site { Id = siteB, TenantId = tenantId, Name = "Villa Korpus 1", TimeZone = "Asia/Baku" });
+        db.Projects.Add(new ProjectRecord { Id = "tenant-project", TenantId = tenantId, Name = "Residence", CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectSites.AddRange(
+            new ProjectSiteRecord { Id = "site-a-link", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectSiteRecord { Id = "site-b-link", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, CreatedAt = DateTimeOffset.UtcNow });
+        db.ProjectWorkItems.AddRange(
+            new ProjectWorkItemRecord { Id = "work-a", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteA, StageId = "stage-a", Name = "Block A concrete work", Unit = "m3", Quantity = 1, TotalCost = 1000, CreatedAt = DateTimeOffset.UtcNow },
+            new ProjectWorkItemRecord { Id = "work-b", TenantId = tenantId, ProjectId = "tenant-project", SiteId = siteB, StageId = "stage-b", Name = "Villa roof work", Unit = "m2", Quantity = 1, TotalCost = 2000, CreatedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync();
+
+        var service = new BuildTrackAiContextService(db, tenantContext, NullLogger<BuildTrackAiContextService>.Instance);
+        var result = await service.BuildContextAsync("layihələr üzrə ümumi vəziyyət", null, null, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var json = result.Context.ToJsonString();
+        Assert.Contains("Block A concrete work", json);
+        Assert.Contains("Villa roof work", json);
+
+        var metadata = result.Context["metadata"]!.AsObject();
+        Assert.Null(metadata["selectedSiteId"]);
+        Assert.Equal("Bütün layihələr", metadata["selectedSiteName"]!.GetValue<string>());
+
+        var summary = result.Context["projectProgress"]!["summary"]!.AsObject();
+        Assert.Equal(2, summary["workItemCount"]!.GetValue<int>());
     }
 
     [Fact]
@@ -186,7 +273,7 @@ public sealed class ProjectAssistantContextServiceTests
         await db.SaveChangesAsync();
 
         var service = new BuildTrackAiContextService(db, tenantContext, NullLogger<BuildTrackAiContextService>.Instance);
-        var result = await service.BuildContextAsync("obyekt", "project-a", siteB, CancellationToken.None);
+        var result = await service.BuildContextAsync("layihə", "project-a", siteB, CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal(400, result.StatusCode);

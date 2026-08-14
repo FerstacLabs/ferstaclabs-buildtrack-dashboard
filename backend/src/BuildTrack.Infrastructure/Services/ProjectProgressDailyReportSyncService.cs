@@ -257,7 +257,7 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
             var first = duplicate.First();
             throw new ProjectProgressSmetaSyncException(
                 "FIELD_SMETA_DUPLICATE_WORK_NAME",
-                $"Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz: {first.WorkName}.",
+                $"Eyni layihə daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz: {first.WorkName}.",
                 duplicate.Select(row => new ProjectProgressSmetaSyncConflict(
                     null,
                     null,
@@ -376,7 +376,7 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
 
         throw new ProjectProgressSmetaSyncException(
             "FIELD_SMETA_IDENTITY_CONFLICT",
-            "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+            "Smeta sinxronizasiyası zamanı eyni layihə və iş adı üzrə konflikt aşkarlandı.",
             [
                 new ProjectProgressSmetaSyncConflict(
                     existing.Id == Guid.Empty ? null : existing.Id,
@@ -396,7 +396,7 @@ public sealed class ProjectProgressDailyReportSyncService(BuildTrackDbContext db
         string reason) =>
         new(
             "FIELD_SMETA_IDENTITY_CONFLICT",
-            "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+            "Smeta sinxronizasiyası zamanı eyni layihə və iş adı üzrə konflikt aşkarlandı.",
             [
                 new ProjectProgressSmetaSyncConflict(
                     target.Id,

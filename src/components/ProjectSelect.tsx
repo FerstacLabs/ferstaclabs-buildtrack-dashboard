@@ -35,7 +35,7 @@ export const ProjectSelect = ({ pageKey = 'global', className, placeholder, styl
   }
 
   const options = useMemo(() => [
-    { value: ALL_PROJECTS_ID, label: t('project.allObjects') },
+    { value: ALL_PROJECTS_ID, label: t('project.allProjects') },
     ...objects.map((object) => ({ value: object.id, label: object.name })),
   ], [objects, t])
 

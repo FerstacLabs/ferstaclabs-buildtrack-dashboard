@@ -432,7 +432,7 @@ export const SupervisorsPage = () => {
             { title: 'Ad Soyad', dataIndex: 'fullName' },
             { title: 'Email', dataIndex: 'email' },
             { title: 'Telefon', dataIndex: 'phone' },
-            { title: 'Obyektlər', render: (_, row) => row.assignments.map((assignment) => <Tag key={assignment.siteId}>{assignment.siteName}</Tag>) },
+            { title: 'Layihələr', render: (_, row) => row.assignments.map((assignment) => <Tag key={assignment.siteId}>{assignment.siteName}</Tag>) },
             { title: 'Status', dataIndex: 'status', render: (status) => <Tag color={status === 'Active' ? 'green' : 'red'}>{status === 'Active' ? 'Aktiv' : 'Deaktiv'}</Tag> },
             { title: 'Hesabat', dataIndex: 'pendingReports' },
             { title: 'Anbar sorğusu', dataIndex: 'openWarehouseRequests' },
@@ -459,7 +459,7 @@ export const SupervisorsPage = () => {
           pagination={{ pageSize: 5 }}
           columns={[
             { title: 'Tarix', dataIndex: 'reportDate' },
-            { title: 'Obyekt', dataIndex: 'siteName' },
+            { title: 'Layihə', dataIndex: 'siteName' },
             { title: 'Prorab', dataIndex: 'supervisorName' },
             { title: 'Sətir', render: (_, row) => row.lines.length },
             {
@@ -480,7 +480,7 @@ export const SupervisorsPage = () => {
             { title: 'Sorğu', dataIndex: 'code', render: (value, row) => value || row.id.slice(0, 8) },
             { title: 'Material', render: (_, row) => warehouseMaterialSummary(row) },
             { title: 'Miqdar', render: (_, row) => `${formatNumber(row.totalRequested)} vahid` },
-            { title: 'Obyekt', dataIndex: 'siteName' },
+            { title: 'Layihə', dataIndex: 'siteName' },
             { title: 'Prorab', dataIndex: 'supervisorName' },
             {
               title: 'Status',
@@ -498,7 +498,7 @@ export const SupervisorsPage = () => {
       <Card className="soft-card" title="Supervisor audit axını">
         <Space wrap style={{ marginBottom: 16 }}>
           <DatePicker.RangePicker onChange={(range) => setAuditDateRange(range as [Dayjs, Dayjs] | null)} />
-          <Select allowClear placeholder="Obyekt" style={{ minWidth: 180 }} options={siteOptions} value={auditSiteId} onChange={setAuditSiteId} />
+          <Select allowClear placeholder="Layihə" style={{ minWidth: 180 }} options={siteOptions} value={auditSiteId} onChange={setAuditSiteId} />
           <Select allowClear placeholder="Prorab" style={{ minWidth: 180 }} options={supervisorOptions} value={auditSupervisorId} onChange={setAuditSupervisorId} />
           <Select allowClear placeholder="Hadisə / modul" style={{ minWidth: 220 }} options={auditActionOptions} value={auditAction} onChange={setAuditAction} />
         </Space>
@@ -509,7 +509,7 @@ export const SupervisorsPage = () => {
           pagination={{ pageSize: 6 }}
           columns={[
             { title: 'Vaxt', dataIndex: 'timestamp', render: formatDateTime },
-            { title: 'Obyekt', render: (_, row) => row.siteName || DASH },
+            { title: 'Layihə', render: (_, row) => row.siteName || DASH },
             { title: 'Prorab', render: (_, row) => row.supervisorName || DASH },
             { title: 'Hadisə', render: (_, row) => actionLabel(row.action ?? row.eventType) },
             { title: 'Bölmə', render: (_, row) => moduleLabel(row.entityType) },
@@ -535,7 +535,7 @@ export const SupervisorsPage = () => {
           <Form.Item name="phone" label="Telefon">
             <Input />
           </Form.Item>
-          <Form.Item name="siteIds" label="Təyin edilən obyektlər" rules={[{ required: true, message: 'Ən azı bir obyekt seçin' }]}>
+          <Form.Item name="siteIds" label="Təyin edilən layihələr" rules={[{ required: true, message: 'Ən azı bir layihə seçin' }]}>
             <Select mode="multiple" options={siteOptions} />
           </Form.Item>
           {editing && (
@@ -568,7 +568,7 @@ export const SupervisorsPage = () => {
             </Card>
             <Descriptions bordered size="small" column={1}>
               <Descriptions.Item label="Tarix">{selectedReport.reportDate}</Descriptions.Item>
-              <Descriptions.Item label="Obyekt">{selectedReport.siteName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Layihə">{selectedReport.siteName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Prorab">{selectedReport.supervisorName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Status"><FieldStatusTag key={`${selectedReport.id}:${selectedReport.status}`} status={selectedReport.status} /></Descriptions.Item>
               <Descriptions.Item label="Hava şəraiti">{selectedReport.weatherCondition || selectedReport.weather || DASH}</Descriptions.Item>
@@ -622,7 +622,7 @@ export const SupervisorsPage = () => {
             )}
             <Descriptions bordered size="small" column={1}>
               <Descriptions.Item label="Sorğu nömrəsi">{selectedWarehouseRequest.code || selectedWarehouseRequest.id.slice(0, 8)}</Descriptions.Item>
-              <Descriptions.Item label="Obyekt">{selectedWarehouseRequest.siteName || DASH}</Descriptions.Item>
+              <Descriptions.Item label="Layihə">{selectedWarehouseRequest.siteName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Prorab">{selectedWarehouseRequest.supervisorName || DASH}</Descriptions.Item>
               <Descriptions.Item label="Tarix">{formatDateTime(selectedWarehouseRequest.createdAt)}</Descriptions.Item>
               <Descriptions.Item label="Təcillik">{priorityLabel(selectedWarehouseRequest.urgency)}</Descriptions.Item>
@@ -658,7 +658,7 @@ export const SupervisorsPage = () => {
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="Vaxt">{formatDateTime(selectedAudit.timestamp)}</Descriptions.Item>
             <Descriptions.Item label="Prorab">{selectedAudit.supervisorName || DASH}</Descriptions.Item>
-            <Descriptions.Item label="Obyekt">{selectedAudit.siteName || DASH}</Descriptions.Item>
+            <Descriptions.Item label="Layihə">{selectedAudit.siteName || DASH}</Descriptions.Item>
             <Descriptions.Item label="Hadisə">{actionLabel(selectedAudit.action ?? selectedAudit.eventType)}</Descriptions.Item>
             <Descriptions.Item label="Bölmə">{moduleLabel(selectedAudit.entityType)}</Descriptions.Item>
             <Descriptions.Item label="Əməliyyat">{selectedAudit.action || selectedAudit.eventType || DASH}</Descriptions.Item>

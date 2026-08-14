@@ -25,7 +25,7 @@ export const RiskWorkersPage = () => {
 
   const columns: TableColumnsType<DelayRiskRow> = [
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
-    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Layihə', dataIndex: 'objectName' },
     { title: 'Vəzifə', dataIndex: 'role' },
     { title: 'Briqada', dataIndex: 'crewName' },
     { title: 'Risk Balı', dataIndex: 'riskScore', sorter: (a, b) => a.riskScore - b.riskScore },
@@ -77,7 +77,7 @@ export const RiskWorkersPage = () => {
 
       <section className="explanation-grid">
         <ExplanationCard icon={<WarningOutlined />} title="Bu tablo niyə lazımdır?" tone="red">
-          <p>Bu hesabat eyni obyekt-worker-briqada modelində riskli davamiyyət və prorab qeydlərini göstərir.</p>
+          <p>Bu hesabat eyni layihə-worker-briqada modelində riskli davamiyyət və prorab qeydlərini göstərir.</p>
         </ExplanationCard>
         <ExplanationCard icon={<SafetyCertificateOutlined />} title="Risk balı necə oxunur?" tone="orange">
           <ul>

@@ -161,7 +161,7 @@ const normalizeObjectId = (objectId?: string | null) =>
   objectId && objectId !== ALL_OBJECTS_ID ? objectId : ALL_OBJECTS_ID
 
 const getObjectName = (objects: ConstructionObject[], objectId?: string) =>
-  objects.find((object) => object.id === objectId)?.name ?? 'Bütün obyektlər'
+  objects.find((object) => object.id === objectId)?.name ?? 'Bütün layihələr'
 
 const statusIsActive = (status: ProjectWorkStatus) => status !== 'Completed'
 

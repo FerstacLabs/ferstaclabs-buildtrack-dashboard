@@ -120,7 +120,7 @@ export const getObjectById = (data: ProjectProgressData, objectId?: string) =>
   data.objects.find((object) => object.id === objectId)
 
 export const getObjectName = (data: ProjectProgressData, objectId?: string) =>
-  getObjectById(data, objectId)?.name ?? 'Bütün obyektlər'
+  getObjectById(data, objectId)?.name ?? 'Bütün layihələr'
 
 const getObjectScopedData = (data: ProjectProgressData, objectId?: string): ProjectProgressData => {
   const normalized = normalizeObjectId(objectId)

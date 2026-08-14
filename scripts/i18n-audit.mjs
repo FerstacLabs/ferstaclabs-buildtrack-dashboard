@@ -25,7 +25,7 @@ const suspiciousWords = [
   'Başlamayıb',
   'İcradadır',
   'Şəkil',
-  'Obyekt seçin',
+  'Layihə seçin',
 ]
 
 const walk = (dir) => {

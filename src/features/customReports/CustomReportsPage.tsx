@@ -30,7 +30,7 @@ import { formatNumber } from '../../utils/formatters'
 
 const columnOptions = [
   'İşçi adı',
-  'Obyekt',
+  'Layihə',
   'Briqada',
   'Tarix',
   'Giriş saatı',
@@ -45,13 +45,13 @@ const dataSourceOptions = [
   { label: 'Davamiyyət və Saatlar', value: 'attendance' },
   { label: 'Maaş Hesabatı', value: 'payroll' },
   { label: 'Riskli İşçilər', value: 'risk' },
-  { label: 'Obyekt Saatları', value: 'hours' },
+  { label: 'Layihə Saatları', value: 'hours' },
   { label: 'Prorab Audit', value: 'audit' },
   { label: 'İş Fazası & Cost Code', value: 'costcode' },
 ]
 
 const groupingOptions = [
-  { label: 'Obyekt -> Briqada', value: 'Obyekt -> Briqada' },
+  { label: 'Layihə -> Briqada', value: 'Layihə -> Briqada' },
   { label: 'Briqada -> Vəzifə', value: 'Briqada -> Vəzifə' },
   { label: 'Risk səviyyəsi', value: 'Risk səviyyəsi' },
   { label: 'Export statusu', value: 'Export statusu' },
@@ -82,7 +82,7 @@ const baseReportName = (source: string, filters: ReportFilters) => {
   if (source === 'payroll') return `Maaş hesabatı — ${dayjs(filters.month).format('MMMM YYYY')}`
   if (source === 'risk') return 'Risk hesabatı — Kritik işçilər'
   if (source === 'audit') return `Prorab audit hesabatı — ${date}`
-  if (source === 'hours') return `Obyekt saatları hesabatı — ${date}`
+  if (source === 'hours') return `Layihə saatları hesabatı — ${date}`
   if (source === 'costcode') return `Cost Code hesabatı — ${date}`
   return `Davamiyyət hesabatı — ${date}`
 }
@@ -98,7 +98,7 @@ export const CustomReportsPage = () => {
   const { addCustomReport, customReports, data, filters } = useBuildTrackStore()
   const [dataSource, setDataSource] = useState('attendance')
   const [selectedColumns, setSelectedColumns] = useState<string[]>(columnOptions.slice(0, 7))
-  const [grouping, setGrouping] = useState('Obyekt -> Briqada')
+  const [grouping, setGrouping] = useState('Layihə -> Briqada')
   const [exportFormat, setExportFormat] = useState('Excel')
   const [previewReport, setPreviewReport] = useState<CustomReportRow | null>(null)
   if (!data) return null
@@ -196,7 +196,7 @@ export const CustomReportsPage = () => {
     const name = sameNameCount ? `${baseName} #${sameNameCount + 1}` : baseName
     const appliedFilters = [
       `Tarix: ${filters.dateRange[0]} - ${filters.dateRange[1]}`,
-      `Obyekt: ${filters.siteId === 'all' ? 'Hamısı' : filters.siteId}`,
+      `Layihə: ${filters.siteId === 'all' ? 'Hamısı' : filters.siteId}`,
       `Briqada: ${filters.brigade === 'all' ? 'Hamısı' : filters.brigade}`,
       `Status: ${filters.status === 'all' ? 'Hamısı' : filters.status}`,
     ]
@@ -267,7 +267,7 @@ export const CustomReportsPage = () => {
             <div className="tag-cloud">
               {[
                 `Tarix: ${filters.dateRange[0]} - ${filters.dateRange[1]}`,
-                `Obyekt: ${filters.siteId === 'all' ? 'Hamısı' : filters.siteId}`,
+                `Layihə: ${filters.siteId === 'all' ? 'Hamısı' : filters.siteId}`,
                 `Briqada: ${filters.brigade === 'all' ? 'Hamısı' : filters.brigade}`,
                 `Status: ${filters.status === 'all' ? 'Hamısı' : filters.status}`,
               ].map((item) => (

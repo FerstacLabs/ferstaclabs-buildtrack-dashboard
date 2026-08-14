@@ -118,9 +118,9 @@ export const DevicesPage = () => {
         hour: '2-digit',
         minute: '2-digit',
       }).format(new Date())
-      const site = await buildTrackBackendApi.createSite({ name: `Yeni obyekt ${suffix}`, address: '', timeZone: 'Asia/Baku' })
+      const site = await buildTrackBackendApi.createSite({ name: `Yeni layihə ${suffix}`, address: '', timeZone: 'Asia/Baku' })
       form.setFieldValue('siteId', site.id)
-      message.success('Yeni obyekt yaradıldı və kamera formasında seçildi')
+      message.success('Yeni layihə yaradıldı və kamera formasında seçildi')
       await loadData()
     } catch (err) {
       message.error(getActionErrorMessage(err))
@@ -169,7 +169,7 @@ export const DevicesPage = () => {
 
   const columns: TableColumnsType<BackendDevice> = [
     { title: 'Cihaz', dataIndex: 'name', sorter: (a, b) => a.name.localeCompare(b.name) },
-    { title: 'Obyekt', dataIndex: 'siteId', render: (value) => siteNameById.get(value) ?? value },
+    { title: 'Layihə', dataIndex: 'siteId', render: (value) => siteNameById.get(value) ?? value },
     { title: 'Model', dataIndex: 'model' },
     { title: 'Rejim', dataIndex: 'mode', render: (value: DeviceMode) => <Tag color="blue">{modeLabel[value] ?? value}</Tag> },
     { title: 'Sub-device ID', dataIndex: 'registerDeviceId' },
@@ -230,7 +230,7 @@ export const DevicesPage = () => {
           <div className="card-heading">
             <h2>Cihaz siyahısı</h2>
             <Space>
-              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createTenantSite}>Yeni obyekt yarat</ToolbarButton>
+              <ToolbarButton icon={<PlusOutlined />} tone="green" onClick={createTenantSite}>Yeni layihə yarat</ToolbarButton>
               <ToolbarButton icon={<ReloadOutlined />} onClick={loadData}>Yenilə</ToolbarButton>
             </Space>
           </div>
@@ -241,7 +241,7 @@ export const DevicesPage = () => {
             rowKey="id"
             pagination={{ pageSize: 8 }}
             scroll={{ x: 'max-content' }}
-            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl obyekt yaradın və kamera terminalı əlavə edin.' }}
+            locale={{ emptyText: 'Cihaz tapılmadı. Əvvəl layihə yaradın və kamera terminalı əlavə edin.' }}
           />
         </section>
 
@@ -253,8 +253,8 @@ export const DevicesPage = () => {
             initialValues={{ model: 'DHI-ASI6213J-MW', mode: 'ActiveRegister', registerPort: 7000, username: 'admin' }}
             onFinish={createDevice}
           >
-            <Form.Item label="Obyekt" name="siteId" rules={[{ required: true, message: 'Obyekt seçin' }]}>
-              <Select options={sites.map((site) => ({ label: site.name, value: site.id }))} placeholder="Obyekt seçin" />
+            <Form.Item label="Layihə" name="siteId" rules={[{ required: true, message: 'Layihə seçin' }]}>
+              <Select options={sites.map((site) => ({ label: site.name, value: site.id }))} placeholder="Layihə seçin" />
             </Form.Item>
             <Form.Item label="Cihaz adı" name="name" rules={[{ required: true, message: 'Cihaz adı yazın' }]}>
               <Input placeholder="Giriş terminalı" />

@@ -52,9 +52,9 @@ export const FieldSettingsPage = () => {
           <Descriptions.Item label="Şirkət">{valueOrDash(me?.tenantName)}</Descriptions.Item>
         </Descriptions>
       </Card>
-      <Card className="soft-card" title="Təyin olunmuş obyektlər">
+      <Card className="soft-card" title="Təyin olunmuş layihələr">
         <List
-          locale={{ emptyText: 'Təyin olunmuş obyekt yoxdur' }}
+          locale={{ emptyText: 'Təyin olunmuş layihə yoxdur' }}
           dataSource={assignments}
           renderItem={(assignment) => (
             <List.Item>

@@ -26,7 +26,7 @@ export const ExportPage = () => {
   const columns: TableColumnsType<ExportPanelRow> = [
     { title: 'Sətir ID', dataIndex: 'id' },
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
-    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Layihə', dataIndex: 'objectName' },
     { title: 'Briqada', dataIndex: 'crewName' },
     { title: 'Vəzifə', dataIndex: 'role' },
     { title: 'Təsdiqli saat', dataIndex: 'approvedHours' },
@@ -51,7 +51,7 @@ export const ExportPage = () => {
       <section className="chart-grid">
         <section className="panel-card export-panel">
           <h2>Export tarixçəsi</h2>
-          <p>Son exportlar cari obyekt filterinə və payroll hesablamalarına əsaslanır.</p>
+          <p>Son exportlar cari layihə filterinə və payroll hesablamalarına əsaslanır.</p>
           <ToolbarButton icon={<FileExcelOutlined />} tone="green" onClick={() => exportRowsToExcel('export-validation', validationRows)}>Excel export</ToolbarButton>
           <ToolbarButton icon={<FileTextOutlined />} tone="purple" onClick={() => exportRowsToCsv('export-validation', validationRows)}>CSV export</ToolbarButton>
         </section>
@@ -67,7 +67,7 @@ export const ExportPage = () => {
 
       <section className="explanation-grid">
         <ExplanationCard icon={<CheckCircleOutlined />} title="Excel export">
-          <p>Cari obyekt filterinə uyğun sətirlər real .xlsx faylı kimi yüklənir.</p>
+          <p>Cari layihə filterinə uyğun sətirlər real .xlsx faylı kimi yüklənir.</p>
         </ExplanationCard>
         <ExplanationCard icon={<WarningOutlined />} title="Export yoxlaması" tone="orange">
           <p>Statuslar payroll selectorundan gəlir və 1C göndərişindən əvvəl yoxlama prosesini göstərir.</p>

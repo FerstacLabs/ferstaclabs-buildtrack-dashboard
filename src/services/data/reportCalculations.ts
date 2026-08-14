@@ -436,7 +436,7 @@ export const customReportRows = (data: BuildTrackData, savedRows: CustomReportRo
     { name: 'Maa\u015f hesabat\u0131 detall\u0131', category: 'Maa\u015f', columns: 22, format: 'Excel, CSV' },
     { name: 'Riskli i\u015f\u00e7il\u0259r siyah\u0131s\u0131', category: 'Risk', columns: 12, format: 'Excel' },
     { name: '\u0130caz\u0259 v\u0259 m\u0259zuniyy\u0259t icmal\u0131', category: '\u0130caz\u0259', columns: 15, format: 'Excel, PDF' },
-    { name: 'Obyekt \u00fczr\u0259 saat analizi', category: 'Saatlar', columns: 11, format: 'Excel' },
+    { name: 'Layihə \u00fczr\u0259 saat analizi', category: 'Saatlar', columns: 11, format: 'Excel' },
     { name: 'Prorab audit n\u0259tic\u0259l\u0259ri', category: 'Audit', columns: 13, format: 'Excel, CSV' },
     { name: '1C \u00fczr\u0259 hesabat uy\u011funlu\u011fu', category: '1C Export', columns: 20, format: '1C XML' },
   ]

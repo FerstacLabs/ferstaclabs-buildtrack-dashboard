@@ -366,7 +366,7 @@ public static class ProjectProgressEndpoints
         }
         catch (DbUpdateException ex) when (IsProjectProgressUniqueConflict(ex))
         {
-            return Results.Conflict(new { error = "Bu obyekt üzrə eyni smeta işi artıq mövcuddur.", code = "PROJECT_WORK_ITEM_CONFLICT" });
+            return Results.Conflict(new { error = "Bu layihə üzrə eyni smeta işi artıq mövcuddur.", code = "PROJECT_WORK_ITEM_CONFLICT" });
         }
     }
 
@@ -397,7 +397,7 @@ public static class ProjectProgressEndpoints
         }
         catch (DbUpdateException ex) when (IsProjectProgressUniqueConflict(ex))
         {
-            return Results.Conflict(new { error = "Bu obyekt üzrə eyni smeta işi artıq mövcuddur.", code = "PROJECT_WORK_ITEM_CONFLICT" });
+            return Results.Conflict(new { error = "Bu layihə üzrə eyni smeta işi artıq mövcuddur.", code = "PROJECT_WORK_ITEM_CONFLICT" });
         }
     }
 
@@ -585,8 +585,8 @@ public static class ProjectProgressEndpoints
             logger.LogWarning("Project progress field smeta sync conflict for tenant {TenantId}. Code={Code}; Conflicts={Conflicts}", tenantId, ex.Code, ex.Conflicts.Count);
             var error = ex.Code switch
             {
-                "FIELD_SMETA_DUPLICATE_WORK_NAME" => "Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
-                _ => "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+                "FIELD_SMETA_DUPLICATE_WORK_NAME" => "Eyni layihə daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
+                _ => "Smeta sinxronizasiyası zamanı eyni layihə və iş adı üzrə konflikt aşkarlandı.",
             };
             return Results.Conflict(new
             {
@@ -601,7 +601,7 @@ public static class ProjectProgressEndpoints
             logger.LogWarning(ex, "Project progress field smeta database unique conflict for tenant {TenantId}", tenantId);
             return Results.Conflict(new
             {
-                error = "Smeta sinxronizasiyası zamanı eyni obyekt və iş adı üzrə konflikt aşkarlandı.",
+                error = "Smeta sinxronizasiyası zamanı eyni layihə və iş adı üzrə konflikt aşkarlandı.",
                 code = "FIELD_SMETA_IDENTITY_CONFLICT",
             });
         }
@@ -1438,7 +1438,7 @@ public static class ProjectProgressEndpoints
             {
                 throw new ProjectProgressSmetaSyncException(
                     "FIELD_SMETA_DUPLICATE_WORK_NAME",
-                    "Eyni obyekt daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
+                    "Eyni layihə daxilində eyni adlı iki aktiv smeta işi yaradıla bilməz.",
                     [
                         new ProjectProgressSmetaSyncConflict(sameNameRow.Id, null, item.SiteId, item.Name, item.Id, sameNameRow.ProjectWorkItemId, "CanonicalWorkItemNameCollision"),
                     ]);

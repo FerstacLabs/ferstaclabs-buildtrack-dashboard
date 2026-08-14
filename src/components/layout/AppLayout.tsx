@@ -32,8 +32,8 @@ export const AppLayout = () => {
   const lastChangedAt = useProjectSelectionStore((state) => state.lastChangedAt)
   const projectContentKey = `${selectedProjectId}:${lastChangedAt}`
   const selectedProjectName = selectedProjectId === ALL_PROJECTS_ID
-    ? 'Bütün obyektlər'
-    : objects.find((object) => object.id === selectedProjectId)?.name ?? 'Naməlum obyekt'
+    ? 'Bütün layihələr'
+    : objects.find((object) => object.id === selectedProjectId)?.name ?? 'Naməlum layihə'
   const showProjectDebug = import.meta.env.DEV || import.meta.env.VITE_PROJECT_STATE_DEBUG === 'true'
 
   useEffect(() => {

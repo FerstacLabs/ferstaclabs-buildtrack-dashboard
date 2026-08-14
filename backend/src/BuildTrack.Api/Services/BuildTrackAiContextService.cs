@@ -104,7 +104,7 @@ public sealed class BuildTrackAiContextService(
             return new BuildTrackAiContextResult(
                 false,
                 StatusCodes.Status404NotFound,
-                "Seçilmiş obyekt bu tenant üçün tapılmadı.",
+                "Seçilmiş layihə bu tenant üçün tapılmadı.",
                 new JsonObject(),
                 modules.ToArray(),
                 stopwatch.Elapsed);
@@ -122,7 +122,7 @@ public sealed class BuildTrackAiContextService(
             return new BuildTrackAiContextResult(
                 false,
                 StatusCodes.Status400BadRequest,
-                "Seçilmiş obyekt seçilmiş layihəyə aid deyil.",
+                "Seçilmiş layihə bu daxili layihə qrupuna aid deyil.",
                 new JsonObject(),
                 modules.ToArray(),
                 stopwatch.Elapsed);
@@ -329,7 +329,7 @@ public sealed class BuildTrackAiContextService(
                 ["selectedProjectId"] = selectedProject?.Id,
                 ["selectedProjectName"] = selectedProject?.Name ?? "Bütün layihələr",
                 ["selectedSiteId"] = selectedSite?.Id,
-                ["selectedSiteName"] = selectedSite?.Name ?? "Bütün obyektlər",
+                ["selectedSiteName"] = selectedSite?.Name ?? "Bütün layihələr",
                 ["role"] = role,
                 ["sourceModules"] = new JsonArray(modules.OrderBy(x => x).Select(x => JsonValue.Create(x)).ToArray()),
             },
@@ -349,7 +349,7 @@ public sealed class BuildTrackAiContextService(
             }).ToArray<JsonNode?>()),
             ["executiveSummary"] = new JsonObject
             {
-                ["siteScope"] = selectedSite?.Name ?? "Bütün obyektlər",
+                ["siteScope"] = selectedSite?.Name ?? "Bütün layihələr",
                 ["projectProgressPercent"] = projectProgress.ProgressPercent,
                 ["projectStageCount"] = projectProgress.StageCount,
                 ["projectWorkItemCount"] = projectProgress.WorkItemCount,

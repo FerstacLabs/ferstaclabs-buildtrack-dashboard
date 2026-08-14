@@ -1225,7 +1225,7 @@ internal static class BakinityDemoSeeder
                 plannedStartDate = DateTime.UtcNow.Date.AddDays(index * 7 - 30).ToString("yyyy-MM-dd"),
                 plannedEndDate = DateTime.UtcNow.Date.AddDays(index * 25 + 120).ToString("yyyy-MM-dd"),
                 clientName = "BAKİNİTY MMC",
-                notes = "Server seed obyekti",
+                notes = "Server seed layihəsi",
             }).ToArray(),
             project = new
             {

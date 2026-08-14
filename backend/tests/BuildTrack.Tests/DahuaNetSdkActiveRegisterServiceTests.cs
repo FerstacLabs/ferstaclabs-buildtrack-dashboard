@@ -239,7 +239,7 @@ public sealed class DahuaNetSdkActiveRegisterServiceTests
             new Tenant { Id = goldTenantId, CompanyName = "GOLD MMC", Code = "GOLDMMC", Status = TenantStatus.Active });
 
         db.Sites.AddRange(
-            new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Obyekti" },
+            new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Layihəsi" },
             new Site { Id = goldSiteId, TenantId = goldTenantId, Name = "GOLD PALACE" });
 
         db.Devices.AddRange(

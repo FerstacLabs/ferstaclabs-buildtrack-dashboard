@@ -208,7 +208,7 @@ export const DashboardPage = () => {
               format={(percent) => `${Number(percent ?? 0).toFixed(1)}%`}
             />
             <div className="summary-metric">
-              <span>Seçilmiş obyekt üzrə icra</span>
+              <span>Seçilmiş layihə üzrə icra</span>
               <strong>{formatPercent(metrics.weightedProgress, 1)}</strong>
             </div>
           </div>

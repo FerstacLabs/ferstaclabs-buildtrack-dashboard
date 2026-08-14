@@ -76,7 +76,7 @@ export const DailyAttendancePage = () => {
   const columns: TableColumnsType<AttendanceDailyRosterRow> = [
     { title: 'İşçi ID', dataIndex: 'workerExternalId', sorter: (a, b) => a.workerExternalId.localeCompare(b.workerExternalId) },
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
-    { title: 'Obyekt', dataIndex: 'siteName' },
+    { title: 'Layihə', dataIndex: 'siteName' },
     { title: 'Vəzifə', dataIndex: 'role', render: (value?: string) => value || '—' },
     { title: 'Briqada', dataIndex: 'brigade', render: (value?: string) => value || '—' },
     { title: 'Plan Giriş', dataIndex: 'plannedCheckIn' },
@@ -128,7 +128,7 @@ export const DailyAttendancePage = () => {
             title="Günlük Davamiyyət Siyahısı"
             columns={columns}
             data={rows}
-            emptyText="Bu tarix və obyekt üçün davamiyyət rosteri tapılmadı"
+            emptyText="Bu tarix və layihə üçün davamiyyət rosteri tapılmadı"
             extra={<ToolbarButton icon={<DownloadOutlined />} onClick={() => exportRowsToExcel('gunluk-davamiyyet', rows)}>Export</ToolbarButton>}
           />
 
@@ -155,7 +155,7 @@ export const DailyAttendancePage = () => {
         </ExplanationCard>
         <ExplanationCard icon={<DownloadOutlined />} title="Custom imkanlar" tone="orange">
           <ul>
-            <li>Obyekt və tarix üzrə filtr.</li>
+            <li>Layihə və tarix üzrə filtr.</li>
             <li>Visible rosterin Excel exportu.</li>
           </ul>
         </ExplanationCard>

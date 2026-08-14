@@ -72,17 +72,13 @@ const sourceLabel = (source?: string) => {
 }
 
 const AI_ALL_PROJECTS_VALUE = '__ai_all_projects__'
-const AI_ALL_SITES_VALUE = '__ai_all_sites__'
 
 export const AiAssistant = () => {
   const tenantId = useAuthStore((state) => state.tenant?.id)
   const userId = useAuthStore((state) => state.user?.id)
-  const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
-  const projects = useProjectProgressStore((state) => state.projects)
+  const globalSelectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const objects = useProjectProgressStore((state) => state.objects)
-  const selectedObject = useProjectProgressStore((state) => state.objects.find((object) => object.id === selectedObjectId))
   const messages = useAiAssistantStore((state) => state.messages)
-  const aiSelectedProjectId = useAiAssistantStore((state) => state.selectedProjectId)
   const aiSelectedSiteId = useAiAssistantStore((state) => state.selectedSiteId)
   const addAssistantMessage = useAiAssistantStore((state) => state.addMessage)
   const clearAssistantMessages = useAiAssistantStore((state) => state.clearMessages)
@@ -102,19 +98,12 @@ export const AiAssistant = () => {
   const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
   const selectedSiteId = aiSelectedSiteId ?? undefined
-  const contextProject = aiSelectedProjectId ? projects.find((project) => project.id === aiSelectedProjectId) : undefined
   const contextSite = aiSelectedSiteId ? objects.find((object) => object.id === aiSelectedSiteId) : undefined
-  const contextLabel = `${contextProject?.name ?? 'Bütün layihələr'} / ${contextSite?.name ?? 'Bütün obyektlər'}`
-  const objectOptions = useMemo(
-    () => objects
-      .filter((object) => !aiSelectedProjectId || object.projectId === aiSelectedProjectId)
-      .map((object) => ({ value: object.id, label: object.name })),
-    [aiSelectedProjectId, objects],
-  )
   const projectOptions = useMemo(
-    () => projects.map((project) => ({ value: project.id, label: project.name })),
-    [projects],
+    () => objects.map((object) => ({ value: object.id, label: object.name })),
+    [objects],
   )
+  const contextLabel = contextSite?.name ?? 'Bütün layihələr'
 
   const cleanupAudioUrl = () => {
     if (audioRef.current) {
@@ -153,16 +142,15 @@ export const AiAssistant = () => {
   }, [migrateLegacyProjectProgressMessages, setAssistantScope, tenantId, userId])
 
   useEffect(() => {
-    const initialSiteId = selectedObjectId !== ALL_PROJECTS_ID ? selectedObjectId : null
-    const initialProjectId = initialSiteId ? selectedObject?.projectId ?? null : null
-    initializeAiContext(initialProjectId, initialSiteId)
-  }, [initializeAiContext, selectedObject?.projectId, selectedObjectId])
-
-  useEffect(() => {
     if (!aiSelectedSiteId) return
-    if (objectOptions.some((option) => option.value === aiSelectedSiteId)) return
-    setAiContext(aiSelectedProjectId ?? null, null)
-  }, [aiSelectedProjectId, aiSelectedSiteId, objectOptions, setAiContext])
+    if (projectOptions.some((option) => option.value === aiSelectedSiteId)) return
+    setAiContext(null)
+  }, [aiSelectedSiteId, projectOptions, setAiContext])
+
+  const openDrawer = () => {
+    initializeAiContext(globalSelectedProjectId === ALL_PROJECTS_ID ? null : globalSelectedProjectId)
+    setOpen(true)
+  }
 
   const closeDrawer = () => {
     cleanupAudioUrl()
@@ -187,7 +175,6 @@ export const AiAssistant = () => {
       method: 'POST',
       body: JSON.stringify({
         message: trimmed,
-        selectedProjectId: aiSelectedProjectId ?? null,
         selectedSiteId: selectedSiteId ?? null,
         history,
       }),
@@ -316,7 +303,7 @@ export const AiAssistant = () => {
           shape="circle"
           size="large"
           icon={<ConstructionBotIcon />}
-          onClick={() => setOpen(true)}
+          onClick={openDrawer}
           aria-label="AI köməkçi"
           title="AI köməkçi"
         />
@@ -338,26 +325,12 @@ export const AiAssistant = () => {
             <label>
               <span>Layihə</span>
               <Select
-                value={aiSelectedProjectId ?? AI_ALL_PROJECTS_VALUE}
+                value={aiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE}
                 options={[
                   { value: AI_ALL_PROJECTS_VALUE, label: 'Bütün layihələr' },
                   ...projectOptions,
                 ]}
-                onChange={(value) => {
-                  const nextProjectId = value === AI_ALL_PROJECTS_VALUE ? null : value
-                  setAiContext(nextProjectId, null)
-                }}
-              />
-            </label>
-            <label>
-              <span>Obyekt</span>
-              <Select
-                value={aiSelectedSiteId ?? AI_ALL_SITES_VALUE}
-                options={[
-                  { value: AI_ALL_SITES_VALUE, label: 'Bütün obyektlər' },
-                  ...objectOptions,
-                ]}
-                onChange={(value) => setAiContext(aiSelectedProjectId ?? null, value === AI_ALL_SITES_VALUE ? null : value)}
+                onChange={(value) => setAiContext(value === AI_ALL_PROJECTS_VALUE ? null : value)}
               />
             </label>
           </div>

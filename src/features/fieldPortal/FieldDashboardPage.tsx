@@ -29,14 +29,14 @@ export const FieldDashboardPage = () => {
     }
   }, [selectedSiteId])
 
-  if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
+  if (!selectedSiteId) return <Alert type="info" showIcon message="Layihə seçin" />
   if (loading && !dashboard) return <Skeleton active />
 
   return (
     <div className="field-page">
       <div className="field-page-title">
         <span>Prorab icmalı</span>
-        <Typography.Title level={2}>{dashboard?.siteName ?? 'Obyekt'}</Typography.Title>
+        <Typography.Title level={2}>{dashboard?.siteName ?? 'Layihə'}</Typography.Title>
         <Typography.Paragraph>Gündəlik hesabat, işçi qeydləri və anbar sorğuları üçün sahə paneli.</Typography.Paragraph>
       </div>
       {error && <Alert type="error" showIcon message={error} />}
@@ -75,7 +75,7 @@ export const FieldDashboardPage = () => {
         <Col xs={24} lg={10}>
           <Card title="Sahə qaydası" className="soft-card">
             <Typography.Paragraph>
-              Bu portalda prorab yalnız ona təyin olunmuş obyekt üzrə faktiki görülən iş miqdarını, sahə qeydlərini və material sorğularını daxil edir.
+              Bu portalda prorab yalnız ona təyin olunmuş layihə üzrə faktiki görülən iş miqdarını, sahə qeydlərini və material sorğularını daxil edir.
             </Typography.Paragraph>
             <Typography.Paragraph>
               Smeta dəyərləri, material balansı və əmək haqqı hesablamaları idarəetmə panelində qalır.

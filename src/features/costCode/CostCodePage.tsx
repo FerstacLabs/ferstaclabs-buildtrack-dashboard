@@ -26,7 +26,7 @@ export const CostCodePage = () => {
   const tableRows = rows.map((row, index) => ({ ...row, key: `${row.site_id}-${row.cost_code}-${index}` }))
   const chartData = rows.map((row) => ({ name: row.phase_name, plan: row.planned_hours, faktiki: row.actual_hours, xərc: row.labor_cost, value: row.labor_cost }))
   const columns: TableColumnsType<CostCodeRecord> = [
-    { title: 'Obyekt', dataIndex: 'site_id', render: (value) => data.sites.find((site) => site.site_id === value)?.site_name ?? value },
+    { title: 'Layihə', dataIndex: 'site_id', render: (value) => data.sites.find((site) => site.site_id === value)?.site_name ?? value },
     { title: 'Cost Code', dataIndex: 'cost_code' },
     { title: 'İş Fazası', dataIndex: 'phase_name', sorter: (a, b) => a.phase_name.localeCompare(b.phase_name) },
     { title: 'Briqada', dataIndex: 'brigade' },
@@ -83,7 +83,7 @@ export const CostCodePage = () => {
         </ExplanationCard>
         <ExplanationCard icon={<CheckCircleOutlined />} title="Custom imkanlar" tone="purple">
           <ul>
-            <li>Tarix, obyekt, briqada və iş fazası üzrə filtr.</li>
+            <li>Tarix, layihə, briqada və iş fazası üzrə filtr.</li>
             <li>Cost code üzrə qruplaşdırma və sıralama.</li>
             <li>Plan-fakt fərqləri üçün xəbərdarlıq.</li>
           </ul>

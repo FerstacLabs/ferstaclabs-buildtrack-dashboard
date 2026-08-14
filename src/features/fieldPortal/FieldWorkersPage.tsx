@@ -16,7 +16,7 @@ const eventTypeOptions: { value: FieldWorkerEventType; label: string }[] = [
   { value: 'Absent', label: 'Gəlməyib' },
   { value: 'Permission', label: 'İcazə' },
   { value: 'Medical', label: 'Tibbi səbəb' },
-  { value: 'SiteTransfer', label: 'Obyekt dəyişimi' },
+  { value: 'SiteTransfer', label: 'Layihə dəyişimi' },
   { value: 'SafetyWarning', label: 'Təhlükəsizlik xəbərdarlığı' },
   { value: 'ManualAttendanceCorrectionRequest', label: 'Davamiyyət düzəlişi sorğusu' },
   { value: 'Other', label: 'Digər' },
@@ -66,7 +66,7 @@ export const FieldWorkersPage = () => {
     await load()
   }
 
-  if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
+  if (!selectedSiteId) return <Alert type="info" showIcon message="Layihə seçin" />
 
   return (
     <div className="field-page">
@@ -82,7 +82,7 @@ export const FieldWorkersPage = () => {
           Qeyd yarat
         </Button>
       </div>
-      <Card className="soft-card" title="Obyekt işçiləri">
+      <Card className="soft-card" title="Layihə işçiləri">
         <Table
           rowKey="id"
           loading={loading}

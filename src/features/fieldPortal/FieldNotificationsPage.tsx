@@ -17,7 +17,7 @@ export const FieldNotificationsPage = () => {
       .finally(() => setLoading(false))
   }, [selectedSiteId])
 
-  if (!selectedSiteId) return <Alert type="info" showIcon message="Obyekt seçin" />
+  if (!selectedSiteId) return <Alert type="info" showIcon message="Layihə seçin" />
   if (loading && !dashboard) return <Skeleton active />
 
   return (

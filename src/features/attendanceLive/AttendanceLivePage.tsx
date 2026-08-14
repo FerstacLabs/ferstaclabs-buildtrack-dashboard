@@ -435,7 +435,7 @@ export const AttendanceLivePage = () => {
         <Alert
           type="warning"
           showIcon
-          message="Bu obyekt üzrə yoxlanılmalı kamera hadisələri var"
+          message="Bu layihə üzrə yoxlanılmalı kamera hadisələri var"
           description="Şübhəli tanıma və identity mismatch hadisələri davamiyyətə əlavə olunmur. Detallara Tanınmayan üzlər bölməsində baxın."
         />
       )}
@@ -445,10 +445,10 @@ export const AttendanceLivePage = () => {
           value={siteId}
           onChange={setSiteId}
           options={siteOptions}
-          placeholder="Obyekt seçin"
+          placeholder="Layihə seçin"
         />
         <ToolbarButton icon={<ReloadOutlined />} onClick={() => loadSessions()}>Yenilə</ToolbarButton>
-        {siteId && <Tag color="blue">Obyekt: {siteNameById.get(siteId) ?? siteId}</Tag>}
+        {siteId && <Tag color="blue">Layihə: {siteNameById.get(siteId) ?? siteId}</Tag>}
       </section>
 
       <section className="kpi-grid live-attendance-kpi-grid" data-build-marker={liveBuildMarker}>

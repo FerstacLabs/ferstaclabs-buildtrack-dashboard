@@ -35,7 +35,7 @@ export const SupervisorAuditPage = () => {
 
   const columns: TableColumnsType<AuditPanelRow> = [
     { title: 'Prorab adı', dataIndex: 'prorabName', sorter: (a, b) => a.prorabName.localeCompare(b.prorabName) },
-    { title: 'Obyekt', dataIndex: 'objectName' },
+    { title: 'Layihə', dataIndex: 'objectName' },
     { title: 'Briqada', dataIndex: 'crewName' },
     { title: 'Period', dataIndex: 'period' },
     { title: 'Tablet Giriş', dataIndex: 'manualEntries' },
@@ -90,11 +90,11 @@ export const SupervisorAuditPage = () => {
 
       <section className="explanation-grid">
         <ExplanationCard icon={<AuditOutlined />} title="Bu tablo niyə lazımdır?">
-          <p>Prorab və briqadir müdaxilələrini obyekt, crew və gündəlik hesabat datası ilə uyğun göstərir.</p>
+          <p>Prorab və briqadir müdaxilələrini layihə, crew və gündəlik hesabat datası ilə uyğun göstərir.</p>
         </ExplanationCard>
         <ExplanationCard icon={<EditOutlined />} title="Custom imkanlar" tone="blue">
           <ul>
-            <li>Obyekt üzrə audit filteri.</li>
+            <li>Layihə üzrə audit filteri.</li>
             <li>Riskli işçi və plan/fakt saat fərqindən avtomatik audit göstəriciləri.</li>
             <li>Excel və CSV formatlarında ixrac.</li>
           </ul>

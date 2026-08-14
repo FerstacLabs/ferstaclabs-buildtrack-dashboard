@@ -67,7 +67,7 @@ export const DelaysPermissionsPage = () => {
 
   const columns: TableColumnsType<AttendanceDisciplineRow> = [
     { title: 'İşçi adı', dataIndex: 'workerName', sorter: (a, b) => a.workerName.localeCompare(b.workerName) },
-    { title: 'Obyekt', dataIndex: 'siteName' },
+    { title: 'Layihə', dataIndex: 'siteName' },
     { title: 'Vəzifə', dataIndex: 'role', render: (value?: string) => value || '—' },
     { title: 'Briqada', dataIndex: 'brigade', render: (value?: string) => value || '—' },
     { title: 'Gecikmə Sayı', dataIndex: 'lateCount', sorter: (a, b) => a.lateCount - b.lateCount },
@@ -147,7 +147,7 @@ export const DelaysPermissionsPage = () => {
         </ExplanationCard>
         <ExplanationCard icon={<ClockCircleOutlined />} title="Custom imkanlar" tone="orange">
           <ul>
-            <li>Obyekt və tarix aralığı üzrə filtr.</li>
+            <li>Layihə və tarix aralığı üzrə filtr.</li>
             <li>Gecikmə = faktiki giriş - plan giriş - grace.</li>
             <li>Erkən çıxış = plan çıxış - təsdiqli çıxış - grace.</li>
           </ul>
