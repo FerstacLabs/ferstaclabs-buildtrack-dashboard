@@ -76,7 +76,6 @@ const AI_ALL_PROJECTS_VALUE = '__ai_all_projects__'
 export const AiAssistant = () => {
   const tenantId = useAuthStore((state) => state.tenant?.id)
   const userId = useAuthStore((state) => state.user?.id)
-  const globalSelectedProjectId = useProjectSelectionStore((state) => state.selectedProjectId)
   const objects = useProjectProgressStore((state) => state.objects)
   const messages = useAiAssistantStore((state) => state.messages)
   const addAssistantMessage = useAiAssistantStore((state) => state.addMessage)
@@ -99,6 +98,17 @@ export const AiAssistant = () => {
     () => objects.map((object) => ({ value: object.id, label: object.name })),
     [objects],
   )
+  const selectValue = aiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE
+
+  useEffect(() => {
+    console.warn('[AI Project Selector]', {
+      event: 'state',
+      globalSelectedProjectId: useProjectSelectionStore.getState().selectedProjectId,
+      aiSelectedSiteId,
+      selectValue,
+      projectOptions: projectOptions.map((option) => option.value),
+    })
+  }, [aiSelectedSiteId, projectOptions, selectValue])
 
   const cleanupAudioUrl = () => {
     if (audioRef.current) {
@@ -137,14 +147,17 @@ export const AiAssistant = () => {
     setAiSelectedSiteId(null)
   }, [migrateLegacyProjectProgressMessages, setAssistantScope, tenantId, userId])
 
-  useEffect(() => {
-    if (!aiSelectedSiteId) return
-    if (projectOptions.some((option) => option.value === aiSelectedSiteId)) return
-    setAiSelectedSiteId(null)
-  }, [aiSelectedSiteId, projectOptions])
-
   const openDrawer = () => {
-    setAiSelectedSiteId(globalSelectedProjectId === ALL_PROJECTS_ID ? null : globalSelectedProjectId)
+    const currentGlobalProjectId = useProjectSelectionStore.getState().selectedProjectId
+    const nextAiSelectedSiteId = currentGlobalProjectId === ALL_PROJECTS_ID ? null : currentGlobalProjectId
+    console.warn('[AI Project Selector]', {
+      event: 'open',
+      globalSelectedProjectId: currentGlobalProjectId,
+      aiSelectedSiteId: nextAiSelectedSiteId,
+      selectValue: nextAiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE,
+      projectOptions: projectOptions.map((option) => option.value),
+    })
+    setAiSelectedSiteId(nextAiSelectedSiteId)
     setOpen(true)
   }
 
@@ -166,6 +179,14 @@ export const AiAssistant = () => {
     setLoading(true)
     setSpeechStatus(null)
     addAssistantMessage({ role: 'user', content: trimmed })
+    console.warn('[AI Project Selector]', {
+      event: 'submit',
+      globalSelectedProjectId: useProjectSelectionStore.getState().selectedProjectId,
+      aiSelectedSiteId,
+      selectValue,
+      outgoingSelectedSiteId: aiSelectedSiteId ?? null,
+      projectOptions: projectOptions.map((option) => option.value),
+    })
 
     const apiAnswer = await tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
       method: 'POST',
@@ -324,7 +345,17 @@ export const AiAssistant = () => {
                 { value: AI_ALL_PROJECTS_VALUE, label: 'Bütün layihələr' },
                 ...projectOptions,
               ]}
-              onChange={(value) => setAiSelectedSiteId(value === AI_ALL_PROJECTS_VALUE ? null : value)}
+              onChange={(value) => {
+                const nextAiSelectedSiteId = value === AI_ALL_PROJECTS_VALUE ? null : value
+                console.warn('[AI Project Selector]', {
+                  event: 'change',
+                  globalSelectedProjectId: useProjectSelectionStore.getState().selectedProjectId,
+                  aiSelectedSiteId: nextAiSelectedSiteId,
+                  selectValue: nextAiSelectedSiteId ?? AI_ALL_PROJECTS_VALUE,
+                  projectOptions: projectOptions.map((option) => option.value),
+                })
+                setAiSelectedSiteId(nextAiSelectedSiteId)
+              }}
             />
           </div>
           <div className="assistant-prompts">

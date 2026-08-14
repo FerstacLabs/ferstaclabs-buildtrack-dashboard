@@ -67,9 +67,11 @@ assertNotContains('src/components/ProjectSelect.tsx', 'defaultValue=', 'ProjectS
 
 assertContains('src/features/aiAssistant/AiAssistant.tsx', '<span className="assistant-project-label">Layihə</span>', 'AI drawer must have one Layihə context label')
 assertContains('src/features/aiAssistant/AiAssistant.tsx', 'const [aiSelectedSiteId, setAiSelectedSiteId] = useState<string | null>(null)', 'AI current project scope must be local React state')
-assertContains('src/features/aiAssistant/AiAssistant.tsx', 'setAiSelectedSiteId(globalSelectedProjectId === ALL_PROJECTS_ID ? null : globalSelectedProjectId)', 'AI drawer open must copy the main global project selection')
-assertContains('src/features/aiAssistant/AiAssistant.tsx', 'onChange={(value) => setAiSelectedSiteId(value === AI_ALL_PROJECTS_VALUE ? null : value)}', 'AI dropdown must update local scope immediately')
+assertContains('src/features/aiAssistant/AiAssistant.tsx', 'const currentGlobalProjectId = useProjectSelectionStore.getState().selectedProjectId', 'AI drawer open must read the main global project selection at click time')
+assertContains('src/features/aiAssistant/AiAssistant.tsx', 'const nextAiSelectedSiteId = currentGlobalProjectId === ALL_PROJECTS_ID ? null : currentGlobalProjectId', 'AI drawer open must copy the main global project selection')
+assertContains('src/features/aiAssistant/AiAssistant.tsx', 'setAiSelectedSiteId(nextAiSelectedSiteId)', 'AI dropdown must update local scope immediately')
 assertContains('src/features/aiAssistant/AiAssistant.tsx', 'selectedSiteId: aiSelectedSiteId ?? null', 'AI request must send the current local selectedSiteId')
+assertContains('src/features/aiAssistant/AiAssistant.tsx', 'outgoingSelectedSiteId: aiSelectedSiteId ?? null', 'AI selector diagnostics must log outgoing selectedSiteId')
 assertContains('src/features/aiAssistant/AiAssistant.tsx', "label: 'Bütün layihələr'", 'AI dropdown must include Bütün layihələr option')
 assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'selectedProjectId:', 'AI frontend must not send selectedProjectId')
 assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'AI_ALL_SITES_VALUE', 'AI drawer must not keep the old second site dropdown sentinel')
@@ -78,6 +80,7 @@ assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'extra={<Button', 
 assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'Kontekst:', 'AI drawer must not show a duplicate context line')
 assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'saveToBackend', 'AI project selection must not trigger ProjectProgress workspace writes')
 assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'queueServerSave', 'AI project selection must not enqueue ProjectProgress workspace writes')
+assertNotContains('src/features/aiAssistant/AiAssistant.tsx', 'projectOptions.some((option) => option.value === aiSelectedSiteId)', 'AI selectedSiteId must not reset to all projects while options are temporarily loading')
 
 assertNotContains('src/features/aiAssistant/aiAssistantStore.ts', 'contextTouched', 'AI context must not persist sticky contextTouched')
 assertNotContains('src/features/aiAssistant/aiAssistantStore.ts', 'selectedProjectId', 'AI store must not keep a separate selectedProjectId')
