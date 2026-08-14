@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
-  AiAssistantMessage,
   ConstructionObject,
   Crew,
   DailyForemanReport,
@@ -56,8 +55,6 @@ interface ProjectProgressState extends ProjectProgressData {
   addDailyReport: (report: Omit<DailyForemanReport, 'id' | 'createdAt'>) => void
   updateDailyReport: (reportId: string, patch: Partial<DailyForemanReport>) => void
   deleteDailyReport: (reportId: string) => void
-  addAssistantMessage: (message: Omit<AiAssistantMessage, 'id' | 'createdAt'>) => void
-  clearAssistantMessages: () => void
 }
 
 const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
@@ -227,7 +224,7 @@ const toProjectProgressData = (state: ProjectProgressData): ProjectProgressData 
   dailyReports: state.dailyReports,
   issues: state.issues,
   risks: state.risks,
-  assistantMessages: state.assistantMessages,
+  assistantMessages: [],
 })
 
 const hasBusinessCollections = (data: Partial<ProjectProgressData>) =>
@@ -457,7 +454,7 @@ const normalizeLegacySnapshot = (saved: Partial<ProjectProgressData>): ProjectPr
     dailyReports: saved.dailyReports ?? [],
     issues: saved.issues ?? [],
     risks: saved.risks ?? [],
-    assistantMessages: saved.assistantMessages ?? [],
+    assistantMessages: [],
   })
 }
 
@@ -527,7 +524,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
             serverPendingSave: false,
             serverLastSavedAt: new Date().toISOString(),
             workspaceTenantId: normalizedData.workspaceTenantId ?? state.workspaceTenantId,
-            assistantMessages: state.assistantMessages.length ? state.assistantMessages : normalizedData.assistantMessages ?? [],
+            assistantMessages: [],
           }))
         })
         return true
@@ -734,20 +731,12 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
       deleteDailyReport: (reportId) => set((state) => ({
         dailyReports: state.dailyReports.filter((report) => report.id !== reportId),
       })),
-      addAssistantMessage: (message) => set((state) => ({
-        assistantMessages: [
-          ...state.assistantMessages,
-          { ...message, id: createId('msg'), createdAt: new Date().toISOString() },
-        ],
-      })),
-        clearAssistantMessages: () => set({ assistantMessages: [] }),
     }),
     {
       name: 'buildtrack-project-progress',
       partialize: (state) => ({
         workspaceTenantId: state.workspaceTenantId,
         activeProjectId: state.activeProjectId,
-        assistantMessages: state.assistantMessages,
         legacyLocalDataAvailable: state.legacyLocalDataAvailable,
         legacyLocalSummary: state.legacyLocalSummary,
       }),
@@ -763,7 +752,7 @@ export const useProjectProgressStore = create<ProjectProgressState>()(
           ...empty,
           workspaceTenantId: saved.workspaceTenantId ?? empty.workspaceTenantId,
           activeProjectId: saved.activeProjectId ?? ALL_PROJECTS_ID,
-          assistantMessages: saved.assistantMessages ?? [],
+          assistantMessages: [],
           serverSyncStatus: 'idle',
           serverPendingSave: false,
           legacyLocalDataAvailable: Boolean(legacySnapshot),

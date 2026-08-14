@@ -9,7 +9,12 @@ namespace BuildTrack.Api.Services;
 
 public interface IOpenAiProjectAssistantService
 {
-    Task<ProjectAssistantChatResponse> GetAnswerAsync(ProjectAssistantChatRequest request, CancellationToken cancellationToken);
+    Task<ProjectAssistantChatResponse> GetAnswerAsync(
+        ProjectAssistantChatRequest request,
+        JsonObject serverContext,
+        IReadOnlyList<string> sourceModules,
+        CancellationToken cancellationToken);
+
     Task<ProjectAssistantSpeechResult> CreateSpeechAsync(ProjectAssistantTtsRequest request, CancellationToken cancellationToken);
 }
 
@@ -25,22 +30,26 @@ public sealed class OpenAiProjectAssistantService(
     AiOptions options,
     ILogger<OpenAiProjectAssistantService> logger) : IOpenAiProjectAssistantService
 {
-    public async Task<ProjectAssistantChatResponse> GetAnswerAsync(ProjectAssistantChatRequest request, CancellationToken cancellationToken)
+    public async Task<ProjectAssistantChatResponse> GetAnswerAsync(
+        ProjectAssistantChatRequest request,
+        JsonObject serverContext,
+        IReadOnlyList<string> sourceModules,
+        CancellationToken cancellationToken)
     {
         var message = request.Message?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(message))
         {
-            return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, null, "Mesaj boş ola bilməz");
+            return new ProjectAssistantChatResponse(string.Empty, "server-fallback", options.Model, null, "Mesaj boş ola bilməz", sourceModules);
         }
 
         if (message.Length > 2000)
         {
-            return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, null, "Mesaj 2000 simvoldan uzun ola bilməz");
+            return new ProjectAssistantChatResponse(string.Empty, "server-fallback", options.Model, null, "Mesaj 2000 simvoldan uzun ola bilməz", sourceModules);
         }
 
         if (!options.Enabled || string.IsNullOrWhiteSpace(options.ApiKey))
         {
-            return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, null, "OpenAI API key is not configured");
+            return BuildServerFallbackResponse(serverContext, sourceModules, "OpenAI API key is not configured");
         }
 
         try
@@ -53,7 +62,7 @@ public sealed class OpenAiProjectAssistantService(
                 ["model"] = options.Model,
                 ["temperature"] = 0.2,
                 ["max_tokens"] = 900,
-                ["messages"] = BuildOpenAiMessages(message, request.Context, request.History),
+                ["messages"] = BuildOpenAiMessages(message, serverContext, request.History),
             };
 
             requestMessage.Content = JsonContent.Create(payload);
@@ -63,23 +72,35 @@ public sealed class OpenAiProjectAssistantService(
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("OpenAI project assistant request failed. Status={StatusCode}", (int)response.StatusCode);
-                return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, null, "OpenAI sorğusu uğursuz oldu");
+                return BuildServerFallbackResponse(serverContext, sourceModules, "OpenAI sorğusu uğursuz oldu");
             }
 
             var parsed = JsonNode.Parse(body)?.AsObject();
             var answer = parsed?["choices"]?[0]?["message"]?["content"]?.GetValue<string>()?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(answer))
             {
-                return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, parsed?["usage"]?.DeepClone(), "OpenAI boş cavab qaytardı");
+                return new ProjectAssistantChatResponse(
+                    BuildServerFallbackAnswer(serverContext),
+                    "server-fallback",
+                    options.Model,
+                    parsed?["usage"]?.DeepClone(),
+                    "OpenAI boş cavab qaytardı",
+                    sourceModules);
             }
 
             if (ContainsCyrillic(answer))
             {
                 logger.LogWarning("OpenAI project assistant answer failed Azerbaijani language guard");
-                return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, parsed?["usage"]?.DeepClone(), "Cavab dil yoxlamasından keçmədi");
+                return new ProjectAssistantChatResponse(
+                    BuildServerFallbackAnswer(serverContext),
+                    "server-fallback",
+                    options.Model,
+                    parsed?["usage"]?.DeepClone(),
+                    "Cavab dil yoxlamasından keçmədi",
+                    sourceModules);
             }
 
-            return new ProjectAssistantChatResponse(answer, "openai", options.Model, parsed?["usage"]?.DeepClone(), null);
+            return new ProjectAssistantChatResponse(answer, "openai", options.Model, parsed?["usage"]?.DeepClone(), null, sourceModules);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -88,7 +109,7 @@ public sealed class OpenAiProjectAssistantService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "OpenAI project assistant request failed");
-            return new ProjectAssistantChatResponse(string.Empty, "local-fallback", options.Model, null, "AI köməkçi hazırda əlçatan deyil");
+            return BuildServerFallbackResponse(serverContext, sourceModules, "AI köməkçi hazırda əlçatan deyil");
         }
     }
 
@@ -123,7 +144,7 @@ public sealed class OpenAiProjectAssistantService(
                 ["input"] = text,
                 ["response_format"] = options.TtsFormat,
                 ["speed"] = 1.0,
-                ["instructions"] = "Azərbaycan dilində təbii, aydın və sakit qadın səsinə yaxın peşəkar köməkçi tonu ilə danış. Tikinti layihəsi rəhbərinə hesabat verirmiş kimi danış. İngilis və rus aksentindən uzaq, mümkün qədər təbii Azərbaycan tələffüzü istifadə et.",
+                ["instructions"] = "Azərbaycan dilində təbii, aydın və sakit peşəkar köməkçi tonu ilə danış. Tikinti layihəsi rəhbərinə hesabat verirmiş kimi danış. İngilis və rus aksentindən uzaq, mümkün qədər təbii Azərbaycan tələffüzü istifadə et.",
             };
 
             requestMessage.Content = JsonContent.Create(payload);
@@ -148,7 +169,7 @@ public sealed class OpenAiProjectAssistantService(
         }
     }
 
-    private static JsonArray BuildOpenAiMessages(string message, JsonElement? context, IReadOnlyList<AiChatMessageDto>? history)
+    private static JsonArray BuildOpenAiMessages(string message, JsonObject serverContext, IReadOnlyList<AiChatMessageDto>? history)
     {
         var messages = new JsonArray
         {
@@ -159,11 +180,14 @@ public sealed class OpenAiProjectAssistantService(
 You are "BuildTrack AI Rəhbər Köməkçisi".
 Always answer in Azerbaijani.
 You are an executive assistant for construction project management.
-Use only provided BuildTrack context data.
-Help with project status, smeta, budget, crews, workers, attendance, payroll, materials, daily reports, risks, delays, audit and export readiness.
+Use only canonical BuildTrack server context data provided in the request.
+Never rely on browser snapshots or user-provided context as facts.
+Help with project status, smeta, budget, crews, workers, attendance, payroll, materials, warehouse, procurement, daily reports, risks, delays, audit, camera and export readiness.
 Give short professional decision-support answers with numbers and recommendations.
 Do not answer in Russian or English unless explicitly asked.
 Do not mention demo/mock/fallback/internal implementation.
+Do not expose passwords, tokens, hashes, API keys, device credentials or private file paths.
+Clearly distinguish planned smeta quantities, warehouse stock, procurement needs, purchased quantities and received quantities.
 """,
             },
         };
@@ -187,64 +211,77 @@ Do not mention demo/mock/fallback/internal implementation.
 İstifadəçi sualı:
 {message}
 
-BuildTrack cari konteksti:
-{BuildCompressedAiContext(context)}
+BuildTrack cari server konteksti:
+{BuildServerContext(serverContext)}
 """,
         });
 
         return messages;
     }
 
-    private static string BuildCompressedAiContext(JsonElement? context)
+    private ProjectAssistantChatResponse BuildServerFallbackResponse(
+        JsonObject serverContext,
+        IReadOnlyList<string> sourceModules,
+        string? error) =>
+        new(BuildServerFallbackAnswer(serverContext), "server-fallback", options.Model, null, error, sourceModules);
+
+    private static string BuildServerContext(JsonObject serverContext)
     {
-        if (context is null) return "{}";
-
-        var source = context.Value;
-        var compressed = new JsonObject();
-        CopyJsonProperty(source, compressed, "selectedObjectId");
-        CopyJsonProperty(source, compressed, "selectedObjectName");
-        CopyJsonProperty(source, compressed, "selectedObject");
-        CopyJsonProperty(source, compressed, "summary");
-        CopyJsonProperty(source, compressed, "topInsights");
-        CopyJsonArraySlice(source, compressed, "objects", 12);
-        CopyJsonArraySlice(source, compressed, "stages", 18);
-        CopyJsonArraySlice(source, compressed, "workItems", 30);
-        CopyJsonArraySlice(source, compressed, "crews", 16);
-        CopyJsonArraySlice(source, compressed, "workers", 30);
-        CopyJsonArraySlice(source, compressed, "attendance", 30);
-        CopyJsonArraySlice(source, compressed, "payroll", 20);
-        CopyJsonArraySlice(source, compressed, "materials", 25);
-        CopyJsonArraySlice(source, compressed, "dailyReports", 12);
-        CopyJsonArraySlice(source, compressed, "risks", 20);
-        CopyJsonArraySlice(source, compressed, "delays", 20);
-        CopyJsonArraySlice(source, compressed, "audit", 16);
-        CopyJsonArraySlice(source, compressed, "exportRows", 16);
-
-        return compressed.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+        var json = serverContext.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+        return json.Length <= 32000 ? json : string.Concat(json.AsSpan(0, 32000), "\n...context truncated...");
     }
 
-    private static void CopyJsonProperty(JsonElement source, JsonObject target, string name)
+    private static string BuildServerFallbackAnswer(JsonObject serverContext)
     {
-        if (source.ValueKind == JsonValueKind.Object && source.TryGetProperty(name, out var value))
+        var metadata = serverContext["metadata"] as JsonObject;
+        var summary = serverContext["executiveSummary"] as JsonObject;
+        var siteName = GetString(metadata?["selectedSiteName"]) ?? "Bütün obyektlər";
+        var progress = GetNumber(summary?["projectProgressPercent"]);
+        var workerCount = GetNumber(summary?["workerCount"]);
+        var present = GetNumber(summary?["todayPresentCount"]);
+        var workedHours = GetNumber(summary?["todayWorkedHours"]);
+        var criticalStock = GetNumber(summary?["criticalWarehouseItems"]);
+        var openRequests = GetNumber(summary?["openWarehouseRequests"]);
+        var openProcurement = GetNumber(summary?["openProcurementNeeds"]);
+        var security = GetNumber(summary?["unreviewedSecurityEvents"]);
+
+        return $"""
+{siteName} üzrə qısa idarəetmə xülasəsi:
+
+• Layihə gedişatı: {progress:0.#}%.
+• İşçi heyəti: {workerCount:0} nəfər, bugün görünən: {present:0}, işlənmiş vaxt: {workedHours:0.##} saat.
+• Anbar: kritik qalıq sayı {criticalStock:0}, açıq anbar sorğusu {openRequests:0}.
+• Satınalma: açıq ehtiyac sayı {openProcurement:0}.
+• Kamera/risk: baxılmamış təhlükəsizlik hadisəsi {security:0}.
+
+Tövsiyə: əvvəlcə kritik anbar qalıqlarını, açıq satınalma ehtiyaclarını və bugün işçi davamiyyətini yoxlayın; gecikən mərhələlər varsa prorab hesabatı ilə səbəbi təsdiqləyin.
+""";
+    }
+
+    private static string? GetString(JsonNode? node)
+    {
+        if (node is null) return null;
+        try
         {
-            target[name] = JsonNode.Parse(value.GetRawText());
+            return node.GetValue<string>();
+        }
+        catch
+        {
+            return null;
         }
     }
 
-    private static void CopyJsonArraySlice(JsonElement source, JsonObject target, string name, int maxItems)
+    private static decimal GetNumber(JsonNode? node)
     {
-        if (source.ValueKind != JsonValueKind.Object || !source.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Array)
+        if (node is null) return 0;
+        try
         {
-            return;
+            return node.GetValue<decimal>();
         }
-
-        var array = new JsonArray();
-        foreach (var item in value.EnumerateArray().Take(maxItems))
+        catch
         {
-            array.Add(JsonNode.Parse(item.GetRawText()));
+            return 0;
         }
-
-        target[name] = array;
     }
 
     private static bool ContainsCyrillic(string value) => value.Any(ch => ch is >= '\u0400' and <= '\u04FF');

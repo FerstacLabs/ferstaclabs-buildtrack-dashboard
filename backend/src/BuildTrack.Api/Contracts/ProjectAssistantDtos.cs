@@ -7,6 +7,7 @@ public sealed record AiChatMessageDto(string Role, string Content);
 
 public sealed record ProjectAssistantChatRequest(
     string Message,
+    Guid? SelectedSiteId,
     JsonElement? Context,
     IReadOnlyList<AiChatMessageDto>? History);
 
@@ -15,7 +16,8 @@ public sealed record ProjectAssistantChatResponse(
     string Source,
     string Model,
     JsonNode? Usage,
-    string? Error);
+    string? Error,
+    IReadOnlyList<string>? SourceModules = null);
 
 public sealed record ProjectAssistantStatusResponse(
     bool Enabled,

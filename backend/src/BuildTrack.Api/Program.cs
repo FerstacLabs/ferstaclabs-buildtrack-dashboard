@@ -53,6 +53,7 @@ builder.Services.AddHttpClient<IOpenAiProjectAssistantService, OpenAiProjectAssi
     client.BaseAddress = new Uri("https://api.openai.com/v1/");
     client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
 });
+builder.Services.AddScoped<IBuildTrackAiContextService, BuildTrackAiContextService>();
 
 var app = builder.Build();
 
@@ -372,9 +373,25 @@ app.MapGet("/api/ai/project-assistant/status", (AiOptions options) =>
 app.MapPost("/api/ai/project-assistant/chat", async (
     ProjectAssistantChatRequest request,
     IOpenAiProjectAssistantService assistantService,
+    IBuildTrackAiContextService contextService,
+    AiOptions options,
     CancellationToken ct) =>
 {
-    var response = await assistantService.GetAnswerAsync(request, ct);
+    var context = await contextService.BuildContextAsync(request.Message, request.SelectedSiteId, ct);
+    if (!context.Success)
+    {
+        return Results.Json(
+            new ProjectAssistantChatResponse(
+                string.Empty,
+                "server-fallback",
+                options.Model,
+                null,
+                context.Error,
+                context.SourceModules),
+            statusCode: context.StatusCode);
+    }
+
+    var response = await assistantService.GetAnswerAsync(request, context.Context, context.SourceModules, ct);
     return Results.Ok(response);
 });
 

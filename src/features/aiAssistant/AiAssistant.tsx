@@ -1,18 +1,19 @@
 import { AudioOutlined, CloseOutlined, DeleteOutlined, SendOutlined, SoundOutlined } from '@ant-design/icons'
 import { Button, Drawer, Input, Tag, Tooltip } from 'antd'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { tryApiRequest } from '../../shared/api/client'
-import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import { ALL_PROJECTS_ID, useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import { useAuthStore } from '../auth/authStore'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
-import { getAssistantAnswer } from './aiAssistantEngine'
+import { useAiAssistantStore } from './aiAssistantStore'
 import { fetchTtsAudio } from './api/ttsApi'
-import { buildAiProjectContext, type AiProjectContext } from './aiContextBuilder'
 
 interface AssistantApiResponse {
   answer?: string
-  source?: 'openai' | 'local-fallback' | string
+  source?: 'openai' | 'server-fallback' | 'local-fallback' | string
   model?: string
   error?: string | null
+  sourceModules?: string[]
 }
 
 interface SpeechRecognitionLike {
@@ -64,31 +65,22 @@ const devLog = (message: string, details?: unknown) => {
   if (import.meta.env.DEV) console.log(`[AI TTS] ${message}`, details ?? '')
 }
 
-const buildAssistantPayloadContext = (context: AiProjectContext) => ({
-  selectedObjectId: context.selectedObject?.id ?? null,
-  selectedObjectName: context.selectedObject?.name ?? 'Bütün obyektlər',
-  summary: context.summary,
-  objects: context.objects,
-  stages: context.stages.slice(0, 18),
-  workItems: context.workItems.slice(0, 30),
-  crews: context.crews.slice(0, 16),
-  workers: context.workers.slice(0, 30),
-  attendance: context.attendance.slice(0, 30),
-  payroll: context.payroll.slice(0, 20),
-  materials: context.materials.slice(0, 25),
-  dailyReports: context.dailyReports.slice(0, 12),
-  risks: context.risks.slice(0, 20),
-  delays: context.delays.slice(0, 20),
-  audit: context.audit.slice(0, 16),
-  exportRows: context.exportRows.slice(0, 16),
-  topInsights: context.topInsights.slice(0, 10),
-})
+const sourceLabel = (source?: string) => {
+  if (source === 'openai') return 'OpenAI cavabı'
+  if (source === 'server-fallback') return 'Server xülasəsi'
+  return 'Yerli xülasə'
+}
 
 export const AiAssistant = () => {
-  const data = useProjectProgressStore()
-  const addAssistantMessage = useProjectProgressStore((state) => state.addAssistantMessage)
-  const clearAssistantMessages = useProjectProgressStore((state) => state.clearAssistantMessages)
+  const tenantId = useAuthStore((state) => state.tenant?.id)
+  const userId = useAuthStore((state) => state.user?.id)
   const selectedObjectId = useProjectSelectionStore((state) => state.selectedProjectId)
+  const selectedObjectName = useProjectProgressStore((state) => state.objects.find((object) => object.id === selectedObjectId)?.name)
+  const messages = useAiAssistantStore((state) => state.messages)
+  const addAssistantMessage = useAiAssistantStore((state) => state.addMessage)
+  const clearAssistantMessages = useAiAssistantStore((state) => state.clearMessages)
+  const setAssistantScope = useAiAssistantStore((state) => state.setScope)
+  const migrateLegacyProjectProgressMessages = useAiAssistantStore((state) => state.migrateLegacyProjectProgressMessages)
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -100,9 +92,8 @@ export const AiAssistant = () => {
   const audioUrlRef = useRef<string | null>(null)
   const preparedSpeechTextRef = useRef<string | null>(null)
   const speechRecognition = getSpeechRecognition()
-  const messages = data.assistantMessages
-  const context = useMemo(() => buildAiProjectContext({ data, objectId: selectedObjectId }), [data, selectedObjectId])
-  const contextLabel = context.selectedObject?.name ?? 'Bütün obyektlər'
+  const selectedSiteId = selectedObjectId !== ALL_PROJECTS_ID ? selectedObjectId : undefined
+  const contextLabel = selectedObjectName ?? 'Bütün obyektlər'
 
   const cleanupAudioUrl = () => {
     if (audioRef.current) {
@@ -135,19 +126,23 @@ export const AiAssistant = () => {
 
   useEffect(() => cleanupAudioUrl, [])
 
+  useEffect(() => {
+    setAssistantScope(tenantId, userId)
+    migrateLegacyProjectProgressMessages()
+  }, [migrateLegacyProjectProgressMessages, setAssistantScope, tenantId, userId])
+
   const closeDrawer = () => {
     cleanupAudioUrl()
     setOpen(false)
   }
 
-  const addLocalAnswer = (question: string) => {
-    const localAnswer = getAssistantAnswer(question, buildAiProjectContext({ data, objectId: selectedObjectId }))
-    addAssistantMessage({ role: 'assistant', content: localAnswer.answer, source: 'local-fallback' })
-  }
-
   const submitQuestion = async (question: string) => {
     const trimmed = question.trim()
     if (!trimmed) return
+
+    const history = useAiAssistantStore.getState().messages
+      .slice(-10)
+      .map((item) => ({ role: item.role, content: item.content }))
 
     cleanupAudioUrl()
     setInput('')
@@ -155,24 +150,30 @@ export const AiAssistant = () => {
     setSpeechStatus(null)
     addAssistantMessage({ role: 'user', content: trimmed })
 
-    const history = messages
-      .slice(-8)
-      .map((item) => ({ role: item.role, content: item.content }))
-
     const apiAnswer = await tryApiRequest<AssistantApiResponse>('/api/ai/project-assistant/chat', {
       method: 'POST',
       body: JSON.stringify({
         message: trimmed,
-        context: buildAssistantPayloadContext(context),
+        selectedSiteId: selectedSiteId ?? null,
         history,
       }),
     })
 
     cleanupAudioUrl()
-    if (apiAnswer?.source === 'openai' && apiAnswer.answer && !containsCyrillic(apiAnswer.answer)) {
-      addAssistantMessage({ role: 'assistant', content: apiAnswer.answer, source: 'openai' })
+    if (apiAnswer?.answer && !containsCyrillic(apiAnswer.answer)) {
+      addAssistantMessage({
+        role: 'assistant',
+        content: apiAnswer.answer,
+        source: apiAnswer.source === 'openai' ? 'openai' : 'server-fallback',
+      })
     } else {
-      addLocalAnswer(trimmed)
+      addAssistantMessage({
+        role: 'assistant',
+        content: apiAnswer?.error
+          ? `AI cavabı hazırda alınmadı: ${apiAnswer.error}`
+          : 'AI cavabı hazırda alınmadı. Bir az sonra yenidən yoxlayın.',
+        source: 'server-fallback',
+      })
     }
 
     setLoading(false)
@@ -262,7 +263,7 @@ export const AiAssistant = () => {
         setIsSpeaking(false)
         setIsPreparingSpeech(false)
         setActiveSpeechMessageId(messageId)
-        setSpeechStatus('Səs hazırdır — başlatmaq üçün yenidən basın')
+        setSpeechStatus('Səs hazırdır - başlatmaq üçün yenidən basın')
       }
     } catch (error) {
       console.error('[AI TTS] prepare failed', error)
@@ -314,7 +315,7 @@ export const AiAssistant = () => {
                 <div className="assistant-message-header">
                   <Tag color={item.role === 'assistant' ? 'green' : 'blue'}>{item.role === 'assistant' ? 'Rəhbər köməkçisi' : 'Sual'}</Tag>
                   {item.role === 'assistant' ? (
-                    <span className="assistant-source-pill">{item.source === 'openai' ? 'OpenAI cavabı' : 'Lokal analiz'}</span>
+                    <span className="assistant-source-pill">{sourceLabel(item.source)}</span>
                   ) : null}
                 </div>
                 <p>{item.content}</p>
@@ -332,7 +333,7 @@ export const AiAssistant = () => {
                         ? 'Səs hazırlanır...'
                         : activeSpeechMessageId === item.id && isSpeaking
                           ? 'Dayandır'
-                          : activeSpeechMessageId === item.id && speechStatus === 'Səs hazırdır — başlatmaq üçün yenidən basın'
+                          : activeSpeechMessageId === item.id && speechStatus === 'Səs hazırdır - başlatmaq üçün yenidən basın'
                             ? 'Səsi başlat'
                             : 'Səsli oxu'}
                     </Button>
