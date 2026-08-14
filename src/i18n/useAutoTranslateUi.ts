@@ -2,24 +2,46 @@ import { useEffect } from 'react'
 import type { AppLanguage } from './index'
 import { translateUiText } from './uiText'
 
-const textNodeOriginals = new WeakMap<Text, string>()
+interface TextTranslationState {
+  lastSource: string
+  lastTranslated: string
+}
+
+const textNodeTranslations = new WeakMap<Text, TextTranslationState>()
 const translatedAttributeNames = ['placeholder', 'title', 'aria-label', 'alt'] as const
+const dynamicDomSelectors = [
+  '[data-i18n-skip="true"]',
+  '[contenteditable="true"]',
+  '.ant-select',
+  '.ant-select-selector',
+  '.ant-select-selection-item',
+  '.ant-select-dropdown',
+  '.ant-table',
+  '.ant-input',
+  '.ant-picker',
+  '.ant-modal',
+  '.ant-drawer',
+  '.ant-dropdown',
+].join(',')
 
 const shouldSkipElement = (element: Element | null) => {
   if (!element) return false
   const tagName = element.tagName.toLowerCase()
   return ['script', 'style', 'textarea', 'code', 'pre'].includes(tagName)
-    || element.closest('[data-i18n-skip="true"]')
-    || element.closest('[contenteditable="true"]')
+    || Boolean(element.closest(dynamicDomSelectors))
 }
 
 const translateTextNode = (node: Text, language: AppLanguage) => {
   if (shouldSkipElement(node.parentElement)) return
-  const original = textNodeOriginals.get(node) ?? node.nodeValue ?? ''
-  if (!textNodeOriginals.has(node)) textNodeOriginals.set(node, original)
+  const currentValue = node.nodeValue ?? ''
+  const previous = textNodeTranslations.get(node)
+  const source = previous && currentValue === previous.lastTranslated
+    ? previous.lastSource
+    : currentValue
 
-  const translated = translateUiText(original, language)
-  if (node.nodeValue !== translated) node.nodeValue = translated
+  const translated = translateUiText(source, language)
+  textNodeTranslations.set(node, { lastSource: source, lastTranslated: translated })
+  if (currentValue !== translated) node.nodeValue = translated
 }
 
 const originalAttributeName = (attributeName: string) => `data-i18n-original-${attributeName}`
@@ -32,10 +54,15 @@ const translateElementAttributes = (element: Element, language: AppLanguage) => 
     if (!currentValue) return
 
     const originalAttribute = originalAttributeName(attributeName)
-    const originalValue = element.getAttribute(originalAttribute) ?? currentValue
-    if (!element.hasAttribute(originalAttribute)) element.setAttribute(originalAttribute, originalValue)
+    const previousOriginal = element.getAttribute(originalAttribute)
+    const previousTranslated = element.getAttribute(`data-i18n-translated-${attributeName}`)
+    const originalValue = previousOriginal && currentValue === previousTranslated
+      ? previousOriginal
+      : currentValue
+    if (previousOriginal !== originalValue) element.setAttribute(originalAttribute, originalValue)
 
     const translated = translateUiText(originalValue, language)
+    element.setAttribute(`data-i18n-translated-${attributeName}`, translated)
     if (translated !== currentValue) element.setAttribute(attributeName, translated)
   })
 }

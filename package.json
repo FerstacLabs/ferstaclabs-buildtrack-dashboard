@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "i18n:audit": "node scripts/i18n-audit.mjs",
     "terminology:audit": "node scripts/terminology-audit.mjs",
+    "auto-translate:audit": "node scripts/auto-translate-audit.mjs",
     "kpi-rendering:audit": "node scripts/kpi-rendering-audit.mjs",
     "project-state:audit": "node scripts/project-state-audit.mjs",
     "project-progress:readonly-audit": "node scripts/project-progress-readonly-audit.mjs",
