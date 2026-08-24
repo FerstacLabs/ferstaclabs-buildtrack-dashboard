@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { apiRequest, ApiClientError } from '../../shared/api/client'
-import { clearDataset } from '../../services/storage/db'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { clearAuthToken, getAuthToken, setAuthToken } from './authToken'
@@ -100,7 +99,6 @@ const normalizeLicenseError = (error: unknown) => {
 
 const resetTenantScopedBrowserState = (previousTenantId: string | undefined, nextTenantId: string | undefined) => {
   if (previousTenantId && previousTenantId !== nextTenantId) {
-    void clearDataset().catch((error) => console.warn('BuildTrack tenant cache reset failed', error))
     useProjectSelectionStore.getState().clearSelection()
   }
 }
@@ -193,7 +191,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Frontend token clear is the source of truth for this SPA-stage logout.
     } finally {
       clearAuthToken()
-      void clearDataset().catch((error) => console.warn('BuildTrack logout cache reset failed', error))
       useProjectSelectionStore.getState().clearSelection()
       useProjectSelectionStore.getState().setTenantScope(undefined)
       useProjectProgressStore.getState().prepareWorkspaceForTenant('anonymous', 'EMPTY', undefined)

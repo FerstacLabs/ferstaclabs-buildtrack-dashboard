@@ -102,6 +102,14 @@ The seeded demo admin can manage tenant licenses from the app at `/admin/license
 
 If `SEED_SUPERVISOR_EMAIL` and `SEED_SUPERVISOR_PASSWORD` are set, the initializer creates or updates a Supervisor account for the demo tenant and assigns it to `SEED_SUPERVISOR_SITE_ID` when provided. Field users inherit the tenant license and cannot activate licenses themselves.
 
+### Browser session isolation
+
+BuildTrack stores the frontend JWT access token in `sessionStorage`, not `localStorage`. This is intentional: several company accounts can stay open on the same origin in separate browser tabs/windows without one login overwriting another tab's API token. Refresh keeps the current tab session, while closing that tab removes its token.
+
+During the migration away from the old shared `localStorage["buildtrack.authToken"]` token, the frontend deletes the legacy value and does not copy it into `sessionStorage`; users may need to log in once after deployment. API requests read the token only through the current tab session.
+
+A normal single HttpOnly cookie is not used for this SPA requirement yet because cookies are shared by all tabs on the same origin and would again make all tabs represent the same active account unless a more complex per-tab session architecture is introduced. Keep HTTPS enabled, use short JWT lifetimes appropriate for the deployment, and maintain strict CSP/XSS hygiene; `sessionStorage` is tab-isolated but JavaScript-readable.
+
 ### BAKİNİTY server-authoritative demo
 
 Set `SEED_BAKINITY_DEMO=true` and provide `SEED_BAKINITY_DEMO_PASSWORD` to create the isolated tenant `BAK-DEMO` (`BAKİNİTY MMC`) with owner user `eldar@bakinity.az`. The initializer seeds BAKİNİTY sites, 10 prorab users, procurement users, workers, field smeta items, warehouse stock, warehouse request states, suppliers, one procurement task and a server-side project progress workspace. Seed passwords are never logged or committed.

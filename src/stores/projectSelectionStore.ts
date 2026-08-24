@@ -30,9 +30,10 @@ const readStoredProjectId = (tenantId?: string) => {
   if (typeof window === 'undefined') return ALL_PROJECTS_ID
 
   try {
-    const scoped = window.localStorage.getItem(scopedStorageKey(tenantId))
+    const scoped = window.sessionStorage.getItem(scopedStorageKey(tenantId))
     if (scoped) return normalizeSelectedProjectId(scoped)
-    if (!tenantId) return normalizeSelectedProjectId(window.localStorage.getItem(legacyProjectSelectionStorageKey))
+    window.localStorage.removeItem(scopedStorageKey(tenantId))
+    if (!tenantId) window.localStorage.removeItem(legacyProjectSelectionStorageKey)
     return ALL_PROJECTS_ID
   } catch {
     return ALL_PROJECTS_ID
@@ -43,7 +44,8 @@ const writeStoredProjectId = (projectId: SelectedProjectId, tenantId?: string) =
   if (typeof window === 'undefined') return
 
   try {
-    window.localStorage.setItem(scopedStorageKey(tenantId), projectId)
+    window.sessionStorage.setItem(scopedStorageKey(tenantId), projectId)
+    window.localStorage.removeItem(scopedStorageKey(tenantId))
     window.localStorage.removeItem(legacyProjectSelectionStorageKey)
   } catch {
     // Persistence can be unavailable in private browsing; reactive state still updates.
@@ -54,6 +56,7 @@ const clearStoredProjectSelection = (tenantId?: string) => {
   if (typeof window === 'undefined') return
 
   try {
+    window.sessionStorage.removeItem(scopedStorageKey(tenantId))
     window.localStorage.removeItem(scopedStorageKey(tenantId))
     window.localStorage.removeItem(legacyProjectSelectionStorageKey)
   } catch {

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type { AiAssistantMessage } from '../../types/projectProgress'
 
 interface AiAssistantState {
@@ -17,27 +17,6 @@ const createId = () => `ai-msg-${Date.now()}-${Math.random().toString(16).slice(
 
 const scopeKey = (tenantId?: string, userId?: string) =>
   `${tenantId?.trim() || 'anonymous'}:${userId?.trim() || 'anonymous'}`
-
-const readLegacyAssistantMessages = (): AiAssistantMessage[] => {
-  if (typeof window === 'undefined') return []
-
-  try {
-    const legacyWorkspaceKey = ['buildtrack', 'project', 'progress'].join('-')
-    const raw = window.localStorage.getItem(legacyWorkspaceKey)
-    if (!raw) return []
-
-    const parsed = JSON.parse(raw) as {
-      state?: { assistantMessages?: AiAssistantMessage[] }
-      assistantMessages?: AiAssistantMessage[]
-    }
-    const messages = parsed.state?.assistantMessages ?? parsed.assistantMessages ?? []
-    return Array.isArray(messages)
-      ? messages.filter((message) => message?.role && typeof message.content === 'string')
-      : []
-  } catch {
-    return []
-  }
-}
 
 export const useAiAssistantStore = create<AiAssistantState>()(
   persist(
@@ -80,35 +59,18 @@ export const useAiAssistantStore = create<AiAssistantState>()(
         }
       }),
       migrateLegacyProjectProgressMessages: () => {
-        if (typeof window === 'undefined') return
-
-        const state = get()
-        const key = scopeKey(state.tenantId, state.userId)
-        const migrationKey = `buildtrack-ai-assistant:migrated:${key}`
-        if (window.localStorage.getItem(migrationKey)) return
-        window.localStorage.setItem(migrationKey, '1')
-
-        if (state.messages.length > 0) return
-        const legacyMessages = readLegacyAssistantMessages()
-        if (!legacyMessages.length) return
-
-        set((current) => ({
-          messages: legacyMessages,
-          messagesByScope: {
-            ...current.messagesByScope,
-            [key]: legacyMessages,
-          },
-        }))
+        void get()
       },
     }),
     {
       name: 'buildtrack-ai-assistant',
+      storage: createJSONStorage(() => window.sessionStorage),
       partialize: (state) => ({
         tenantId: state.tenantId,
         userId: state.userId,
         messagesByScope: state.messagesByScope,
       }),
-      version: 3,
+      version: 4,
     },
   ),
 )
