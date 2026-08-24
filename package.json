@@ -13,6 +13,8 @@
     "project-state:audit": "node scripts/project-state-audit.mjs",
     "project-progress:readonly-audit": "node scripts/project-progress-readonly-audit.mjs",
     "project-progress:persistence-audit": "node scripts/project-progress-persistence-audit.mjs",
+    "tenant-isolation:audit": "node scripts/tenant-isolation-audit.mjs",
+    "tenant-isolation:repair": "node scripts/tenant-isolation-repair.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

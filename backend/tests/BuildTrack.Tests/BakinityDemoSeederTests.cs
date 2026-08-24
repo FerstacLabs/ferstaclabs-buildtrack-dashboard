@@ -28,7 +28,8 @@ public sealed class BakinityDemoSeederTests
         Assert.Equal(DbInitializer.BakinityDemoTenantId, tenant.Id);
         Assert.Equal("BAKİNİTY MMC", tenant.CompanyName);
 
-        Assert.Equal(1, await db.Users.CountAsync(x => x.TenantId == tenant.Id && x.Email == "eldar@bakinity.az" && x.Role == BuildTrackUserRole.Owner));
+        var owner = await db.Users.SingleAsync(x => x.TenantId == tenant.Id && x.Email == "eldar@bakinity.az" && x.Role == BuildTrackUserRole.Owner);
+        Assert.Equal("Eldar Qəmbərov", owner.FullName);
         Assert.Equal(10, await db.Users.CountAsync(x => x.TenantId == tenant.Id && x.Role == BuildTrackUserRole.Supervisor));
         Assert.Equal(3, await db.Users.CountAsync(x => x.TenantId == tenant.Id && x.Role == BuildTrackUserRole.ProcurementAgent));
         Assert.Equal(4, await db.Sites.CountAsync(x => x.TenantId == tenant.Id));
@@ -195,6 +196,37 @@ public sealed class BakinityDemoSeederTests
         await BakinityDemoSeeder.SeedAsync(db, new ConfigurationBuilder().Build(), CancellationToken.None);
 
         Assert.False(await db.Tenants.AnyAsync(x => x.Code == DbInitializer.BakinityDemoTenantCode));
+    }
+
+    [Fact]
+    public async Task BakinityDemoSeedThrowsWhenConfiguredOwnerEmailBelongsToAnotherTenant()
+    {
+        await using var db = CreateDb();
+        var otherTenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = otherTenantId, CompanyName = "Other Tenant", Code = "OTHER", Status = TenantStatus.Active });
+        db.Users.Add(new AppUser
+        {
+            TenantId = otherTenantId,
+            FullName = "Existing Owner",
+            Email = "eldar@bakinity.az",
+            PasswordHash = "hash",
+            Role = BuildTrackUserRole.Owner,
+            Status = BuildTrackUserStatus.Active,
+        });
+        await db.SaveChangesAsync();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SEED_BAKINITY_DEMO"] = "true",
+                ["SEED_BAKINITY_DEMO_PASSWORD"] = CreateTestPassword(),
+            })
+            .Build();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => BakinityDemoSeeder.SeedAsync(db, configuration, CancellationToken.None));
+
+        Assert.Contains("already belongs to another tenant", error.Message);
+        var existingUser = await db.Users.SingleAsync(x => x.Email == "eldar@bakinity.az");
+        Assert.Equal(otherTenantId, existingUser.TenantId);
     }
 
     private static BuildTrackDbContext CreateDb()

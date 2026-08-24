@@ -409,8 +409,11 @@ app.MapPost("/api/ai/tts", async (
     return Results.Json(new { error = response.Error }, statusCode: response.StatusCode);
 });
 
-app.MapGet("/api/sites", async (BuildTrackDbContext db, CancellationToken ct) =>
-    await db.Sites.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct));
+app.MapGet("/api/sites", async (BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
+{
+    var tenantId = RequireTenantId(tenantContext);
+    return await db.Sites.AsNoTracking().Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).ToListAsync(ct);
+});
 
 app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
@@ -427,24 +430,31 @@ app.MapPost("/api/sites", async (CreateSiteRequest request, BuildTrackDbContext 
     return Results.Created($"/api/sites/{site.Id}", site);
 });
 
-app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, ILoggerFactory loggerFactory, CancellationToken ct) =>
+app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, ITenantContext tenantContext, ILoggerFactory loggerFactory, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
+    if (siteId is not null && !await db.Sites.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == siteId.Value, ct))
+    {
+        return Results.NotFound(new { error = "Site was not found" });
+    }
+
     var workers = await db.Workers
         .AsNoTracking()
         .Include(x => x.CameraIdentities)
         .Include(x => x.SiteAssignments)
+        .Where(x => x.TenantId == tenantId)
         .OrderBy(x => x.FullName)
         .ToListAsync(ct);
     if (siteId is not null)
     {
         var assignedWorkerIds = (await db.WorkerSiteAssignments
             .AsNoTracking()
-            .Where(x => x.SiteId == siteId.Value && x.Status == WorkerSiteAssignmentStatus.Active)
+            .Where(x => x.TenantId == tenantId && x.SiteId == siteId.Value && x.Status == WorkerSiteAssignmentStatus.Active)
             .Select(x => x.WorkerId)
             .ToListAsync(ct)).ToHashSet();
         var siteSessions = await db.AttendanceSessions
             .AsNoTracking()
-            .Where(x => x.SiteId == siteId.Value)
+            .Where(x => x.TenantId == tenantId && x.SiteId == siteId.Value)
             .ToListAsync(ct);
         workers = workers
             .Where(worker => assignedWorkerIds.Contains(worker.Id) || siteSessions.Any(session => SessionMatchesWorker(session, worker)))
@@ -455,7 +465,8 @@ app.MapGet("/api/workers", async (Guid? siteId, BuildTrackDbContext db, ILoggerF
 
 app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, IWorkerSiteAssignmentService siteAssignmentService, CancellationToken ct) =>
 {
-    if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
+    var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Sites.AnyAsync(x => x.TenantId == tenantId && x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     if (string.IsNullOrWhiteSpace(request.ExternalWorkerCode) || string.IsNullOrWhiteSpace(request.FullName))
     {
         return Results.BadRequest(new { error = "External worker code and full name are required" });
@@ -463,7 +474,7 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
 
     var worker = new Worker
     {
-        TenantId = RequireTenantId(tenantContext),
+        TenantId = tenantId,
         SiteId = request.SiteId,
         ExternalWorkerCode = request.ExternalWorkerCode.Trim(),
         FullName = request.FullName.Trim(),
@@ -490,11 +501,12 @@ app.MapPost("/api/workers", async (CreateWorkerRequest request, BuildTrackDbCont
     return Results.Created($"/api/workers/{worker.Id}", response);
 });
 
-app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request, BuildTrackDbContext db, IWorkerCameraIdentityResolver identityResolver, IWorkerSiteAssignmentService siteAssignmentService, CancellationToken ct) =>
+app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, IWorkerSiteAssignmentService siteAssignmentService, CancellationToken ct) =>
 {
-    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (worker is null) return Results.NotFound();
-    if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
+    if (!await db.Sites.AnyAsync(x => x.TenantId == tenantId && x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     if (string.IsNullOrWhiteSpace(request.ExternalWorkerCode) || string.IsNullOrWhiteSpace(request.FullName))
     {
         return Results.BadRequest(new { error = "External worker code and full name are required" });
@@ -526,28 +538,38 @@ app.MapPut("/api/workers/{id:guid}", async (Guid id, UpdateWorkerRequest request
     return Results.Ok(response);
 });
 
-app.MapDelete("/api/workers/{id:guid}", async (Guid id, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapDelete("/api/workers/{id:guid}", async (Guid id, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
-    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (worker is null) return Results.NotFound();
     db.Workers.Remove(worker);
     await db.SaveChangesAsync(ct);
     return Results.NoContent();
 });
 
-app.MapPost("/api/workers/{id:guid}/camera-identities", async (Guid id, SaveWorkerCameraIdentityRequest request, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+app.MapPost("/api/workers/{id:guid}/camera-identities", async (Guid id, SaveWorkerCameraIdentityRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
+    var worker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
+    if (worker is null) return Results.NotFound();
+    if (request.DeviceId is not null && !await db.Devices.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == request.DeviceId.Value, ct))
+    {
+        return Results.BadRequest(new { error = "Device was not found" });
+    }
+
     var identity = await identityResolver.UpsertAsync(id, request.DeviceId, request.ExternalUserId, request.CardName, request.IsPrimary, ct);
     return Results.Ok(new { identity.Id, identity.WorkerId, identity.DeviceId, identity.ExternalUserId, identity.CardName, identity.NormalizedCardName, identity.IsPrimary });
 });
 
-app.MapPost("/api/workers/{id:guid}/camera-identities/test", async (Guid id, TestWorkerCameraIdentityRequest request, BuildTrackDbContext db, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+app.MapPost("/api/workers/{id:guid}/camera-identities/test", async (Guid id, TestWorkerCameraIdentityRequest request, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
 {
-    var worker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var worker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (worker is null) return Results.NotFound();
     var device = request.DeviceId is not null
-        ? await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId.Value, ct)
-        : await db.Devices.AsNoTracking().Where(x => x.SiteId == worker.SiteId).OrderBy(x => x.Name).FirstOrDefaultAsync(ct);
+        ? await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == request.DeviceId.Value, ct)
+        : await db.Devices.AsNoTracking().Where(x => x.TenantId == tenantId && x.SiteId == worker.SiteId).OrderBy(x => x.Name).FirstOrDefaultAsync(ct);
     if (device is null) return Results.BadRequest(new { error = "Device was not found" });
     var record = new DahuaAccessRecord
     {
@@ -577,24 +599,40 @@ app.MapPost("/api/workers/{id:guid}/camera-identities/test", async (Guid id, Tes
         resolution.Reason));
 });
 
-app.MapPost("/api/workers/{id:guid}/camera-identities/remap", async (Guid id, Guid? identityId, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+app.MapPost("/api/workers/{id:guid}/camera-identities/remap", async (Guid id, Guid? identityId, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Workers.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == id, ct)) return Results.NotFound();
+    if (identityId is not null && !await db.WorkerCameraIdentities.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.WorkerId == id && x.Id == identityId.Value, ct))
+    {
+        return Results.BadRequest(new { error = "Worker camera identity was not found" });
+    }
+
     var result = await identityResolver.RemapRecentAsync(id, identityId, ct);
     return Results.Ok(new WorkerCameraIdentityRemapResponse(result.AttendanceEventsUpdated, result.AttendanceSessionsUpdated));
 });
 
-app.MapPost("/api/workers/{id:guid}/remap-camera-events", async (Guid id, Guid? identityId, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
+app.MapPost("/api/workers/{id:guid}/remap-camera-events", async (Guid id, Guid? identityId, BuildTrackDbContext db, ITenantContext tenantContext, IWorkerCameraIdentityResolver identityResolver, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Workers.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == id, ct)) return Results.NotFound();
+    if (identityId is not null && !await db.WorkerCameraIdentities.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.WorkerId == id && x.Id == identityId.Value, ct))
+    {
+        return Results.BadRequest(new { error = "Worker camera identity was not found" });
+    }
+
     var result = await identityResolver.RemapRecentAsync(id, identityId, ct);
     return Results.Ok(new WorkerCameraIdentityRemapResponse(result.AttendanceEventsUpdated, result.AttendanceSessionsUpdated));
 });
 
-app.MapGet("/api/worker-camera-identities", async (BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/worker-camera-identities", async (BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
     var identities = await db.WorkerCameraIdentities
         .AsNoTracking()
         .Include(x => x.Worker)
         .Include(x => x.Device)
+        .Where(x => x.TenantId == tenantId)
         .OrderBy(x => x.Worker!.FullName)
         .ThenBy(x => x.CardName)
         .ToListAsync(ct);
@@ -613,10 +651,12 @@ app.MapGet("/api/worker-camera-identities", async (BuildTrackDbContext db, Cance
         identity.UpdatedAt)).ToArray());
 });
 
-app.MapGet("/api/devices", async (BuildTrackDbContext db, IDahuaActiveRegisterSdk sdk, CancellationToken ct) =>
+app.MapGet("/api/devices", async (BuildTrackDbContext db, ITenantContext tenantContext, IDahuaActiveRegisterSdk sdk, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
     var devices = await db.Devices
         .AsNoTracking()
+        .Where(device => device.TenantId == tenantId)
         .OrderBy(device => device.Name)
         .ToListAsync(ct);
 
@@ -625,7 +665,7 @@ app.MapGet("/api/devices", async (BuildTrackDbContext db, IDahuaActiveRegisterSd
     var deviceIds = devices.Select(device => device.Id).ToArray();
     var latestEvents = await db.AttendanceEvents
         .AsNoTracking()
-        .Where(attendanceEvent => deviceIds.Contains(attendanceEvent.DeviceId))
+        .Where(attendanceEvent => attendanceEvent.TenantId == tenantId && deviceIds.Contains(attendanceEvent.DeviceId))
         .GroupBy(attendanceEvent => attendanceEvent.DeviceId)
         .Select(group => group
             .OrderByDescending(attendanceEvent => attendanceEvent.EventTime)
@@ -642,15 +682,15 @@ app.MapGet("/api/devices", async (BuildTrackDbContext db, IDahuaActiveRegisterSd
         .ToArray();
 });
 
-app.MapGet("/api/devices/{id:guid}", async (Guid id, BuildTrackDbContext db, IDahuaActiveRegisterSdk sdk, CancellationToken ct) =>
+app.MapGet("/api/devices/{id:guid}", async (Guid id, BuildTrackDbContext db, ITenantContext tenantContext, IDahuaActiveRegisterSdk sdk, CancellationToken ct) =>
 {
-
-    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (device is null) return Results.NotFound();
 
     var lastEvent = await db.AttendanceEvents
         .AsNoTracking()
-        .Where(x => x.DeviceId == device.Id)
+        .Where(x => x.TenantId == tenantId && x.DeviceId == device.Id)
         .OrderByDescending(x => x.EventTime)
         .ThenByDescending(x => x.CreatedAt)
         .FirstOrDefaultAsync(ct);
@@ -665,8 +705,8 @@ app.MapPost("/api/devices", async (
     ITenantContext tenantContext,
     CancellationToken ct) =>
 {
-    if (!await db.Sites.AnyAsync(x => x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Sites.AnyAsync(x => x.TenantId == tenantId && x.Id == request.SiteId, ct)) return Results.BadRequest(new { error = "Site was not found" });
     var tenantCode = await db.Tenants.AsNoTracking()
         .Where(x => x.Id == tenantId)
         .Select(x => x.Code)
@@ -694,10 +734,10 @@ app.MapPost("/api/devices", async (
     return Results.Created($"/api/devices/{device.Id}", ApiResponseMapper.ToDeviceResponse(device, null));
 });
 
-app.MapPost("/api/devices/{id:guid}/test-config", async (Guid id, BuildTrackDbContext db, IDahuaNativeLibraryProbe probe, CancellationToken ct) =>
+app.MapPost("/api/devices/{id:guid}/test-config", async (Guid id, BuildTrackDbContext db, ITenantContext tenantContext, IDahuaNativeLibraryProbe probe, CancellationToken ct) =>
 {
-
-    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (device is null) return Results.NotFound();
     return Results.Ok(new
     {
@@ -714,10 +754,12 @@ app.MapPost("/api/devices/{id:guid}/test-config", async (Guid id, BuildTrackDbCo
 app.MapPost("/api/devices/{id:guid}/mark-active-register-ready", async (
     Guid id,
     BuildTrackDbContext db,
+    ITenantContext tenantContext,
     IDeviceConnectionLogger connectionLogger,
     CancellationToken ct) =>
 {
-    var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var device = await db.Devices.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (device is null) return Results.NotFound();
     device.Status = DeviceStatus.Pending;
     device.UpdatedAt = DateTimeOffset.UtcNow;
@@ -726,12 +768,20 @@ app.MapPost("/api/devices/{id:guid}/mark-active-register-ready", async (
     return Results.Ok(ApiResponseMapper.ToDeviceResponse(device, null));
 });
 
-app.MapGet("/api/devices/{id:guid}/logs", async (Guid id, BuildTrackDbContext db, CancellationToken ct) =>
-    await db.DeviceConnectionLogs.AsNoTracking().Where(x => x.DeviceId == id).OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(ct));
-
-app.MapGet("/api/attendance-events", async (Guid? siteId, Guid? deviceId, int? limit, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/devices/{id:guid}/logs", async (Guid id, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
-    var query = db.AttendanceEvents.AsNoTracking();
+    var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Devices.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == id, ct)) return Results.NotFound();
+    return Results.Ok(await db.DeviceConnectionLogs.AsNoTracking().Where(x => x.TenantId == tenantId && x.DeviceId == id).OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(ct));
+});
+
+app.MapGet("/api/attendance-events", async Task<IResult> (Guid? siteId, Guid? deviceId, int? limit, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
+{
+    var tenantId = RequireTenantId(tenantContext);
+    if (siteId is not null && !await db.Sites.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == siteId.Value, ct)) return Results.NotFound(new { error = "Site was not found" });
+    if (deviceId is not null && !await db.Devices.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == deviceId.Value, ct)) return Results.NotFound(new { error = "Device was not found" });
+
+    var query = db.AttendanceEvents.AsNoTracking().Where(x => x.TenantId == tenantId);
     if (siteId is not null) query = query.Where(x => x.SiteId == siteId);
     if (deviceId is not null) query = query.Where(x => x.DeviceId == deviceId);
 
@@ -739,23 +789,26 @@ app.MapGet("/api/attendance-events", async (Guid? siteId, Guid? deviceId, int? l
         .OrderByDescending(x => x.EventTime)
         .Take(Math.Clamp(limit ?? 200, 1, 1000))
         .ToListAsync(ct);
-    return await MapAttendanceEventsAsync(db, events, ct);
+    return Results.Ok(await MapAttendanceEventsAsync(db, events, ct));
 });
 
-app.MapGet("/api/sites/{siteId:guid}/attendance-live", async (Guid siteId, int? limit, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/sites/{siteId:guid}/attendance-live", async Task<IResult> (Guid siteId, int? limit, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
+    if (!await db.Sites.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == siteId, ct)) return Results.NotFound();
     var events = await db.AttendanceEvents.AsNoTracking()
-        .Where(x => x.SiteId == siteId)
+        .Where(x => x.TenantId == tenantId && x.SiteId == siteId)
         .OrderByDescending(x => x.EventTime)
         .Take(Math.Clamp(limit ?? 100, 1, 500))
         .ToListAsync(ct);
     events = events.Where(IsRecognizedAttendancePayload).ToList();
-    return await MapAttendanceEventsAsync(db, events, ct);
+    return Results.Ok(await MapAttendanceEventsAsync(db, events, ct));
 });
 
-app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, IConfiguration configuration, CancellationToken ct) =>
+app.MapGet("/api/attendance-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, ITenantContext tenantContext, IConfiguration configuration, CancellationToken ct) =>
 {
-    var attendanceEvent = await db.AttendanceEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var attendanceEvent = await db.AttendanceEvents.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == eventId, ct);
     if (attendanceEvent is null || string.IsNullOrWhiteSpace(attendanceEvent.SnapshotPath)) return Results.NotFound();
 
     var storageRoot = configuration["SECURITY_SNAPSHOT_STORAGE_PATH"];
@@ -790,13 +843,15 @@ app.MapGet("/api/snapshots/{**relativePath}", async (string relativePath, BuildT
     return Results.File(bytes, "image/jpeg");
 });
 
-app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? deviceId, string? workerExternalId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? deviceId, string? workerExternalId, string? date, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
+    var tenantId = RequireTenantId(tenantContext);
     if (string.IsNullOrWhiteSpace(workerExternalId)) return Results.BadRequest(new { error = "workerExternalId is required" });
     if (string.IsNullOrWhiteSpace(date)) return Results.BadRequest(new { error = "date is required" });
 
-    var site = siteId is null ? null : await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId.Value, ct);
+    var site = siteId is null ? null : await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == siteId.Value, ct);
     if (siteId is not null && site is null) return Results.NotFound(new { error = "site not found" });
+    if (deviceId is not null && !await db.Devices.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == deviceId.Value, ct)) return Results.NotFound(new { error = "device not found" });
     var timeZone = ResolveApiTimeZone(site?.TimeZone ?? "Asia/Baku");
     var workDate = DateOnly.TryParse(date, out var parsedDate)
         ? parsedDate
@@ -804,11 +859,12 @@ app.MapGet("/api/attendance-events/snapshots", async (Guid? siteId, Guid? device
     var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
 
     var mappedWorker = siteId is null
-        ? await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct)
-        : await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.SiteId == siteId.Value && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct);
+        ? await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct)
+        : await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == siteId.Value && x.ExternalWorkerCode == workerExternalId && x.Status == WorkerStatus.Active, ct);
 
     var query = db.AttendanceEvents.AsNoTracking()
-        .Where(x => x.WorkerExternalId == workerExternalId
+        .Where(x => x.TenantId == tenantId
+                    && x.WorkerExternalId == workerExternalId
                     && x.CreatedAt >= dayStartUtc
                     && x.CreatedAt < dayEndUtc
                     && x.Status == AttendanceEventStatus.Ok
@@ -864,26 +920,27 @@ app.MapGet("/api/attendance/discipline", async (Guid? siteId, string? dateFrom, 
 });
 
 
-app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
-    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == siteId, ct);
     if (site is null) return Results.NotFound();
 
     var timeZone = ResolveApiTimeZone(site.TimeZone);
     var now = DateTimeOffset.UtcNow;
     var workDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, timeZone).DateTime);
     var sessions = await db.AttendanceSessions.AsNoTracking()
-        .Where(x => x.SiteId == siteId && x.WorkDate == workDate && x.Status == AttendanceSessionStatus.Open)
+        .Where(x => x.TenantId == tenantId && x.SiteId == siteId && x.WorkDate == workDate && x.Status == AttendanceSessionStatus.Open)
         .OrderBy(x => x.CheckInTime)
         .ToListAsync(ct);
     sessions = await FilterVerifiedAttendanceSessionsAsync(db, sessions, ct);
     var staleOpenSessionsCount = await db.AttendanceSessions.AsNoTracking()
-        .CountAsync(x => x.SiteId == siteId && x.WorkDate < workDate && x.Status == AttendanceSessionStatus.Open, ct);
+        .CountAsync(x => x.TenantId == tenantId && x.SiteId == siteId && x.WorkDate < workDate && x.Status == AttendanceSessionStatus.Open, ct);
     var liveWorkerCodes = sessions.Select(x => x.WorkerExternalId).Distinct().ToArray();
     var liveWorkersByCode = liveWorkerCodes.Length == 0
         ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         : await db.Workers.AsNoTracking()
-            .Where(x => x.SiteId == siteId && liveWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .Where(x => x.TenantId == tenantId && x.SiteId == siteId && liveWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
             .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
 
     var workers = AttendanceSessionPlanner.SelectCurrentOpenSessions(sessions, workDate)
@@ -915,7 +972,8 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
     var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
     var activeRegisterEvents = await db.AttendanceEvents.AsNoTracking()
-        .Where(x => x.SiteId == siteId
+        .Where(x => x.TenantId == tenantId
+                    && x.SiteId == siteId
                     && x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
                     && x.CreatedAt >= dayStartUtc
                     && x.CreatedAt < dayEndUtc
@@ -936,7 +994,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
     var activeRegisterWorkersByCode = activeRegisterWorkerCodes.Length == 0
         ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         : await db.Workers.AsNoTracking()
-            .Where(x => x.SiteId == siteId && activeRegisterWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .Where(x => x.TenantId == tenantId && x.SiteId == siteId && activeRegisterWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
             .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
 
     var activeRegisterWorkerRows = activeRegisterEvents
@@ -972,9 +1030,10 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/live-status", async (Guid siteId
     return Results.Ok(new AttendanceLiveStatusResponse(workDate, combinedWorkers.Length, combinedWorkers, staleOpenSessionsCount));
 });
 
-app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, string? date, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, string? date, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
-    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == siteId, ct);
     if (site is null) return Results.NotFound();
 
     var timeZone = ResolveApiTimeZone(site.TimeZone);
@@ -983,7 +1042,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
 
     var sessions = await db.AttendanceSessions.AsNoTracking()
-        .Where(x => x.SiteId == siteId && x.WorkDate == workDate)
+        .Where(x => x.TenantId == tenantId && x.SiteId == siteId && x.WorkDate == workDate)
         .OrderBy(x => x.CheckInTime)
         .ToListAsync(ct);
     sessions = await FilterVerifiedAttendanceSessionsAsync(db, sessions, ct);
@@ -992,7 +1051,8 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
     {
         var (dayStartUtc, dayEndUtc) = GetUtcRangeForWorkDate(workDate, timeZone);
         var events = await db.AttendanceEvents.AsNoTracking()
-            .Where(x => x.SiteId == siteId
+            .Where(x => x.TenantId == tenantId
+                        && x.SiteId == siteId
                         && x.Status == AttendanceEventStatus.Ok
                         && x.WorkerExternalId != null
                         && ((x.Source == DahuaEventSourceExtensions.ActiveRegisterSource
@@ -1007,7 +1067,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         var fallbackWorkers = fallbackWorkerCodes.Length == 0
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             : await db.Workers.AsNoTracking()
-                .Where(x => x.SiteId == siteId && fallbackWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+                .Where(x => x.TenantId == tenantId && x.SiteId == siteId && fallbackWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
                 .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
         events = events
             .Where(x => x.Source != DahuaEventSourceExtensions.ActiveRegisterSource || IsRecognizedAttendancePayload(x))
@@ -1093,7 +1153,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
     var dailyWorkersByCode = dailyWorkerCodes.Length == 0
         ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         : await db.Workers.AsNoTracking()
-            .Where(x => x.SiteId == siteId && dailyWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
+            .Where(x => x.TenantId == tenantId && x.SiteId == siteId && dailyWorkerCodes.Contains(x.ExternalWorkerCode) && x.Status == WorkerStatus.Active)
             .ToDictionaryAsync(x => x.ExternalWorkerCode, x => x.FullName, StringComparer.OrdinalIgnoreCase, ct);
 
     var eventIds = dailySessions
@@ -1104,7 +1164,7 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         .ToArray();
     var eventsById = eventIds.Length == 0
         ? new Dictionary<Guid, AttendanceEvent>()
-        : await db.AttendanceEvents.AsNoTracking().Where(x => eventIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        : await db.AttendanceEvents.AsNoTracking().Where(x => x.TenantId == tenantId && eventIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
 
     var sessionRows = dailySessions.Select(row =>
     {
@@ -1147,26 +1207,27 @@ app.MapGet("/api/sites/{siteId:guid}/attendance/daily", async (Guid siteId, stri
         sessionRows));
 });
 
-app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, string? date, BuildTrackDbContext db, IConfiguration configuration, CancellationToken ct) =>
+app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, string? date, BuildTrackDbContext db, ITenantContext tenantContext, IConfiguration configuration, CancellationToken ct) =>
 {
-    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.Id == siteId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var site = await db.Sites.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == siteId, ct);
     if (site is null) return Results.NotFound();
 
     var timeZone = ResolveApiTimeZone(site.TimeZone);
-    await PromoteExpiredParserCorrelationEventsAsync(db, siteId, configuration, ct);
+    await PromoteExpiredParserCorrelationEventsAsync(db, tenantId, siteId, configuration, ct);
     var eventDate = DateOnly.TryParse(date, out var parsedDate)
         ? parsedDate
         : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timeZone).DateTime);
 
     var events = await db.SecurityEvents.AsNoTracking()
-        .Where(x => x.SiteId == siteId && x.EventDate == eventDate)
+        .Where(x => x.TenantId == tenantId && x.SiteId == siteId && x.EventDate == eventDate)
         .OrderByDescending(x => x.EventTime)
         .Take(300)
         .ToListAsync(ct);
 
     var deviceIds = events.Select(x => x.DeviceId).Distinct().ToArray();
     var deviceNames = await db.Devices.AsNoTracking()
-        .Where(x => deviceIds.Contains(x.Id))
+        .Where(x => x.TenantId == tenantId && deviceIds.Contains(x.Id))
         .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
 
     return Results.Ok(events.Select(securityEvent =>
@@ -1193,14 +1254,15 @@ app.MapGet("/api/sites/{siteId:guid}/security-events", async (Guid siteId, strin
     }).ToArray());
 });
 
-app.MapPatch("/api/security-events/{eventId:guid}/review", async (Guid eventId, ReviewSecurityEventRequest request, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapPatch("/api/security-events/{eventId:guid}/review", async (Guid eventId, ReviewSecurityEventRequest request, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
     if (request.Status is not (SecurityEventStatus.Reviewed or SecurityEventStatus.Ignored))
     {
         return Results.BadRequest(new { error = "Status must be Reviewed or Ignored" });
     }
 
-    var securityEvent = await db.SecurityEvents.FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var securityEvent = await db.SecurityEvents.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == eventId, ct);
     if (securityEvent is null) return Results.NotFound();
 
     securityEvent.Status = request.Status;
@@ -1214,16 +1276,22 @@ app.MapPost("/api/security-events/{eventId:guid}/link-worker", async (
     Guid eventId,
     LinkSecurityEventToWorkerRequest request,
     BuildTrackDbContext db,
+    ITenantContext tenantContext,
     IWorkerCameraIdentityResolver identityResolver,
     CancellationToken ct) =>
 {
-    var securityEvent = await db.SecurityEvents.FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var securityEvent = await db.SecurityEvents.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == eventId, ct);
     if (securityEvent is null) return Results.NotFound();
-    var worker = await db.Workers.FirstOrDefaultAsync(x => x.Id == request.WorkerId, ct);
+    var worker = await db.Workers.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == request.WorkerId, ct);
     if (worker is null) return Results.BadRequest(new { error = "Worker was not found" });
     if (worker.TenantId != securityEvent.TenantId || worker.SiteId != securityEvent.SiteId)
     {
         return Results.BadRequest(new { error = "Worker belongs to another tenant or site" });
+    }
+    if (request.DeviceId is not null && !await db.Devices.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.SiteId == securityEvent.SiteId && x.Id == request.DeviceId.Value, ct))
+    {
+        return Results.BadRequest(new { error = "Device was not found" });
     }
 
     var (cameraUserId, cameraCardName) = ExtractCameraIdentity(securityEvent.RawPayloadJson);
@@ -1258,9 +1326,10 @@ app.MapPost("/api/security-events/{eventId:guid}/link-worker", async (
     });
 });
 
-app.MapGet("/api/security-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, CancellationToken ct) =>
+app.MapGet("/api/security-events/{eventId:guid}/snapshot", async (Guid eventId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct) =>
 {
-    var securityEvent = await db.SecurityEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == eventId, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var securityEvent = await db.SecurityEvents.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == eventId, ct);
     if (securityEvent is null) return Results.NotFound();
 
     var localSnapshot = await SecuritySnapshotFileReader.TryReadAsync(securityEvent, ct);
@@ -1643,6 +1712,7 @@ app.MapGet("/api/dahua/netsdk/diagnostics", async (BuildTrackDbContext db, IDahu
 app.MapPost("/api/devices/{id:guid}/simulate-active-register", async (
     Guid id,
     BuildTrackDbContext db,
+    ITenantContext tenantContext,
     IDeviceConnectionLogger connectionLogger,
     IConfiguration configuration,
     ILoggerFactory loggerFactory,
@@ -1654,7 +1724,8 @@ app.MapPost("/api/devices/{id:guid}/simulate-active-register", async (
         return Results.Json(new { error = "Dahua dev simulator actions are disabled" }, statusCode: StatusCodes.Status403Forbidden);
     }
 
-    var device = await db.Devices.FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var device = await db.Devices.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (device is null) return Results.NotFound();
     device.Status = DeviceStatus.Online;
     device.LastSeenAt = DateTimeOffset.UtcNow;
@@ -1669,6 +1740,7 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
     Guid id,
     SimulateEventRequest request,
     BuildTrackDbContext db,
+    ITenantContext tenantContext,
     IAttendanceIngestionService ingestion,
     IConfiguration configuration,
     ILoggerFactory loggerFactory,
@@ -1680,10 +1752,11 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
         return Results.Json(new { error = "Dahua dev simulator actions are disabled" }, statusCode: StatusCodes.Status403Forbidden);
     }
 
-    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+    var tenantId = RequireTenantId(tenantContext);
+    var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, ct);
     if (device is null) return Results.NotFound();
 
-    var fallbackWorker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.SiteId == device.SiteId, ct);
+    var fallbackWorker = await db.Workers.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == device.SiteId, ct);
     var record = new DahuaAccessRecord
     {
         RecNo = request.RecNo ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -1708,7 +1781,7 @@ app.MapPost("/api/devices/{id:guid}/simulate-event", async (
     var inserted = await ingestion.IngestDahuaRecordAsync(device.Id, record, "simulator", device.RegisterPort, ct);
     if (inserted is null) return Results.Conflict(new { message = "Duplicate event ignored" });
 
-    var siteName = await db.Sites.AsNoTracking().Where(x => x.Id == inserted.SiteId).Select(x => x.Name).FirstOrDefaultAsync(ct);
+    var siteName = await db.Sites.AsNoTracking().Where(x => x.TenantId == tenantId && x.Id == inserted.SiteId).Select(x => x.Name).FirstOrDefaultAsync(ct);
     return Results.Ok(ApiResponseMapper.ToAttendanceEventResponse(inserted, siteName, device.Name));
 });
 
@@ -2271,12 +2344,13 @@ static double CalculatePresenceHours(AttendanceSession session)
     return Math.Max(0, (end - session.CheckInTime).TotalHours);
 }
 
-static async Task PromoteExpiredParserCorrelationEventsAsync(BuildTrackDbContext db, Guid siteId, IConfiguration configuration, CancellationToken ct)
+static async Task PromoteExpiredParserCorrelationEventsAsync(BuildTrackDbContext db, Guid tenantId, Guid siteId, IConfiguration configuration, CancellationToken ct)
 {
     var graceSeconds = ParsePositiveInt(configuration["DAHUA_PARSER_UNCERTAIN_CORRELATION_SECONDS"], 60);
     var cutoff = DateTimeOffset.UtcNow.AddSeconds(-graceSeconds);
     var expired = await db.SecurityEvents
-        .Where(x => x.SiteId == siteId
+        .Where(x => x.TenantId == tenantId
+                    && x.SiteId == siteId
                     && x.Status == SecurityEventStatus.PendingCorrelation
                     && (x.EventType == SecurityEventType.ParserUncertainSmartEvent
                         || x.EventType == SecurityEventType.SuspiciousRecognition)

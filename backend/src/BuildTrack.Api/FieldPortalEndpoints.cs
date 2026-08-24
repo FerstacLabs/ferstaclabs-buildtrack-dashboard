@@ -701,10 +701,12 @@ public static class FieldPortalEndpoints
     private static async Task<IResult> GetManagementFieldReportsAsync(Guid? siteId, BuildTrackDbContext db, ITenantContext tenantContext, CancellationToken ct)
     {
         if (!IsManagementRole(tenantContext.Role)) return Results.Forbid();
+        var tenantId = RequireTenantId(tenantContext);
         var query = db.SupervisorDailyReports.AsNoTracking()
             .Include(x => x.Site)
             .Include(x => x.SupervisorUser)
             .Include(x => x.Lines).ThenInclude(x => x.SmetaItem)
+            .Where(x => x.TenantId == tenantId)
             .AsQueryable();
         if (siteId is not null) query = query.Where(x => x.SiteId == siteId.Value);
         var reports = await query.OrderByDescending(x => x.SubmittedAt ?? x.CreatedAt).Take(150).ToListAsync(ct);

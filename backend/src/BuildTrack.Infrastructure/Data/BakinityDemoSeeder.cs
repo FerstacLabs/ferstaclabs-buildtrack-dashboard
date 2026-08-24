@@ -36,7 +36,7 @@ internal static class BakinityDemoSeeder
 
         var tenant = await UpsertTenantAsync(db, ct);
         await UpsertLicenseAsync(db, tenant.Id, ct);
-        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_BAKINITY_DEMO_EMAIL"] ?? "eldar@bakinity.az", "Eldar Məmmədov", BuildTrackUserRole.Owner, ownerPassword, true, ct);
+        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_BAKINITY_DEMO_EMAIL"] ?? "eldar@bakinity.az", "Eldar Qəmbərov", BuildTrackUserRole.Owner, ownerPassword, true, ct);
 
         var siteRows = await UpsertSitesAsync(db, tenant.Id, ct);
         var primarySite = siteRows[0];
@@ -126,6 +126,11 @@ internal static class BakinityDemoSeeder
             };
             db.Users.Add(user);
             return user;
+        }
+
+        if (user.TenantId != tenantId)
+        {
+            throw new InvalidOperationException($"Cannot seed BAKINITY demo user '{normalizedEmail}' because that email already belongs to another tenant.");
         }
 
         user.TenantId = tenantId;

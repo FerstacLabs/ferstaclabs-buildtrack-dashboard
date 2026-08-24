@@ -42,6 +42,8 @@ public sealed class TenantAccessPolicyTests
         Assert.Equal(["ilham"], await db.AttendanceSessions.OrderBy(x => x.WorkerName).Select(x => x.WorkerName!).ToArrayAsync());
         Assert.Equal(["GOLD security"], await db.SecurityEvents.OrderBy(x => x.Message).Select(x => x.Message!).ToArrayAsync());
         Assert.Equal(["BT-GOLDMMC-CAM001"], await db.DahuaActiveRegisterRawEvents.OrderBy(x => x.RegisterDeviceId).Select(x => x.RegisterDeviceId!).ToArrayAsync());
+        Assert.Equal(["GOLD report"], await db.SupervisorDailyReports.OrderBy(x => x.GeneralNote).Select(x => x.GeneralNote!).ToArrayAsync());
+        Assert.Equal(["GOLD line"], await db.SupervisorDailyReportLines.OrderBy(x => x.Note).Select(x => x.Note!).ToArrayAsync());
 
         tenantContext.TenantId = ids.DemoTenantId;
 
@@ -51,6 +53,8 @@ public sealed class TenantAccessPolicyTests
         Assert.Equal(["demo worker"], await db.AttendanceSessions.OrderBy(x => x.WorkerName).Select(x => x.WorkerName!).ToArrayAsync());
         Assert.Equal(["DEMO security"], await db.SecurityEvents.OrderBy(x => x.Message).Select(x => x.Message!).ToArrayAsync());
         Assert.Equal(["BT-API-TEST-001"], await db.DahuaActiveRegisterRawEvents.OrderBy(x => x.RegisterDeviceId).Select(x => x.RegisterDeviceId!).ToArrayAsync());
+        Assert.Equal(["DEMO report"], await db.SupervisorDailyReports.OrderBy(x => x.GeneralNote).Select(x => x.GeneralNote!).ToArrayAsync());
+        Assert.Equal(["DEMO line"], await db.SupervisorDailyReportLines.OrderBy(x => x.Note).Select(x => x.Note!).ToArrayAsync());
     }
 
     private static BuildTrackDbContext CreateDbContext(ITenantContext tenantContext)
@@ -71,6 +75,12 @@ public sealed class TenantAccessPolicyTests
         var goldDeviceId = Guid.Parse("40cdf585-f528-42d7-ada0-d5e5823356a6");
         var demoEventId = Guid.NewGuid();
         var goldEventId = Guid.NewGuid();
+        var demoSupervisorId = Guid.NewGuid();
+        var goldSupervisorId = Guid.NewGuid();
+        var demoSmetaItemId = Guid.NewGuid();
+        var goldSmetaItemId = Guid.NewGuid();
+        var demoReportId = Guid.NewGuid();
+        var goldReportId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var workDate = DateOnly.FromDateTime(now.UtcDateTime);
 
@@ -81,6 +91,28 @@ public sealed class TenantAccessPolicyTests
         db.Sites.AddRange(
             new Site { Id = demoSiteId, TenantId = demoTenantId, Name = "API Test Layihəsi" },
             new Site { Id = goldSiteId, TenantId = goldTenantId, Name = "GOLD PALACE" });
+
+        db.Users.AddRange(
+            new AppUser
+            {
+                Id = demoSupervisorId,
+                TenantId = demoTenantId,
+                FullName = "Demo Supervisor",
+                Email = "demo.supervisor@example.test",
+                PasswordHash = "hash",
+                Role = BuildTrackUserRole.Supervisor,
+                Status = BuildTrackUserStatus.Active,
+            },
+            new AppUser
+            {
+                Id = goldSupervisorId,
+                TenantId = goldTenantId,
+                FullName = "Gold Supervisor",
+                Email = "gold.supervisor@example.test",
+                PasswordHash = "hash",
+                Role = BuildTrackUserRole.Supervisor,
+                Status = BuildTrackUserStatus.Active,
+            });
 
         db.Devices.AddRange(
             new Device
@@ -214,6 +246,68 @@ public sealed class TenantAccessPolicyTests
                 ListenerPort = 7000,
                 CallbackCommand = 5,
                 PayloadBytes = 10,
+            });
+
+        db.FieldSmetaItems.AddRange(
+            new FieldSmetaItem
+            {
+                Id = demoSmetaItemId,
+                TenantId = demoTenantId,
+                SiteId = demoSiteId,
+                StageName = "Demo stage",
+                WorkName = "Demo work",
+                Unit = "m2",
+            },
+            new FieldSmetaItem
+            {
+                Id = goldSmetaItemId,
+                TenantId = goldTenantId,
+                SiteId = goldSiteId,
+                StageName = "Gold stage",
+                WorkName = "Gold work",
+                Unit = "m2",
+            });
+
+        db.SupervisorDailyReports.AddRange(
+            new SupervisorDailyReport
+            {
+                Id = demoReportId,
+                TenantId = demoTenantId,
+                SiteId = demoSiteId,
+                SupervisorUserId = demoSupervisorId,
+                ReportDate = workDate,
+                Status = FieldDailyReportStatus.Submitted,
+                GeneralNote = "DEMO report",
+            },
+            new SupervisorDailyReport
+            {
+                Id = goldReportId,
+                TenantId = goldTenantId,
+                SiteId = goldSiteId,
+                SupervisorUserId = goldSupervisorId,
+                ReportDate = workDate,
+                Status = FieldDailyReportStatus.Submitted,
+                GeneralNote = "GOLD report",
+            });
+
+        db.SupervisorDailyReportLines.AddRange(
+            new SupervisorDailyReportLine
+            {
+                TenantId = demoTenantId,
+                ReportId = demoReportId,
+                SmetaItemId = demoSmetaItemId,
+                ReportedQuantity = 1,
+                Unit = "m2",
+                Note = "DEMO line",
+            },
+            new SupervisorDailyReportLine
+            {
+                TenantId = goldTenantId,
+                ReportId = goldReportId,
+                SmetaItemId = goldSmetaItemId,
+                ReportedQuantity = 1,
+                Unit = "m2",
+                Note = "GOLD line",
             });
 
         await db.SaveChangesAsync();

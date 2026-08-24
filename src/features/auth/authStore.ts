@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { apiRequest, ApiClientError } from '../../shared/api/client'
+import { clearDataset } from '../../services/storage/db'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
 import { clearAuthToken, getAuthToken, setAuthToken } from './authToken'
@@ -97,9 +98,17 @@ const normalizeLicenseError = (error: unknown) => {
   return LICENSE_ACTIVATION_FAILED_MESSAGE
 }
 
-const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string) => {
+const resetTenantScopedBrowserState = (previousTenantId: string | undefined, nextTenantId: string | undefined) => {
+  if (previousTenantId && previousTenantId !== nextTenantId) {
+    void clearDataset().catch((error) => console.warn('BuildTrack tenant cache reset failed', error))
+    useProjectSelectionStore.getState().clearSelection()
+  }
+}
+
+const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string, previousTenantId?: string) => {
   const nextToken = token ?? getAuthToken()
   if ('accessToken' in response) setAuthToken(response.accessToken)
+  resetTenantScopedBrowserState(previousTenantId, response.tenant.id)
   useProjectSelectionStore.getState().setTenantScope(response.tenant.id)
   useProjectProgressStore.getState().prepareWorkspaceForTenant(response.tenant.id, response.tenant.code, response.tenant.companyName)
   return {
@@ -128,8 +137,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     set({ loading: true, error: undefined })
     try {
+      const previousTenantId = get().tenant?.id
       const response = await apiRequest<MeResponse>('/api/auth/me')
-      set({ ...applyAuthResponse(response, token), loading: false, initialized: true })
+      set({ ...applyAuthResponse(response, token, previousTenantId), loading: false, initialized: true })
     } catch (error) {
       clearAuthToken()
       set({ token: '', user: undefined, tenant: undefined, license: undefined, loading: false, initialized: true, isAuthenticated: false, hasActiveLicense: false, error: normalizeError(error) })
@@ -138,11 +148,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   login: async (email, password) => {
     set({ loading: true, error: undefined })
     try {
+      const previousTenantId = get().tenant?.id
       const response = await apiRequest<AuthResponse>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      set({ ...applyAuthResponse(response), loading: false, initialized: true })
+      set({ ...applyAuthResponse(response, undefined, previousTenantId), loading: false, initialized: true })
     } catch (error) {
       set({ loading: false, error: normalizeLoginError(error) })
       throw error
@@ -151,11 +162,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   register: async (payload) => {
     set({ loading: true, error: undefined })
     try {
+      const previousTenantId = get().tenant?.id
       const response = await apiRequest<AuthResponse>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
-      set({ ...applyAuthResponse(response), loading: false, initialized: true })
+      set({ ...applyAuthResponse(response, undefined, previousTenantId), loading: false, initialized: true })
     } catch (error) {
       set({ loading: false, error: normalizeLicenseError(error) })
       throw error
@@ -181,6 +193,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       // Frontend token clear is the source of truth for this SPA-stage logout.
     } finally {
       clearAuthToken()
+      void clearDataset().catch((error) => console.warn('BuildTrack logout cache reset failed', error))
       useProjectSelectionStore.getState().clearSelection()
       useProjectSelectionStore.getState().setTenantScope(undefined)
       useProjectProgressStore.getState().prepareWorkspaceForTenant('anonymous', 'EMPTY', undefined)
