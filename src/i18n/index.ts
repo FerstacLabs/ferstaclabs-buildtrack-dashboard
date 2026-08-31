@@ -3,6 +3,7 @@ import { az } from './az'
 import { en } from './en'
 import { ru } from './ru'
 import { useAutoTranslateUi } from './useAutoTranslateUi'
+import { languageChangedEventName } from './helpers'
 
 export type AppLanguage = 'az' | 'en' | 'ru'
 
@@ -41,6 +42,16 @@ export const I18nProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (typeof document !== 'undefined') document.documentElement.lang = language
   }, [language])
+
+  useEffect(() => {
+    const onLanguageChange = (event: Event) => {
+      const next = event instanceof CustomEvent ? event.detail : null
+      if (typeof next === 'string' && isAppLanguage(next)) setLanguageState(next)
+    }
+
+    window.addEventListener(languageChangedEventName, onLanguageChange)
+    return () => window.removeEventListener(languageChangedEventName, onLanguageChange)
+  }, [])
 
   const setLanguage = useCallback((nextLanguage: AppLanguage) => {
     setLanguageState(nextLanguage)

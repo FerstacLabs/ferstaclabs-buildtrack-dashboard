@@ -12,6 +12,7 @@ import {
   FileSearchOutlined,
   InboxOutlined,
   KeyOutlined,
+  RadarChartOutlined,
   RightOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -69,6 +70,7 @@ const groups: SidebarGroup[] = [
       { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
       { labelKey: 'nav.warehouse', path: '/warehouse', icon: <InboxOutlined /> },
       { labelKey: 'nav.procurement', path: '/procurement', icon: <ShoppingCartOutlined /> },
+      { labelKey: 'nav.skysnapDrone', path: '/skysnap-drone', icon: <RadarChartOutlined /> },
     ],
   },
   {

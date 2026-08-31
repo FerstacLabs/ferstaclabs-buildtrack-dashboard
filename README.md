@@ -91,6 +91,12 @@ SEED_BAKINITY_DEMO_PASSWORD=
 SEED_BAKINITY_DEMO_PRORAB_PASSWORD=
 SEED_BAKINITY_DEMO_SUPPLY_PASSWORD=
 
+# Optional isolated SkySnap English partner demo tenant.
+SEED_SKYSNAP_DEMO=false
+SEED_SKYSNAP_DEMO_RESET=false
+SEED_SKYSNAP_DEMO_EMAIL=tomasz.odrobinski@skysnap.pl
+SEED_SKYSNAP_DEMO_PASSWORD=SkySnapDemo!2026
+
 CORS_ALLOWED_ORIGINS=https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com
 ```
 
@@ -117,6 +123,20 @@ Set `SEED_BAKINITY_DEMO=true` and provide `SEED_BAKINITY_DEMO_PASSWORD` to creat
 The BAKİNİTY demo is isolated from existing tenants such as GOLD MMC. To reset only this demo environment, set `SEED_BAKINITY_DEMO_RESET=true`, restart the API/worker once, verify the seed, then set it back to `false`. The reset removes/reseeds only tenant code `BAK-DEMO`; it does not touch other tenant codes.
 
 Project progress data is server-authoritative through PostgreSQL-backed project, stage, work-item, crew and material endpoints. `/api/project-progress/workspace` remains a read/legacy compatibility projection and the visible one-time "Serverə köçür" migration path for old browser snapshots; normal Smeta/crew/material edits use granular backend writes and localStorage keeps only UI/session state.
+
+### SkySnap English partner demo
+
+Set `SEED_SKYSNAP_DEMO=true` to create the isolated tenant `SKYSNAP-DEMO` (`SkySnap Construction Demo`) with owner user `tomasz.odrobinski@skysnap.pl`. The deterministic demo password is `SkySnapDemo!2026` unless `SEED_SKYSNAP_DEMO_PASSWORD` is set in the VPS `.env`. Keep real customer passwords out of frontend/Vercel variables.
+
+The SkySnap seed is presentation-oriented and English-first: 4 projects/sites, 10 field managers, 48 workers, 6 crews, English smeta/stages/work items, warehouse stock, procurement shortfall, daily reports, payroll/attendance rows and Active Register-ready Dahua device placeholders. It is tenant-isolated from `BAK-DEMO`, `DEMO`, GOLD MMC and all other tenants. If `tomasz.odrobinski@skysnap.pl` already belongs to another tenant, the seeder throws a clear conflict and does not mutate that user. To reset only SkySnap, set `SEED_SKYSNAP_DEMO_RESET=true` for one restart, then set it back to `false`.
+
+The SkySnap drone panel is available in the management app at `/skysnap-drone` under Materials. Configure the embedded partner app URL with:
+
+```env
+VITE_SKYSNAP_EMBED_URL=https://partner-skysnap-url.example
+```
+
+On Vercel, add `VITE_SKYSNAP_EMBED_URL` as a frontend environment variable. Locally, put it in `.env`. BuildTrack does not append JWTs or secrets to the iframe URL. If SkySnap blocks iframe embedding through X-Frame-Options/CSP, the page shows an "Open SkySnap in new tab" action.
 
 You can also create a tenant license as the demo/admin account with curl:
 

@@ -2171,6 +2171,18 @@ main,
   box-shadow: 0 16px 34px rgba(15, 118, 110, 0.32);
 }
 
+.skysnap-embed-card {
+  min-height: 620px;
+}
+
+.skysnap-embed-frame {
+  width: 100%;
+  min-height: 560px;
+  border: 1px solid #dce8ef;
+  border-radius: 14px;
+  background: #f8fbfd;
+}
+
 @media (max-width: 900px) {
   .field-shell {
     grid-template-columns: 1fr;
@@ -2199,5 +2211,13 @@ main,
 
   .field-cart-line {
     grid-template-columns: 1fr;
+  }
+
+  .skysnap-embed-card {
+    min-height: 460px;
+  }
+
+  .skysnap-embed-frame {
+    min-height: 420px;
   }
 }

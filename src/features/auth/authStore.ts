@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { apiRequest, ApiClientError } from '../../shared/api/client'
 import { useProjectProgressStore } from '../projectProgress/projectProgressStore'
 import { useProjectSelectionStore } from '../../stores/projectSelectionStore'
+import { applyPreferredTenantLanguage } from '../../i18n/helpers'
 import { clearAuthToken, getAuthToken, setAuthToken } from './authToken'
 
 export type LicenseStatus = 'Pending' | 'Active' | 'Expired' | 'Revoked'
@@ -107,6 +108,7 @@ const applyAuthResponse = (response: AuthResponse | MeResponse, token?: string, 
   const nextToken = token ?? getAuthToken()
   if ('accessToken' in response) setAuthToken(response.accessToken)
   resetTenantScopedBrowserState(previousTenantId, response.tenant.id)
+  applyPreferredTenantLanguage(response.tenant.code)
   useProjectSelectionStore.getState().setTenantScope(response.tenant.id)
   useProjectProgressStore.getState().prepareWorkspaceForTenant(response.tenant.id, response.tenant.code, response.tenant.companyName)
   return {

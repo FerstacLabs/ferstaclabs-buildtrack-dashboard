@@ -11,6 +11,8 @@ public static class DbInitializer
     public static readonly Guid DemoTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid BakinityDemoTenantId = Guid.Parse("ba100000-0000-4000-9000-000000000001");
     public const string BakinityDemoTenantCode = "BAK-DEMO";
+    public static readonly Guid SkySnapDemoTenantId = SkySnapDemoSeeder.TenantId;
+    public const string SkySnapDemoTenantCode = SkySnapDemoSeeder.TenantCode;
 
     public sealed record SupplyCatalogSeedItem(
         string Code,
@@ -887,6 +889,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "UX_project_progress_workspaces_TenantId" ON p
         await SeedDemoFieldDataAsync(db, configuration, cancellationToken);
         await SeedSupplyChainDataAsync(db, configuration, cancellationToken);
         await BakinityDemoSeeder.SeedAsync(db, configuration, cancellationToken);
+        await SkySnapDemoSeeder.SeedAsync(db, configuration, cancellationToken);
     }
 
     private static async Task EnsureSupplyChainSchemaAsync(BuildTrackDbContext db, CancellationToken cancellationToken)
@@ -1724,7 +1727,6 @@ CREATE INDEX IF NOT EXISTS "IX_supply_notifications_Tenant_Audience_Status" ON s
             || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
     }
 }
-
 
 
 

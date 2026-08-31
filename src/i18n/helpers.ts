@@ -1,6 +1,20 @@
 import type { AppLanguage } from './index'
 import { translateUiText } from './uiText'
 
+export const languageChangedEventName = 'buildtrack-language-changed'
+
+export const preferredLanguageForTenantCode = (tenantCode?: string): AppLanguage | undefined => {
+  if (tenantCode?.trim().toUpperCase() === 'SKYSNAP-DEMO') return 'en'
+  return undefined
+}
+
+export const applyPreferredTenantLanguage = (tenantCode?: string) => {
+  const preferred = preferredLanguageForTenantCode(tenantCode)
+  if (!preferred || typeof window === 'undefined') return
+  window.localStorage.setItem('buildtrack-language', preferred)
+  window.dispatchEvent(new CustomEvent(languageChangedEventName, { detail: preferred }))
+}
+
 type Translator = (key: string, fallback?: string) => string
 
 export const crewTypeDefinitions = [

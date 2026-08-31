@@ -26,6 +26,7 @@ import { RiskWorkersPage } from '../features/riskWorkers/RiskWorkersPage'
 import { SecurityEventsPage } from '../features/securityEvents/SecurityEventsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { SiteHoursPage } from '../features/siteHours/SiteHoursPage'
+import { SkySnapDronePage } from '../features/skysnapDrone/SkySnapDronePage'
 import { SupervisorAuditPage } from '../features/supervisorAudit/SupervisorAuditPage'
 import { SupervisorsPage } from '../features/supervisors/SupervisorsPage'
 import { WorkersPage } from '../features/workers/WorkersPage'
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
       { path: 'materials', element: <MaterialsPage /> },
       { path: 'warehouse', element: <WarehousePage /> },
       { path: 'procurement', element: <ProcurementPage /> },
+      { path: 'skysnap-drone', element: <SkySnapDronePage /> },
       { path: 'daily-attendance', element: <DailyAttendancePage /> },
       { path: 'attendance-live', element: <AttendanceLivePage /> },
       { path: 'site-hours', element: <SiteHoursPage /> },
