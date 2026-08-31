@@ -948,6 +948,7 @@ public sealed class BuildTrackDbContext : DbContext
             entity.HasIndex(x => x.TenantId);
             entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.SiteId });
             entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.Code }).IsUnique().HasFilter("\"Code\" IS NOT NULL");
+            entity.HasOne<Site>().WithMany().HasForeignKey(x => x.SiteId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ProjectWorkItemMaterialRecord>(entity =>
@@ -1008,7 +1009,6 @@ public sealed class BuildTrackDbContext : DbContext
         });
     }
 }
-
 
 
 

@@ -24,14 +24,24 @@ internal static class SkySnapDemoSeeder
     {
         if (!ParseBool(configuration?["SEED_SKYSNAP_DEMO"])) return;
 
+        if (db.Database.IsRelational())
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await SeedInternalAsync(db, configuration, ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        await SeedInternalAsync(db, configuration, ct);
+    }
+
+    private static async Task SeedInternalAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken ct)
+    {
         if (ParseBool(configuration?["SEED_SKYSNAP_DEMO_RESET"]))
         {
             var existing = await db.Tenants.FirstOrDefaultAsync(x => x.Code == TenantCode, ct);
-            if (existing is not null)
-            {
-                db.Tenants.Remove(existing);
-                await db.SaveChangesAsync(ct);
-            }
+            if (existing is not null) db.Tenants.Remove(existing);
+            await db.SaveChangesAsync(ct);
         }
 
         var password = configuration?["SEED_SKYSNAP_DEMO_PASSWORD"];
@@ -44,10 +54,14 @@ internal static class SkySnapDemoSeeder
         await UpsertLicenseAsync(db, tenant.Id, ct);
         await UpsertUserAsync(db, tenant.Id, configuration?["SEED_SKYSNAP_DEMO_EMAIL"] ?? DefaultOwnerEmail, DefaultOwnerName, BuildTrackUserRole.Owner, password, true, ct);
         var sites = await UpsertSitesAsync(db, tenant.Id, ct);
+        await db.SaveChangesAsync(ct);
+
         await SeedCatalogAndWarehouseAsync(db, tenant.Id, ct);
         var supervisors = await UpsertSupervisorsAsync(db, tenant.Id, sites, password, ct);
         await UpsertProcurementUsersAsync(db, tenant.Id, password, ct);
         var workers = await UpsertWorkersAsync(db, tenant.Id, sites, ct);
+        await db.SaveChangesAsync(ct);
+
         await UpsertFieldSmetaAndCanonicalProgressAsync(db, tenant.Id, sites, workers, ct);
         await UpsertAttendanceSeedAsync(db, tenant.Id, sites, workers, ct);
         await UpsertWarehouseWorkflowSeedAsync(db, tenant.Id, sites[0], supervisors[0].Id, ct);
@@ -301,13 +315,14 @@ internal static class SkySnapDemoSeeder
         {
             var site = sites[i % sites.Count];
             var code = $"SKY-W-{i + 1:000}";
-            var worker = await db.Workers.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.SiteId == site.Id && x.ExternalWorkerCode == code, ct);
+            var worker = await db.Workers.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.ExternalWorkerCode == code, ct);
             if (worker is null)
             {
                 worker = new Worker { TenantId = tenantId, SiteId = site.Id, ExternalWorkerCode = code };
                 db.Workers.Add(worker);
             }
 
+            worker.SiteId = site.Id;
             worker.FullName = $"{firstNames[i % firstNames.Length]} {lastNames[i % lastNames.Length]}";
             worker.Brigade = crewNames[i % crewNames.Length];
             worker.Role = roles[i % roles.Length];
@@ -430,6 +445,8 @@ internal static class SkySnapDemoSeeder
             stage.Notes = "SkySnap drone visual progress can be linked to this stage";
         }
 
+        await db.SaveChangesAsync(ct);
+
         var workSeeds = WorkItemSeeds();
         for (var i = 0; i < workSeeds.Length; i++)
         {
@@ -483,8 +500,13 @@ internal static class SkySnapDemoSeeder
             smeta.IsActive = true;
         }
 
+        await db.SaveChangesAsync(ct);
+
         await UpsertProjectMaterialsAsync(db, tenantId, sites, stageSeeds, workSeeds, ct);
+        await db.SaveChangesAsync(ct);
+
         await UpsertWorkspaceAsync(db, tenantId, sites, workers, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     private static async Task UpsertProjectMaterialsAsync(BuildTrackDbContext db, Guid tenantId, IReadOnlyList<Site> sites, IReadOnlyList<StageSeed> stages, IReadOnlyList<WorkItemSeed> workItems, CancellationToken ct)
