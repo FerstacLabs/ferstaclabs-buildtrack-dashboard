@@ -66,11 +66,12 @@ Configure the final SkySnap link here:
 
 ```env
 VITE_SKYSNAP_EMBED_URL=https://partner-skysnap-url.example
+VITE_SKYSNAP_EMBED_ENABLED=false
 ```
 
 Use this as a Vercel Environment Variable for the management frontend. For local development, put the same value in local `.env`.
 
-The iframe does not receive a BuildTrack JWT/token, and BuildTrack does not append secrets to the URL. If the partner app blocks iframe embedding through CSP or X-Frame-Options, the panel shows an "Open SkySnap in new tab" action.
+Production should keep `VITE_SKYSNAP_EMBED_ENABLED=false` until SkySnap confirms iframe embedding support for the BuildTrack origin. In the default mode, the panel shows a clean "Open SkySnap Platform" action instead of rendering a browser-blocked iframe. If embedding is enabled later, the iframe does not receive a BuildTrack JWT/token, and BuildTrack does not append secrets to the URL.
 
 ## Presentation Screenshots
 

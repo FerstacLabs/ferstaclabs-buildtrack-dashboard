@@ -130,13 +130,14 @@ Set `SEED_SKYSNAP_DEMO=true` to create the isolated tenant `SKYSNAP-DEMO` (`SkyS
 
 The SkySnap seed is presentation-oriented and English-first: 4 projects/sites, 10 field managers, 48 workers, 6 crews, English smeta/stages/work items, warehouse stock, procurement shortfall, daily reports, payroll/attendance rows and Active Register-ready Dahua device placeholders. It is tenant-isolated from `BAK-DEMO`, `DEMO`, GOLD MMC and all other tenants. If `tomasz.odrobinski@skysnap.pl` already belongs to another tenant, the seeder throws a clear conflict and does not mutate that user. To reset only SkySnap, set `SEED_SKYSNAP_DEMO_RESET=true` for one restart, then set it back to `false`.
 
-The SkySnap drone panel is available in the management app at `/skysnap-drone` under Materials. Configure the embedded partner app URL with:
+The SkySnap drone panel is available in the management app as a top-level sidebar item at `/skysnap-drone`. Configure the partner app URL with:
 
 ```env
 VITE_SKYSNAP_EMBED_URL=https://partner-skysnap-url.example
+VITE_SKYSNAP_EMBED_ENABLED=false
 ```
 
-On Vercel, add `VITE_SKYSNAP_EMBED_URL` as a frontend environment variable. Locally, put it in `.env`. BuildTrack does not append JWTs or secrets to the iframe URL. If SkySnap blocks iframe embedding through X-Frame-Options/CSP, the page shows an "Open SkySnap in new tab" action.
+On Vercel, add `VITE_SKYSNAP_EMBED_URL` as a frontend environment variable. Locally, put it in `.env`. Production defaults to external-launch mode; keep `VITE_SKYSNAP_EMBED_ENABLED=false` until SkySnap authorizes BuildTrack as an embedding origin. BuildTrack does not append JWTs or secrets to the SkySnap URL.
 
 You can also create a tenant license as the demo/admin account with curl:
 

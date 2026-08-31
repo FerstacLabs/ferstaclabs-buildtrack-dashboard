@@ -167,4 +167,8 @@ export const ru = {
   'skysnap.configureHint': 'Укажите VITE_SKYSNAP_EMBED_URL в Vercel или локальном .env.',
   'skysnap.frameBlocked': 'SkySnap не открылся внутри iframe',
   'skysnap.frameBlockedDescription': 'Партнерское приложение может блокировать встраивание через X-Frame-Options или CSP. Используйте кнопку новой вкладки.',
+  'skysnap.launchTitle': 'Открыть дрон-платформу SkySnap',
+  'skysnap.launchDescription': 'Откройте платформу SkySnap в новой вкладке, чтобы просмотреть аэросъемку, ход проекта, состояние площадки и визуальные строительные данные.',
+  'skysnap.embedDisabledNote': 'Прямое встраивание будет включено после того, как SkySnap разрешит BuildTrack как embedding origin.',
+  'skysnap.openPlatform': 'Открыть платформу SkySnap',
 } as const

@@ -167,4 +167,8 @@ export const az = {
   'skysnap.configureHint': 'Vercel və ya local .env daxilində VITE_SKYSNAP_EMBED_URL əlavə edin.',
   'skysnap.frameBlocked': 'SkySnap iframe daxilində açılmadı',
   'skysnap.frameBlockedDescription': 'Tərəfdaş tətbiqinin X-Frame-Options və ya CSP ayarları embed-i bloklaya bilər. Yeni tab düyməsindən istifadə edin.',
+  'skysnap.launchTitle': 'SkySnap dron platformasını aç',
+  'skysnap.launchDescription': 'Hava çəkilişləri, layihə gedişatı, sahə vəziyyəti və vizual tikinti datasını yoxlamaq üçün SkySnap platformasını yeni tabda açın.',
+  'skysnap.embedDisabledNote': 'Birbaşa embedded giriş SkySnap BuildTrack origin-ini təsdiqlədikdən sonra aktiv ediləcək.',
+  'skysnap.openPlatform': 'SkySnap Platformasını aç',
 } as const

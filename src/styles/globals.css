@@ -2183,6 +2183,40 @@ main,
   background: #f8fbfd;
 }
 
+.skysnap-launch-card {
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 42px;
+  border: 1px solid #dce8ef;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 34%),
+    linear-gradient(135deg, #f8fbfd 0%, #eef8f6 100%);
+}
+
+.skysnap-launch-copy {
+  max-width: 720px;
+}
+
+.skysnap-partner-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 14px;
+}
+
+.skysnap-partner-strip span {
+  padding: 7px 12px;
+  border: 1px solid #cfe1ea;
+  border-radius: 999px;
+  color: #063f3a;
+  background: rgba(255, 255, 255, 0.78);
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .field-shell {
     grid-template-columns: 1fr;
@@ -2219,5 +2253,12 @@ main,
 
   .skysnap-embed-frame {
     min-height: 420px;
+  }
+
+  .skysnap-launch-card {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 24px;
   }
 }

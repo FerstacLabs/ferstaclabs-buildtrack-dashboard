@@ -1,6 +1,6 @@
 import { ApiOutlined, CloudOutlined, ExportOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Col, Empty, Row, Space, Statistic, Tag, Typography } from 'antd'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { PageTitle } from '../../components/ui/PageTitle'
 import { useI18n } from '../../i18n'
 
@@ -10,10 +10,13 @@ const normalizeEmbedUrl = (value?: string) => {
   return trimmed
 }
 
+const isEmbedEnabled = (value?: string) => value?.trim().toLowerCase() === 'true'
+
 export const SkySnapDronePage = () => {
   const { t } = useI18n()
   const embedUrl = useMemo(() => normalizeEmbedUrl(import.meta.env.VITE_SKYSNAP_EMBED_URL), [])
-  const [iframeFailed, setIframeFailed] = useState(false)
+  const embedEnabled = isEmbedEnabled(import.meta.env.VITE_SKYSNAP_EMBED_ENABLED)
+  const canRenderIframe = embedEnabled && Boolean(embedUrl)
 
   return (
     <div className="page-stack">
@@ -82,19 +85,7 @@ export const SkySnapDronePage = () => {
               </Space>
             }
           />
-        ) : iframeFailed ? (
-          <Alert
-            type="warning"
-            showIcon
-            message={t('skysnap.frameBlocked')}
-            description={t('skysnap.frameBlockedDescription')}
-            action={
-              <Button href={embedUrl} target="_blank" rel="noreferrer">
-                {t('skysnap.openNewTab')}
-              </Button>
-            }
-          />
-        ) : (
+        ) : canRenderIframe ? (
           <iframe
             className="skysnap-embed-frame"
             title="SkySnap drone progress"
@@ -102,8 +93,23 @@ export const SkySnapDronePage = () => {
             sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
             allow="fullscreen; geolocation"
             referrerPolicy="no-referrer"
-            onError={() => setIframeFailed(true)}
           />
+        ) : (
+          <div className="skysnap-launch-card">
+            <div className="skysnap-launch-copy">
+              <Typography.Title level={3}>{t('skysnap.launchTitle')}</Typography.Title>
+              <Typography.Paragraph>{t('skysnap.launchDescription')}</Typography.Paragraph>
+              <div className="skysnap-partner-strip">
+                <span>FerstacLabs</span>
+                <span>1Muhasib</span>
+                <span>SkySnap</span>
+              </div>
+              <Typography.Text type="secondary">{t('skysnap.embedDisabledNote')}</Typography.Text>
+            </div>
+            <Button type="primary" size="large" icon={<ExportOutlined />} href={embedUrl} target="_blank" rel="noopener noreferrer">
+              {t('skysnap.openPlatform')}
+            </Button>
+          </div>
         )}
       </Card>
     </div>

@@ -52,6 +52,7 @@ const mainItems: SidebarItem[] = [
   { labelKey: 'nav.crews', path: '/crews', icon: <TeamOutlined /> },
   { labelKey: 'nav.workers', path: '/workers', icon: <UserOutlined /> },
   { labelKey: 'nav.dailyReports', path: '/daily-reports', icon: <CalendarOutlined /> },
+  { labelKey: 'nav.skysnapDrone', path: '/skysnap-drone', icon: <RadarChartOutlined /> },
 ]
 
 const footerItems: SidebarItem[] = [
@@ -70,7 +71,6 @@ const groups: SidebarGroup[] = [
       { labelKey: 'nav.materials', path: '/materials', icon: <ToolOutlined /> },
       { labelKey: 'nav.warehouse', path: '/warehouse', icon: <InboxOutlined /> },
       { labelKey: 'nav.procurement', path: '/procurement', icon: <ShoppingCartOutlined /> },
-      { labelKey: 'nav.skysnapDrone', path: '/skysnap-drone', icon: <RadarChartOutlined /> },
     ],
   },
   {
