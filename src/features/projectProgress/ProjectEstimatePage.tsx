@@ -169,6 +169,12 @@ export const ProjectEstimatePage = () => {
   const crewNameById = useMemo(() => new Map(crews.map((crew) => [crew.id, crew.name])), [crews])
   const statusText = useCallback((status: ProjectWorkStatus) => t(`status.${status}`, statusLabel[status]), [t])
   const statusOptions = useMemo(() => workStatusValues.map((value) => ({ value, label: statusText(value) })), [statusText])
+  const formatHoursText = useCallback((value: number, digits = 0) => {
+    const safeValue = Number.isFinite(value) ? value : 0
+    if (language === 'en') return `${formatNumber(safeValue, digits)} h`
+    if (language === 'ru') return `${formatNumber(safeValue, digits)} ч`
+    return formatHours(safeValue, digits)
+  }, [language])
   const selectedObjectName = getObjectName(store, selectedObjectId)
   const targetObjectId = selectedObjectId === ALL_OBJECTS_ID ? store.objects[0]?.id : selectedObjectId
   const scopedSummary = useMemo<ProjectEstimateSummary>(() => {
@@ -378,10 +384,10 @@ export const ProjectEstimatePage = () => {
       setItemDrawerOpen(false)
       setEditingItem(undefined)
       refreshEstimateTables()
-      void message.success(materialRows.length ? 'Smeta sətri və bağlı materiallar serverdə saxlandı' : 'Smeta sətri serverdə saxlandı')
+      void message.success(materialRows.length ? t('estimate.workItemSavedWithMaterials') : t('estimate.workItemSaved'))
     } catch (error) {
       console.error('Project work item save failed', error)
-      void message.error('Smeta sətri saxlanmadı. Server bağlantısını və məlumatları yoxlayın.')
+      void message.error(t('estimate.workItemSaveFailed'))
     }
   }
 
@@ -400,7 +406,7 @@ export const ProjectEstimatePage = () => {
       useProjectSelectionStore.getState().setSelectedProjectId(site.id)
       projectForm.resetFields()
       setProjectModalOpen(false)
-      void message.success('Yeni layihə yaradıldı və bütün modullarda layihə kimi göründü')
+      void message.success(t('estimate.projectCreatedBackend'))
       return
     } catch (error) {
       console.warn('Backend site creation failed; local project object fallback will be used', error)
@@ -409,7 +415,7 @@ export const ProjectEstimatePage = () => {
     const objectId = addObject({
       name,
       address: values.address?.trim(),
-      zone: values.address?.trim() || 'Yeni layihə',
+      zone: values.address?.trim() || t('estimate.newProject'),
       plannedStartDate: toDateString(values.plannedStartDate),
       plannedEndDate: toDateString(values.plannedEndDate),
       clientName: values.clientName?.trim(),
@@ -419,7 +425,7 @@ export const ProjectEstimatePage = () => {
 
     projectForm.resetFields()
     setProjectModalOpen(false)
-    void message.success('Yeni layihə yaradıldı və layihə filterlərinə əlavə olundu')
+    void message.success(t('estimate.projectCreatedLocal'))
 
     useProjectSelectionStore.getState().setSelectedProjectId(objectId)
   }
@@ -443,10 +449,10 @@ export const ProjectEstimatePage = () => {
       setStageModalOpen(false)
       stageForm.resetFields()
       refreshEstimateTables()
-      void message.success('Yeni etap serverdə əlavə edildi')
+      void message.success(t('estimate.stageSaved'))
     } catch (error) {
       console.error('Project stage save failed', error)
-      void message.error('Etap saxlanmadı. Server bağlantısını yoxlayın.')
+      void message.error(t('estimate.stageSaveFailed'))
     }
   }
 
@@ -457,7 +463,7 @@ export const ProjectEstimatePage = () => {
       refreshEstimateTables()
     } catch (error) {
       console.error('Project work item progress save failed', error)
-      void message.error('Gedişat faizi serverdə saxlanmadı')
+      void message.error(t('estimate.progressSaveFailed'))
     }
   }
 
@@ -466,10 +472,10 @@ export const ProjectEstimatePage = () => {
       await projectProgressApi.deleteWorkItem(row.id)
       await loadFromBackend()
       refreshEstimateTables()
-      void message.success('Smeta sətri silindi')
+      void message.success(t('estimate.workItemDeleted'))
     } catch (error) {
       console.error('Project work item delete failed', error)
-      void message.error('Smeta sətri silinmədi')
+      void message.error(t('estimate.workItemDeleteFailed'))
     }
   }
 
@@ -478,11 +484,41 @@ export const ProjectEstimatePage = () => {
       await projectProgressApi.deleteStage(stageId)
       await loadFromBackend()
       refreshEstimateTables()
-      void message.success('Etap silindi')
+      void message.success(t('estimate.stageDeleted'))
     } catch (error) {
       console.error('Project stage delete failed', error)
-      void message.error('Etap silinmədi')
+      void message.error(t('estimate.stageDeleteFailed'))
     }
+  }
+
+  const explainEstimateVersionCreation = () => {
+    Modal.confirm({
+      title: t('estimate.versionConfirmTitle'),
+      width: 640,
+      okText: t('estimate.versionConfirmOk'),
+      cancelText: t('common.cancel'),
+      content: (
+        <Space direction="vertical" size={10}>
+          <p>{t('estimate.versionConfirmIntro')}</p>
+          <Alert
+            type="info"
+            showIcon
+            message={t('estimate.versionCopiedTitle')}
+            description={t('estimate.versionCopiedDescription')}
+          />
+          <Alert
+            type="warning"
+            showIcon
+            message={t('estimate.versionResetTitle')}
+            description={t('estimate.versionResetDescription')}
+          />
+          <p className="muted-text">{t('estimate.versionSafeNote')}</p>
+        </Space>
+      ),
+      onOk: () => {
+        void message.success(t('estimate.versionCreatedMessage'))
+      },
+    })
   }
 
   const applyImportedRows = (rows: ParsedEstimateRow[], invalidRows: InvalidEstimateRow[]): EstimateImportSummary => {
@@ -493,7 +529,7 @@ export const ProjectEstimatePage = () => {
         createdCrews: 0,
         createdMaterials: 0,
         skippedRows: rows.length + invalidRows.length,
-        invalidRows: [...invalidRows, { rowNumber: 0, reason: 'Aktiv layihə tapılmadı' }],
+        invalidRows: [...invalidRows, { rowNumber: 0, reason: t('estimate.activeProjectNotFound') }],
       }
     }
 
@@ -529,7 +565,7 @@ export const ProjectEstimatePage = () => {
       }
 
       if (!stage) {
-        skippedRows.push({ rowNumber: row.rowNumber, reason: 'Etap yaradıla bilmədi' })
+        skippedRows.push({ rowNumber: row.rowNumber, reason: t('estimate.stageCouldNotBeCreated') })
         return
       }
 
@@ -650,7 +686,7 @@ export const ProjectEstimatePage = () => {
 
   const parseWorkbook = async (file: File) => {
     if (selectedObjectId === ALL_OBJECTS_ID) {
-      void message.warning('Import üçün konkret layihə seçin')
+      void message.warning(t('estimate.selectProjectForImport'))
       return
     }
 
@@ -665,7 +701,7 @@ export const ProjectEstimatePage = () => {
       void message.success(t('estimate.importSuccess'))
     } catch (error) {
       console.error('Smeta import failed', error)
-      void message.error('Smeta faylı oxunmadı')
+      void message.error(t('estimate.importFailed'))
     }
   }
 
@@ -673,7 +709,7 @@ export const ProjectEstimatePage = () => {
     exportEstimateWorkbook({
       projectName: project.name,
       objectName: selectedObjectName,
-      estimateVersionName: estimateVersions.find((version) => version.id === project.activeEstimateVersionId)?.name ?? 'Cari smeta',
+      estimateVersionName: estimateVersions.find((version) => version.id === project.activeEstimateVersionId)?.name ?? t('estimate.current'),
       summary: scopedSummary,
       stages: scopedStages,
       workItems: scopedWorkItems,
@@ -692,21 +728,21 @@ export const ProjectEstimatePage = () => {
   }
 
   const columns: TableColumnsType<WorkItem> = [
-    { title: 'Etap', dataIndex: 'stageId', width: 210, render: (value) => stageNameById.get(String(value)) ?? value, filters: scopedStages.map((stage) => ({ text: stage.name, value: stage.id })), onFilter: (value, record) => record.stageId === value },
-    { title: 'İş adı', dataIndex: 'name', width: 250, render: (value, row) => <strong>{value}<br /><span className="muted-text">{row.costCode ?? 'Cost code yoxdur'}</span></strong> },
+    { title: t('estimate.stage'), dataIndex: 'stageId', width: 210, render: (value) => stageNameById.get(String(value)) ?? value, filters: scopedStages.map((stage) => ({ text: stage.name, value: stage.id })), onFilter: (value, record) => record.stageId === value },
+    { title: t('estimate.workName'), dataIndex: 'name', width: 250, render: (value, row) => <strong>{value}<br /><span className="muted-text">{row.costCode ?? t('estimate.noCostCode')}</span></strong> },
     { title: t('estimate.workUnit'), dataIndex: 'unit', width: 110 },
-    { title: 'Miqdar', dataIndex: 'quantity', width: 100, align: 'right', sorter: (a, b) => a.quantity - b.quantity },
-    { title: 'Tamamlanan', dataIndex: 'completedQuantity', width: 120, align: 'right', render: (value, row) => `${formatNumber(Number(value ?? 0), 1)} / ${formatNumber(row.quantity, 1)}` },
-    { title: 'İşçilik', dataIndex: 'laborTotal', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.laborTotal - b.laborTotal },
-    { title: 'Material', dataIndex: 'materialTotal', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.materialTotal - b.materialTotal },
-    { title: 'Ümumi xərc', dataIndex: 'totalCost', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.totalCost - b.totalCost },
-    { title: 'Plan saat', dataIndex: 'plannedHours', width: 120, align: 'right', render: (value) => formatHours(Number(value), 0) },
-    { title: 'Faktiki saat', dataIndex: 'actualHours', width: 120, align: 'right', render: (value) => formatHours(Number(value), 0) },
-    { title: 'Briqada', dataIndex: 'assignedCrewId', width: 170, render: (value) => crewNameById.get(String(value)) ?? 'Təyin edilməyib' },
-    { title: 'Status', dataIndex: 'status', width: 130, render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
-    { title: 'Gedişat %', dataIndex: 'progressPercent', width: 160, render: (value, row) => <WorkItemProgressSlider value={Number(value)} onCommit={(progressPercent) => void saveWorkItemProgress(row, progressPercent)} /> },
+    { title: t('estimate.quantity'), dataIndex: 'quantity', width: 100, align: 'right', sorter: (a, b) => a.quantity - b.quantity },
+    { title: t('estimate.completed'), dataIndex: 'completedQuantity', width: 120, align: 'right', render: (value, row) => `${formatNumber(Number(value ?? 0), 1)} / ${formatNumber(row.quantity, 1)}` },
+    { title: t('estimate.labor'), dataIndex: 'laborTotal', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.laborTotal - b.laborTotal },
+    { title: t('estimate.material'), dataIndex: 'materialTotal', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.materialTotal - b.materialTotal },
+    { title: t('estimate.totalCost'), dataIndex: 'totalCost', width: 130, align: 'right', render: (value) => formatCurrency(Number(value)), sorter: (a, b) => a.totalCost - b.totalCost },
+    { title: t('estimate.plannedHours'), dataIndex: 'plannedHours', width: 120, align: 'right', render: (value) => formatHoursText(Number(value), 0) },
+    { title: t('estimate.actualHours'), dataIndex: 'actualHours', width: 120, align: 'right', render: (value) => formatHoursText(Number(value), 0) },
+    { title: t('estimate.crew'), dataIndex: 'assignedCrewId', width: 170, render: (value) => crewNameById.get(String(value)) ?? t('common.notAssigned') },
+    { title: t('common.status'), dataIndex: 'status', width: 130, render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
+    { title: t('estimate.progressPercent'), dataIndex: 'progressPercent', width: 160, render: (value, row) => <WorkItemProgressSlider value={Number(value)} onCommit={(progressPercent) => void saveWorkItemProgress(row, progressPercent)} /> },
     {
-      title: 'Əməliyyat',
+      title: t('common.actions'),
       fixed: 'right',
       width: 110,
       render: (_, row) => (
@@ -715,7 +751,7 @@ export const ProjectEstimatePage = () => {
           <Button
             danger
             icon={<DeleteOutlined />}
-            onClick={() => Modal.confirm({ title: 'Sətri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteServerWorkItem(row) })}
+            onClick={() => Modal.confirm({ title: t('estimate.deleteWorkItemConfirm'), okText: t('common.delete'), cancelText: t('common.cancel'), onOk: () => deleteServerWorkItem(row) })}
           />
         </Space>
       ),
@@ -747,7 +783,7 @@ export const ProjectEstimatePage = () => {
           <h2>{t('estimate.current')}</h2>
           <Space wrap>
             {estimateVersions.map((version) => <Tag color="blue" key={version.id}>{version.name}</Tag>)}
-            <Button size="small" onClick={() => void message.success('Yeni smeta versiyası üçün hazır struktur yaradılıb')}>Yeni versiya yarat</Button>
+            <Button size="small" onClick={explainEstimateVersionCreation}>{t('estimate.createVersion')}</Button>
           </Space>
         </div>
         <Table
@@ -762,7 +798,7 @@ export const ProjectEstimatePage = () => {
 
       <section className="table-card">
         <div className="card-heading">
-          <h2>Etaplar</h2>
+          <h2>{t('estimate.stages')}</h2>
         </div>
         <Table
           key={`stages:${selectedObjectId}:${estimateTableRevision}`}
@@ -770,20 +806,20 @@ export const ProjectEstimatePage = () => {
           dataSource={scopedStages}
           pagination={{ pageSize: 6, current: stageTablePage, onChange: setStageTablePage }}
           columns={[
-            { title: 'Sıra', dataIndex: 'order', width: 70 },
-            { title: 'Etap', dataIndex: 'name' },
-            { title: 'Məbləğ', dataIndex: 'totalCost', align: 'right', render: (value) => formatCurrency(Number(value)) },
-            { title: 'Plan tarix', render: (_, row) => `${formatDisplayDate(row.plannedStartDate)} - ${formatDisplayDate(row.plannedEndDate)}` },
-            { title: 'Status', dataIndex: 'status', render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
-            { title: 'Əməliyyat', width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: 'Etapı və ona bağlı işləri silmək istəyirsiniz?', okText: 'Sil', cancelText: 'İmtina', onOk: () => deleteServerStage(row.id) })} /> },
+            { title: t('estimate.order'), dataIndex: 'order', width: 70 },
+            { title: t('estimate.stage'), dataIndex: 'name' },
+            { title: t('estimate.amount'), dataIndex: 'totalCost', align: 'right', render: (value) => formatCurrency(Number(value)) },
+            { title: t('estimate.plannedDate'), render: (_, row) => `${formatDisplayDate(row.plannedStartDate)} - ${formatDisplayDate(row.plannedEndDate)}` },
+            { title: t('common.status'), dataIndex: 'status', render: (value: ProjectWorkStatus, row) => <Tag key={`${row.id}:${value}`} color={statusColor[value]}>{statusText(value)}</Tag> },
+            { title: t('common.actions'), width: 120, render: (_, row) => <Button danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: t('estimate.deleteStageConfirm'), okText: t('common.delete'), cancelText: t('common.cancel'), onOk: () => deleteServerStage(row.id) })} /> },
           ]}
         />
       </section>
 
-      <Drawer title={editingItem ? 'İş sətrini redaktə et' : 'Yeni iş sətri'} open={itemDrawerOpen} width={600} onClose={() => setItemDrawerOpen(false)}>
+      <Drawer title={editingItem ? t('estimate.editWorkItem') : t('estimate.newWorkItem')} open={itemDrawerOpen} width={600} onClose={() => setItemDrawerOpen(false)}>
         <Form form={itemForm} layout="vertical" onFinish={saveWorkItem}>
-          <Form.Item name="stageId" label="Etap" rules={[{ required: true }]}><Select showSearch options={stageOptions} /></Form.Item>
-          <Form.Item name="name" label="İş adı" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="stageId" label={t('estimate.stage')} rules={[{ required: true }]}><Select showSearch options={stageOptions} /></Form.Item>
+          <Form.Item name="name" label={t('estimate.workName')} rules={[{ required: true }]}><Input /></Form.Item>
           <Space.Compact block>
             <Form.Item name="costCode" label="Cost Code" className="form-half"><Input /></Form.Item>
             <Form.Item name="unit" label={t('estimate.workUnit')} extra={t('estimate.workUnit.help')} rules={[{ required: true }]} className="form-half">
@@ -791,23 +827,23 @@ export const ProjectEstimatePage = () => {
             </Form.Item>
           </Space.Compact>
           <Space.Compact block>
-            <Form.Item name="quantity" label="Miqdar" rules={[{ required: true }]} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="completedQuantity" label="Tamamlanan miqdar" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="quantity" label={t('estimate.quantity')} rules={[{ required: true }]} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="completedQuantity" label={t('estimate.completedQuantity')} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
-            <Form.Item name="laborUnitPrice" label="İşçilik vahid qiyməti" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="plannedHours" label="Plan saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="laborUnitPrice" label={t('estimate.laborUnitPrice')} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="plannedHours" label={t('estimate.plannedHours')} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           </Space.Compact>
 
-          <Divider>Material istifadəsi</Divider>
+          <Divider>{t('estimate.materialUsage')}</Divider>
           <Form.List name="materials">
             {(fields, { add, remove }) => (
               <Space direction="vertical" className="full-width">
                 <Alert
                   showIcon
                   type="info"
-                  message="Materiallar mərkəzi kataloqdan seçilir"
-                  description="Bu seçim yalnız smeta planını yeniləyir; anbar qalığı azalmır və satınalma tapşırığı yaradılmır."
+                  message={t('estimate.materialCatalogInfoTitle')}
+                  description={t('estimate.materialCatalogInfoDescription')}
                 />
                 {fields.map((field) => {
                   const catalogItemId = itemForm.getFieldValue(['materials', field.name, 'catalogItemId']) as string | undefined
@@ -815,15 +851,15 @@ export const ProjectEstimatePage = () => {
                   const stock = catalogItemId ? stockByCatalogItemId.get(catalogItemId) : undefined
 
                   return (
-                    <Card size="small" key={field.key} title={`Material ${field.name + 1}`}>
+                    <Card size="small" key={field.key} title={`${t('estimate.material')} ${field.name + 1}`}>
                       <Form.Item name={[field.name, 'id']} hidden><Input /></Form.Item>
                       <Form.Item name={[field.name, 'materialName']} hidden><Input /></Form.Item>
-                      <Form.Item name={[field.name, 'catalogItemId']} label="Material" rules={[{ required: true, message: 'Material seçin' }]}>
+                      <Form.Item name={[field.name, 'catalogItemId']} label={t('estimate.material')} rules={[{ required: true, message: t('estimate.selectMaterial') }]}>
                         <Select
                           allowClear
                           showSearch
                           loading={catalogLoading}
-                          placeholder="Kataloqda axtarın: beton, sement, armatur, kaska, kabel"
+                          placeholder={t('estimate.materialSearchPlaceholder')}
                           options={materialOptions}
                           optionFilterProp="searchText"
                           filterOption={(input, option) => String(option?.searchText ?? '').includes(input.toLocaleLowerCase('az-AZ'))}
@@ -845,70 +881,70 @@ export const ProjectEstimatePage = () => {
                         />
                       )}
                       <Space.Compact block>
-                        <Form.Item name={[field.name, 'materialUnit']} label="Material ölçü vahidi" className="form-half">
-                          <Input readOnly placeholder="Kataloqdan avtomatik" />
+                        <Form.Item name={[field.name, 'materialUnit']} label={t('estimate.materialUnit')} className="form-half">
+                          <Input readOnly placeholder={t('estimate.catalogAuto')} />
                         </Form.Item>
-                        <Form.Item name={[field.name, 'materialQuantity']} label="Material miqdarı" rules={[{ type: 'number', min: 0.000001, message: 'Miqdar 0-dan böyük olmalıdır' }]} className="form-half">
+                        <Form.Item name={[field.name, 'materialQuantity']} label={t('estimate.materialQuantity')} rules={[{ type: 'number', min: 0.000001, message: t('estimate.quantityPositive') }]} className="form-half">
                           <InputNumber min={0.000001} step={0.1} style={{ width: '100%' }} />
                         </Form.Item>
                       </Space.Compact>
                       <Space.Compact block>
-                        <Form.Item name={[field.name, 'materialUnitPrice']} label="Plan vahid qiyməti" className="form-half">
+                        <Form.Item name={[field.name, 'materialUnitPrice']} label={t('estimate.plannedUnitPrice')} className="form-half">
                           <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
                         </Form.Item>
                         <div className="form-half" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                          <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)}>Sil</Button>
+                          <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)}>{t('common.delete')}</Button>
                         </div>
                       </Space.Compact>
                     </Card>
                   )
                 })}
-                <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ materialQuantity: 1, materialUnitPrice: 0 })}>Material əlavə et</Button>
+                <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add({ materialQuantity: 1, materialUnitPrice: 0 })}>{t('estimate.addMaterial')}</Button>
               </Space>
             )}
           </Form.List>
 
           <Space.Compact block>
-            <Form.Item name="actualHours" label="Faktiki saat" className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="assignedCrewId" label="Briqada" className="form-half"><Select allowClear showSearch options={crewOptions} /></Form.Item>
+            <Form.Item name="actualHours" label={t('estimate.actualHours')} className="form-half"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="assignedCrewId" label={t('estimate.crew')} className="form-half"><Select allowClear showSearch options={crewOptions} /></Form.Item>
           </Space.Compact>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = itemForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) itemForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Bitmə tarixi" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = itemForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
+            <Form.Item name="plannedStartDate" label={t('estimate.startDate')} className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = itemForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) itemForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label={t('estimate.endDate')} className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error(t('estimate.endBeforeStart'))) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = itemForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
-          <Form.Item name="status" label="Status"><Select options={statusOptions} /></Form.Item>
-          <Form.Item name="progressPercent" label="Gedişat %"><Slider min={0} max={100} /></Form.Item>
-          <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>
-          <Button type="primary" htmlType="submit" block>Yadda saxla</Button>
+          <Form.Item name="status" label={t('common.status')}><Select options={statusOptions} /></Form.Item>
+          <Form.Item name="progressPercent" label={t('estimate.progressPercent')}><Slider min={0} max={100} /></Form.Item>
+          <Form.Item name="notes" label={t('common.note')}><Input.TextArea rows={3} /></Form.Item>
+          <Button type="primary" htmlType="submit" block>{t('common.save')}</Button>
         </Form>
       </Drawer>
 
-      <Modal title="Yeni layihə" open={projectModalOpen} onCancel={() => setProjectModalOpen(false)} onOk={() => projectForm.submit()} okText="Yarat" cancelText="İmtina">
+      <Modal title={t('estimate.newProject')} open={projectModalOpen} onCancel={() => setProjectModalOpen(false)} onOk={() => projectForm.submit()} okText={t('common.create')} cancelText={t('common.cancel')}>
         <Form form={projectForm} layout="vertical" onFinish={createProjectObject}>
-          <Form.Item name="name" label="Layihə adı" rules={[{ required: true, message: 'Layihə adı yazın' }]}><Input placeholder="Məsələn: Villa B blok" /></Form.Item>
-          <Form.Item name="address" label="Ünvan"><Input /></Form.Item>
+          <Form.Item name="name" label={t('estimate.projectName')} rules={[{ required: true, message: t('estimate.enterProjectName') }]}><Input placeholder={t('estimate.projectNamePlaceholder')} /></Form.Item>
+          <Form.Item name="address" label={t('common.address')}><Input /></Form.Item>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama tarixi" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = projectForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) projectForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Plan bitmə tarixi" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = projectForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
+            <Form.Item name="plannedStartDate" label={t('estimate.startDate')} className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = projectForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) projectForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label={t('estimate.plannedEndDate')} className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error(t('estimate.endBeforeStart'))) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = projectForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
-          <Form.Item name="clientName" label="Müştəri / şirkət adı"><Input /></Form.Item>
-          <Form.Item name="notes" label="Qeyd"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="clientName" label={t('estimate.clientName')}><Input /></Form.Item>
+          <Form.Item name="notes" label={t('common.note')}><Input.TextArea rows={3} /></Form.Item>
         </Form>
       </Modal>
 
-      <Modal title="Yeni etap" open={stageModalOpen} onCancel={() => setStageModalOpen(false)} onOk={() => stageForm.submit()} okText="Əlavə et" cancelText="İmtina">
+      <Modal title={t('estimate.newStage')} open={stageModalOpen} onCancel={() => setStageModalOpen(false)} onOk={() => stageForm.submit()} okText={t('common.add')} cancelText={t('common.cancel')}>
         <Form form={stageForm} layout="vertical" onFinish={addNewStage}>
-          <Form.Item name="name" label="Etap adı" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="totalCost" label="Ümumi məbləğ"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="plannedHours" label="Plan saat"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="name" label={t('estimate.stageName')} rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="totalCost" label={t('estimate.totalAmount')}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="plannedHours" label={t('estimate.plannedHours')}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
           <Space.Compact block>
-            <Form.Item name="plannedStartDate" label="Başlama" className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = stageForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) stageForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
-            <Form.Item name="plannedEndDate" label="Bitmə" className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error('Bitmə tarixi başlama tarixindən əvvəl ola bilməz')) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = stageForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
+            <Form.Item name="plannedStartDate" label={t('estimate.start')} className="form-half"><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} onChange={(date) => { const end = stageForm.getFieldValue('plannedEndDate') as Dayjs | undefined; if (date && end?.isBefore(date, 'day')) stageForm.setFieldValue('plannedEndDate', undefined) }} /></Form.Item>
+            <Form.Item name="plannedEndDate" label={t('estimate.end')} className="form-half" rules={[({ getFieldValue }) => ({ validator: (_, value?: Dayjs) => { const startDate = getFieldValue('plannedStartDate') as Dayjs | undefined; if (!value || !startDate || !value.isBefore(startDate, 'day')) return Promise.resolve(); return Promise.reject(new Error(t('estimate.endBeforeStart'))) } })]}><DatePicker format="DD.MM.YYYY" allowClear style={{ width: '100%' }} disabledDate={(current) => { const startDate = stageForm.getFieldValue('plannedStartDate') as Dayjs | undefined; return Boolean(startDate && current && current.isBefore(startDate, 'day')) }} /></Form.Item>
           </Space.Compact>
         </Form>
       </Modal>
 
-      <Modal title={t('estimate.importPreview')} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button onClick={() => setPreviewOpen(false)}>Bağla</Button>} width={920}>
+      <Modal title={t('estimate.importPreview')} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={<Button onClick={() => setPreviewOpen(false)}>{t('common.close')}</Button>} width={920}>
         <p>{t('estimate.importFoundSheets')}: {previewSheetNames.join(', ')}</p>
         {importSummary && (
           <Alert
@@ -938,7 +974,7 @@ export const ProjectEstimatePage = () => {
           size="small"
           pagination={{ pageSize: 8 }}
           dataSource={previewRows.map((row, index) => ({ key: index, row }))}
-          columns={[{ title: 'Sətir önizləmə', dataIndex: 'row', render: (row: unknown[]) => row.map((cell) => String(cell ?? '')).join(' | ') }]}
+          columns={[{ title: t('estimate.rowPreview'), dataIndex: 'row', render: (row: unknown[]) => row.map((cell) => String(cell ?? '')).join(' | ') }]}
         />
       </Modal>
     </div>
