@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons'
 import { Alert, Button, Drawer, Select, Spin } from 'antd'
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../auth/authStore'
 import { useFieldPortalStore } from './fieldPortalStore'
 
@@ -54,6 +54,7 @@ const FieldSidebar = ({ onNavigate }: { onNavigate?: () => void }) => (
 
 export const FieldLayout = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const { logout } = useAuthStore()
   const { me, assignments, selectedSiteId, loading, error, load, setSelectedSiteId } = useFieldPortalStore()
@@ -61,6 +62,10 @@ export const FieldLayout = () => {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 })
+  }, [location.pathname])
 
   const handleLogout = async () => {
     await logout()

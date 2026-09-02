@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import { Alert, Button, Drawer, Spin } from 'antd'
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../auth/authStore'
 import { useSupplyPortalStore } from './supplyPortalStore'
 
@@ -50,6 +50,7 @@ const SupplySidebar = ({ onNavigate }: { onNavigate?: () => void }) => (
 
 export const SupplyLayout = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const { user, tenant, logout } = useAuthStore()
   const { loading, error, load } = useSupplyPortalStore()
@@ -57,6 +58,10 @@ export const SupplyLayout = () => {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 })
+  }, [location.pathname])
 
   const handleLogout = async () => {
     await logout()

@@ -10,7 +10,6 @@ import { fieldRouter } from './fieldRoutes'
 import { router } from './routes'
 import { supplyRouter } from './supplyRoutes'
 import { theme } from './theme'
-import { useScreenshotMode } from './useScreenshotMode'
 
 const localeByLanguage = {
   az: azAZ,
@@ -21,7 +20,6 @@ const localeByLanguage = {
 const AppShell = () => {
   const { language } = useI18n()
   const hostMode = getHostMode()
-  useScreenshotMode()
 
   return (
     <ConfigProvider theme={theme} locale={localeByLanguage[language]}>

@@ -45,6 +45,7 @@ export const AppLayout = () => {
     document.body.style.removeProperty('overflow-y')
     document.documentElement.style.removeProperty('overflow')
     document.documentElement.style.removeProperty('overflow-y')
+    window.scrollTo({ top: 0, left: 0 })
   }, [location.pathname])
 
   useEffect(() => {

@@ -70,6 +70,7 @@ body {
 .app-layout {
   min-height: 100vh;
   height: auto;
+  overflow: visible;
 }
 
 .app-shell {
@@ -203,87 +204,38 @@ body {
   width: 100%;
   min-width: 0;
   min-height: 100vh;
-  height: 100vh;
-  max-height: 100vh;
+  height: auto !important;
+  max-height: none !important;
   overflow-x: hidden;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
   padding: 28px 24px 80px 252px;
 }
 
-html.bt-screenshot-mode,
-body.bt-screenshot-mode,
-#root.bt-screenshot-mode {
-  min-height: 100%;
-  height: auto !important;
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
-}
-
-body.bt-screenshot-mode .app-shell,
-body.bt-screenshot-mode .app-layout,
-body.bt-screenshot-mode .field-shell,
-body.bt-screenshot-mode .supply-shell {
-  min-height: 100vh;
-  height: auto !important;
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-body.bt-screenshot-mode .app-main {
-  min-height: 100vh;
-  height: auto !important;
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
-}
-
-body.bt-screenshot-mode .app-sidebar {
-  position: absolute !important;
-  top: 10px !important;
-  bottom: auto !important;
-  height: auto !important;
-  max-height: none !important;
-  overflow-x: hidden !important;
-  overflow-y: visible !important;
-}
-
-body.bt-screenshot-mode .field-sidebar,
-body.bt-screenshot-mode .supply-sidebar {
-  position: sticky;
-  top: 10px;
-  height: auto !important;
-  max-height: none !important;
-  align-self: start;
-  overflow-y: visible !important;
-}
-
-body.bt-screenshot-mode .field-main,
-body.bt-screenshot-mode .project-content-remount-boundary,
-body.bt-screenshot-mode .page-stack,
-body.bt-screenshot-mode .table-card,
-body.bt-screenshot-mode .chart-card,
-body.bt-screenshot-mode .panel-card {
+.project-content-remount-boundary,
+.page-stack,
+.table-card,
+.chart-card,
+.panel-card {
   height: auto !important;
   max-height: none !important;
   overflow-y: visible !important;
 }
 
-body.bt-screenshot-mode .ant-table-container,
-body.bt-screenshot-mode .ant-table,
-body.bt-screenshot-mode .ant-table-content,
-body.bt-screenshot-mode .ant-table-body {
+.ant-table-container,
+.ant-table,
+.ant-table-content,
+.ant-table-body {
   max-height: none !important;
   overflow-y: visible !important;
 }
 
-body.bt-screenshot-mode .ant-table-content,
-body.bt-screenshot-mode .ant-table-body {
+.ant-table-content,
+.ant-table-body {
   overflow-x: auto !important;
 }
 
-body.bt-screenshot-mode .chart-body,
-body.bt-screenshot-mode .recharts-responsive-container {
+.chart-body,
+.recharts-responsive-container {
   min-height: 280px;
 }
 
