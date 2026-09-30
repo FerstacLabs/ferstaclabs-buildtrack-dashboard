@@ -4,3 +4,14 @@ dist
 .vercel
 backend/**/bin
 backend/**/obj
+data
+.env
+.env.*
+**/.env
+**/.env.*
+**/node_modules
+company-site
+**/*.pfx
+**/*.pem
+backend/vendor
+docs

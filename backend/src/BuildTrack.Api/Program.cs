@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using BuildTrack.Api;
 using BuildTrack.Api.Contracts;
@@ -15,6 +15,7 @@ using BuildTrack.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+ProductionConfiguration.Validate(builder.Configuration, builder.Environment.IsDevelopment(), api: true);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -35,7 +36,7 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins(allowedOrigins);
         }
-        else
+        else if (builder.Environment.IsDevelopment())
         {
             policy.AllowAnyOrigin();
         }
@@ -136,7 +137,10 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok", service = "BuildTrack.Api", time = DateTimeOffset.UtcNow }));
+app.MapGet("/api/health", async (BuildTrackDbContext db, CancellationToken ct) =>
+    await db.Database.CanConnectAsync(ct)
+        ? Results.Ok(new { status = "ok", service = "BuildTrack.Api", time = DateTimeOffset.UtcNow })
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 app.MapPost("/api/auth/register", async (
     RegisterRequest request,

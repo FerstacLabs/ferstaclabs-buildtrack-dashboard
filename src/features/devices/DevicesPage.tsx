@@ -288,7 +288,7 @@ export const DevicesPage = () => {
           <ol>
             <li>Kamera terminalında Connection &gt; Network &gt; Active Register bölməsinə keçin.</li>
             <li>Active Register Enable = ON edin.</li>
-            <li>Server IP: 46.101.182.202.</li>
+            <li>Server: api.buildtrack.ferstaclabs.com.</li>
             <li>Port: 7000.</li>
             <li>Sub-device ID: BuildTrack-də yaradılan Register Device ID.</li>
           </ol>

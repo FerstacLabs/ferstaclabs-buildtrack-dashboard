@@ -13,6 +13,9 @@ RUN dotnet publish backend/src/BuildTrack.Api/BuildTrack.Api.csproj -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
-COPY backend/vendor/dahua-netsdk ./vendor/dahua-netsdk
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /app/data && chown app:app /app/data
+USER app
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 CMD curl --fail --silent http://127.0.0.1:8080/api/health > /dev/null || exit 1
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "BuildTrack.Api.dll"]

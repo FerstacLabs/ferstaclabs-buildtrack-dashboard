@@ -12,9 +12,11 @@ RUN dotnet publish backend/src/BuildTrack.Worker.Dahua/BuildTrack.Worker.Dahua.c
 
 FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
 WORKDIR /app
-ENV LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64
 COPY --from=build /app/publish .
-COPY backend/vendor/dahua-netsdk ./vendor/dahua-netsdk
+RUN mkdir -p /app/data /app/vendor/dahua-netsdk/linux-x64 && chown app:app /app/data
+USER app
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 CMD test -f /tmp/buildtrack-worker-health && test "$(( $(date +%s) - $(stat -c %Y /tmp/buildtrack-worker-health) ))" -lt 120
 EXPOSE 9500/tcp
 EXPOSE 7000/tcp
 ENTRYPOINT ["dotnet", "BuildTrack.Worker.Dahua.dll"]

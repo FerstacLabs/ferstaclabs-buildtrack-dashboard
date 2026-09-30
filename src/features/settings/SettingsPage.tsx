@@ -127,7 +127,7 @@ export const SettingsPage = () => {
             <h2>Kamera inteqrasiyası</h2>
           </div>
           <Descriptions column={1} size="small">
-            <Descriptions.Item label="Server IP">46.101.182.202</Descriptions.Item>
+            <Descriptions.Item label="Server">api.buildtrack.ferstaclabs.com</Descriptions.Item>
             <Descriptions.Item label="Active Register port">7000</Descriptions.Item>
             <Descriptions.Item label="Qeydiyyatlı kamera">{devices.length}</Descriptions.Item>
             <Descriptions.Item label="Son kamera hadisəsi">{formatDateTime(lastCameraEvent)}</Descriptions.Item>

@@ -1,4 +1,4 @@
-﻿using BuildTrack.Infrastructure.Dahua;
+using BuildTrack.Infrastructure.Dahua;
 using BuildTrack.Infrastructure.Data;
 using BuildTrack.Infrastructure.Security;
 using BuildTrack.Infrastructure.Services;
@@ -15,7 +15,7 @@ public static class ServiceCollectionExtensions
     {
         var connectionString = configuration["POSTGRES_CONNECTION_STRING"]
             ?? configuration.GetConnectionString("Postgres")
-            ?? "Host=localhost;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack";
+            ?? throw new InvalidOperationException("POSTGRES_CONNECTION_STRING is required.");
 
         services.AddDbContext<BuildTrackDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<ITenantContext, TenantContext>();

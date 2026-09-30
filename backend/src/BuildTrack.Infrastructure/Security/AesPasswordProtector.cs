@@ -9,7 +9,7 @@ public sealed class AesPasswordProtector(IConfiguration configuration) : IPasswo
     private readonly byte[] _key = SHA256.HashData(Encoding.UTF8.GetBytes(
         configuration["BUILDTRACK_SECRET_KEY"]
         ?? configuration["BuildTrack:SecretKey"]
-        ?? "dev-only-buildtrack-secret-key-change-me"));
+        ?? throw new InvalidOperationException("BUILDTRACK_SECRET_KEY is required.")));
 
     public string Protect(string plainText)
     {

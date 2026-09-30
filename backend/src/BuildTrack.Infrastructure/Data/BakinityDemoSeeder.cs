@@ -17,6 +17,8 @@ internal static class BakinityDemoSeeder
     internal static async Task SeedAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken ct)
     {
         if (!ParseBool(configuration?["SEED_BAKINITY_DEMO"])) return;
+        if (string.IsNullOrWhiteSpace(configuration?["SEED_BAKINITY_DEMO_PASSWORD"]))
+            throw new InvalidOperationException("SEED_BAKINITY_DEMO_PASSWORD is required when seeding is enabled.");
 
         if (ParseBool(configuration?["SEED_BAKINITY_DEMO_RESET"]))
         {
@@ -36,7 +38,7 @@ internal static class BakinityDemoSeeder
 
         var tenant = await UpsertTenantAsync(db, ct);
         await UpsertLicenseAsync(db, tenant.Id, ct);
-        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_BAKINITY_DEMO_EMAIL"] ?? "eldar@bakinity.az", "Eldar Qəmbərov", BuildTrackUserRole.Owner, ownerPassword, true, ct);
+        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_BAKINITY_DEMO_EMAIL"] ?? "eldar@bakinity.az", "Eldar Qəmbərov", BuildTrackUserRole.Owner, ownerPassword, false, ct);
 
         var siteRows = await UpsertSitesAsync(db, tenant.Id, ct);
         var primarySite = siteRows[0];

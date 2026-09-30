@@ -15,7 +15,6 @@ internal static class SkySnapDemoSeeder
     public const string TenantCode = "SKYSNAP-DEMO";
     public const string DefaultOwnerEmail = "tomasz.odrobinski@skysnap.pl";
     public const string DefaultOwnerName = "Tomasz Odrobiński";
-    public const string DemoPasswordDocumentationValue = "SkySnapDemo!2026";
     private const string ProjectId = "skysnap-demo-project";
     private const string EstimateId = "skysnap-demo-estimate-v1";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -23,6 +22,8 @@ internal static class SkySnapDemoSeeder
     internal static async Task SeedAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken ct)
     {
         if (!ParseBool(configuration?["SEED_SKYSNAP_DEMO"])) return;
+        if (string.IsNullOrWhiteSpace(configuration?["SEED_SKYSNAP_DEMO_PASSWORD"]))
+            throw new InvalidOperationException("SEED_SKYSNAP_DEMO_PASSWORD is required when seeding is enabled.");
 
         if (db.Database.IsRelational())
         {
@@ -47,12 +48,12 @@ internal static class SkySnapDemoSeeder
         var password = configuration?["SEED_SKYSNAP_DEMO_PASSWORD"];
         if (string.IsNullOrWhiteSpace(password))
         {
-            password = DemoPasswordDocumentationValue;
+            throw new InvalidOperationException("SEED_SKYSNAP_DEMO_PASSWORD is required.");
         }
 
         var tenant = await UpsertTenantAsync(db, ct);
         await UpsertLicenseAsync(db, tenant.Id, ct);
-        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_SKYSNAP_DEMO_EMAIL"] ?? DefaultOwnerEmail, DefaultOwnerName, BuildTrackUserRole.Owner, password, true, ct);
+        await UpsertUserAsync(db, tenant.Id, configuration?["SEED_SKYSNAP_DEMO_EMAIL"] ?? DefaultOwnerEmail, DefaultOwnerName, BuildTrackUserRole.Owner, password, false, ct);
         var sites = await UpsertSitesAsync(db, tenant.Id, ct);
         await db.SaveChangesAsync(ct);
 

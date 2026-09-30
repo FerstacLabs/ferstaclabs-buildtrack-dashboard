@@ -1,5 +1,9 @@
 # React + TypeScript + Vite
 
+## Production deployment
+
+Production uses GHCR images, not source builds on the VPS. See [production deployment and exact migration commands](docs/production-deployment.md) and [security audit / rotation checklist](docs/security-deployment-audit.md). `docker-compose.yml` is for local source builds; `docker-compose.prod.yml` is the image-only production stack. Never run `down -v`.
+
 ## BuildTrack deployment notes
 
 BuildTrack frontend is deployed on Vercel. Do not run the production frontend inside the VPS Docker stack.
@@ -7,22 +11,22 @@ BuildTrack frontend is deployed on Vercel. Do not run the production frontend in
 The backend API stays on the VPS as Docker containers and is currently reachable on the VPS at:
 
 ```text
-http://46.101.182.202:8080
+http://localhost:8080
 ```
 
 For production browser traffic, expose the backend through an HTTPS reverse proxy such as Nginx:
 
 ```text
-https://api.ferstaclabs.com -> http://127.0.0.1:8080
+https://api.buildtrack.ferstaclabs.com -> http://127.0.0.1:8080
 ```
 
 Set this Vercel environment variable for the frontend:
 
 ```env
-VITE_API_BASE_URL=https://api.ferstaclabs.com
+VITE_API_BASE_URL=https://api.buildtrack.ferstaclabs.com
 ```
 
-The React app reads only `VITE_API_BASE_URL` for the backend API URL. If it is missing, local development falls back to `http://46.101.182.202:8080`. On Vercel, always set the HTTPS API URL to avoid mixed-content blocking.
+The React app reads only `VITE_API_BASE_URL` for the backend API URL. If it is missing, local development falls back to `http://localhost:8080`. On Vercel, set the HTTPS API URL. Without it production uses the same-origin `/backend` HTTPS rewrite, never a public IP fallback.
 
 BuildTrack uses host-based routing:
 
@@ -36,7 +40,7 @@ supply.buildtrack.ferstaclabs.com supply / procurement portal
 For the field portal deployment, set:
 
 ```env
-VITE_API_BASE_URL=https://api.ferstaclabs.com
+VITE_API_BASE_URL=https://api.buildtrack.ferstaclabs.com
 VITE_APP_BASE_URL=https://app.buildtrack.ferstaclabs.com
 VITE_FIELD_BASE_URL=https://field.buildtrack.ferstaclabs.com
 VITE_SUPPLY_BASE_URL=https://supply.buildtrack.ferstaclabs.com
@@ -126,7 +130,7 @@ Project progress data is server-authoritative through PostgreSQL-backed project,
 
 ### SkySnap English partner demo
 
-Set `SEED_SKYSNAP_DEMO=true` to create the isolated tenant `SKYSNAP-DEMO` (`SkySnap Construction Demo`) with owner user `tomasz.odrobinski@skysnap.pl`. The deterministic demo password is `SkySnapDemo!2026` unless `SEED_SKYSNAP_DEMO_PASSWORD` is set in the VPS `.env`. Keep real customer passwords out of frontend/Vercel variables.
+Set `SEED_SKYSNAP_DEMO=true` to create the isolated tenant `SKYSNAP-DEMO` (`SkySnap Construction Demo`) with owner user `tomasz.odrobinski@skysnap.pl`. An explicit `SEED_SKYSNAP_DEMO_PASSWORD` is required. There is no default password and re-seeding preserves existing password hashes. Keep real customer passwords out of frontend/Vercel variables.
 
 The SkySnap seed is presentation-oriented and English-first: 4 projects/sites, 10 field managers, 48 workers, 6 crews, English smeta/stages/work items, warehouse stock, procurement shortfall, daily reports, payroll/attendance rows and Active Register-ready Dahua device placeholders. It is tenant-isolated from `BAK-DEMO`, `DEMO`, GOLD MMC and all other tenants. If `tomasz.odrobinski@skysnap.pl` already belongs to another tenant, the seeder throws a clear conflict and does not mutate that user. To reset only SkySnap, set `SEED_SKYSNAP_DEMO_RESET=true` for one restart, then set it back to `false`.
 
@@ -142,7 +146,7 @@ On Vercel, add `VITE_SKYSNAP_EMBED_URL` as a frontend environment variable. Loca
 You can also create a tenant license as the demo/admin account with curl:
 
 ```bash
-curl -X POST https://api.ferstaclabs.com/api/admin/licenses \
+curl -X POST https://api.buildtrack.ferstaclabs.com/api/admin/licenses \
   -H "Authorization: Bearer <admin-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"tenantId":"<tenant-id>","plan":"Business","expiresAt":null,"maxProjects":10,"maxUsers":50,"maxCameras":5}'
@@ -151,7 +155,7 @@ curl -X POST https://api.ferstaclabs.com/api/admin/licenses \
 The response includes the raw `licenseKey` only once. Store only the hash in the database. The tenant activates it from `/license` or with:
 
 ```bash
-curl -X POST https://api.ferstaclabs.com/api/licenses/activate \
+curl -X POST https://api.buildtrack.ferstaclabs.com/api/licenses/activate \
   -H "Authorization: Bearer <tenant-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"licenseKey":"BT-..."}'
@@ -224,7 +228,7 @@ docker compose up -d --build buildtrack-api
 The frontend continues to use only:
 
 ```env
-VITE_API_BASE_URL=https://api.ferstaclabs.com
+VITE_API_BASE_URL=https://api.buildtrack.ferstaclabs.com
 ```
 
 If the backend has no OpenAI key or the AI endpoint is unavailable, the assistant falls back to the local BuildTrack analysis engine and marks the answer with a compact `Lokal analiz` pill.

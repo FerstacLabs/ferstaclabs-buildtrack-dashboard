@@ -69,7 +69,7 @@ BuildTrack can load `libdhnetsdk.so` and start `CLIENT_ListenServer` with native
 
 ## Run locally with Docker
 
-From repository root:
+For local source builds only, from repository root: first copy `.env.example` to `.env` and configure explicit DB/JWT/encryption secrets. Production uses the image-only deployment package described in [production deployment](../docs/production-deployment.md).
 
 ```bash
 docker compose up --build
@@ -79,14 +79,15 @@ Services:
 
 - API: `http://localhost:8080`
 - Swagger: `http://localhost:8080/swagger`
-- PostgreSQL: `localhost:5432`
+- PostgreSQL: private Docker network only (no published host port)
 - Dahua TCP Active Register: `9500/tcp` and `7000/tcp`
 
 Default environment variables in `docker-compose.yml`:
 
 ```text
-POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=buildtrack
-BUILDTRACK_SECRET_KEY=change-this-32-byte-production-secret
+BUILDTRACK_DB_PASSWORD=<explicit-secret>
+BUILDTRACK_SECRET_KEY=<existing-strong-encryption-key>
+JWT_SECRET=<existing-strong-signing-key>
 OPENAI_ASSISTANT_ENABLED=true
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_API_KEY=
@@ -104,15 +105,12 @@ ASPNETCORE_ENVIRONMENT=Production
 
 1. Point your DNS/API domain to the VPS.
 2. Install Docker and Docker Compose.
-3. Copy the repository to the VPS.
-4. Set a strong `BUILDTRACK_SECRET_KEY`.
-5. Add `OPENAI_API_KEY=sk-...` to the `.env` file beside `docker-compose.yml` if the AI assistant should use OpenAI. Keep this key only on the backend/VPS, never in Vercel.
-6. Add Dahua NetSDK native binaries under `backend/vendor/dahua-netsdk/linux-x64/`, including `libdhnetsdk.so` and its required `lib*.so` dependencies. The worker container sets `LD_LIBRARY_PATH=/app/vendor/dahua-netsdk/linux-x64`.
-7. Run `docker compose up -d --build`.
-8. Open TCP ports on the VPS firewall:
-   - `8080` or your reverse-proxied API port
-   - `9500/tcp` for Dahua Active Register
-   - `7000/tcp` if using that Dahua/NVR style port
+3. Install only the CI deployment archive, not a repository checkout. Follow [exact migration commands](../docs/production-deployment.md) to preserve the existing database volume and `/app/data`.
+4. Preserve strong production DB/JWT/encryption secrets in `.env`.
+5. Optional OpenAI/Dahua credentials remain in the backend `.env`, never Vercel.
+6. Supply only licensed Linux native runtime libraries via `DAHUA_SDK_RUNTIME_PATH`; deployment verifies library loading and exports.
+7. Run `./deploy.sh sha-<full-commit-SHA>` to pull images and health-check the ordered rollout.
+8. API binds host `127.0.0.1:8080` behind Nginx HTTPS; PostgreSQL is private. Dahua TCP 7000 and 9500 remain published. This change does not alter firewall rules.
 9. Do not put `9500` or `7000` behind Cloudflare HTTP proxy. These ports need raw TCP reachability.
 
 AI assistant endpoints:

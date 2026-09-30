@@ -42,7 +42,10 @@ backend/vendor/dahua-netsdk/extracted/
 .env
 .env.*
 !.env.example
-data/
+/data/
+deployment-history/
+backups/
+.deploy.lock
 channel*.jpg
 unknown_*.jpg
 dahua_records.txt

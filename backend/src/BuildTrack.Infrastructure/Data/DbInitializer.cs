@@ -183,6 +183,13 @@ public static class DbInitializer
 
     public static async Task EnsureDatabaseAsync(BuildTrackDbContext db, IConfiguration? configuration = null, CancellationToken cancellationToken = default)
     {
+        await using var initializationLock = await DatabaseInitializationLock.AcquireAsync(
+            db.Database.GetConnectionString() ?? throw new InvalidOperationException("Database connection is required."), cancellationToken);
+        await InitializeCoreAsync(db, configuration, cancellationToken);
+    }
+
+    private static async Task InitializeCoreAsync(BuildTrackDbContext db, IConfiguration? configuration, CancellationToken cancellationToken)
+    {
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await db.Database.ExecuteSqlRawAsync("""
 CREATE TABLE IF NOT EXISTS tenants (

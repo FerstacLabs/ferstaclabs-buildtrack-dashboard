@@ -2,12 +2,12 @@ import { authHeader } from '../../features/auth/authToken'
 
 export const API_BASE_URL = (
   (import.meta.env.VITE_API_BASE_URL as string | undefined)
-  ?? 'http://46.101.182.202:8080'
+  || (import.meta.env.DEV ? 'http://localhost:8080' : '/backend')
 ).replace(/\/$/, '')
 
 export const API_BASE_URL_SOURCE = (import.meta.env.VITE_API_BASE_URL as string | undefined)
   ? 'VITE_API_BASE_URL'
-  : 'default-dev-url'
+  : (import.meta.env.DEV ? 'default-dev-url' : 'same-origin-backend-rewrite')
 
 export class ApiClientError extends Error {
   readonly url: string

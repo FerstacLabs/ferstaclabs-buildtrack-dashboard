@@ -1,6 +1,12 @@
+name: ${COMPOSE_PROJECT_NAME:?Existing compose project name is required}
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
     container_name: buildtrack-postgres
     environment:
       POSTGRES_DB: buildtrack
@@ -16,9 +22,16 @@ services:
 
   buildtrack-api:
     restart: unless-stopped
-    build:
-      context: .
-      dockerfile: backend/src/BuildTrack.Api/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    image: ${BUILDTRACK_IMAGE_REGISTRY:?Registry is required}/buildtrack-api:${BUILDTRACK_IMAGE_TAG:?Image tag is required}
+    platform: linux/amd64
     container_name: buildtrack-api
     depends_on:
       postgres:
@@ -34,7 +47,7 @@ services:
       JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-720}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
-      SEED_ADMIN_RESET_PASSWORD: ${SEED_ADMIN_RESET_PASSWORD:-false}
+      SEED_ADMIN_RESET_PASSWORD: "false"
       SEED_ADMIN_FULL_NAME: ${SEED_ADMIN_FULL_NAME:-}
       SEED_ADMIN_TENANT_NAME: ${SEED_ADMIN_TENANT_NAME:-FerstacLabs Demo}
       SEED_SUPERVISOR_EMAIL: ${SEED_SUPERVISOR_EMAIL:-}
@@ -44,13 +57,13 @@ services:
       SEED_SUPERVISOR_SITE_ID: ${SEED_SUPERVISOR_SITE_ID:-}
       SEED_DEMO_WAREHOUSE_STOCK: ${SEED_DEMO_WAREHOUSE_STOCK:-false}
       SEED_BAKINITY_DEMO: ${SEED_BAKINITY_DEMO:-false}
-      SEED_BAKINITY_DEMO_RESET: ${SEED_BAKINITY_DEMO_RESET:-false}
+      SEED_BAKINITY_DEMO_RESET: "false"
       SEED_BAKINITY_DEMO_PASSWORD: ${SEED_BAKINITY_DEMO_PASSWORD:-}
       SEED_BAKINITY_DEMO_EMAIL: ${SEED_BAKINITY_DEMO_EMAIL:-eldar@bakinity.az}
       SEED_BAKINITY_DEMO_PRORAB_PASSWORD: ${SEED_BAKINITY_DEMO_PRORAB_PASSWORD:-}
       SEED_BAKINITY_DEMO_SUPPLY_PASSWORD: ${SEED_BAKINITY_DEMO_SUPPLY_PASSWORD:-}
       SEED_SKYSNAP_DEMO: ${SEED_SKYSNAP_DEMO:-false}
-      SEED_SKYSNAP_DEMO_RESET: ${SEED_SKYSNAP_DEMO_RESET:-false}
+      SEED_SKYSNAP_DEMO_RESET: "false"
       SEED_SKYSNAP_DEMO_EMAIL: ${SEED_SKYSNAP_DEMO_EMAIL:-tomasz.odrobinski@skysnap.pl}
       SEED_SKYSNAP_DEMO_PASSWORD: ${SEED_SKYSNAP_DEMO_PASSWORD:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://ferstaclabs-buildtrack-dashboard.vercel.app,https://app.buildtrack.ferstaclabs.com,https://field.buildtrack.ferstaclabs.com,https://supply.buildtrack.ferstaclabs.com,https://buildtrack.ferstaclabs.com}
@@ -73,42 +86,35 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
-      - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
-      - ./data:/app/data
+      - type: bind
+        source: ${BUILDTRACK_DATA_PATH:?Existing data directory is required}
+        target: /app/data
+        bind:
+          create_host_path: false
 
   buildtrack-dahua-worker:
     restart: unless-stopped
-    build:
-      context: .
-      dockerfile: backend/src/BuildTrack.Worker.Dahua/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    image: ${BUILDTRACK_IMAGE_REGISTRY:?Registry is required}/buildtrack-dahua-worker:${BUILDTRACK_IMAGE_TAG:?Image tag is required}
+    platform: linux/amd64
     container_name: buildtrack-dahua-worker
     depends_on:
       postgres:
         condition: service_healthy
+      buildtrack-api:
+        condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Production
+      BUILDTRACK_INITIALIZE_DATABASE: "false"
       POSTGRES_CONNECTION_STRING: Host=postgres;Port=5432;Database=buildtrack;Username=buildtrack;Password=${BUILDTRACK_DB_PASSWORD:?BUILDTRACK_DB_PASSWORD is required}
       BUILDTRACK_SECRET_KEY: ${BUILDTRACK_SECRET_KEY:?BUILDTRACK_SECRET_KEY is required}
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
-      SEED_ADMIN_RESET_PASSWORD: ${SEED_ADMIN_RESET_PASSWORD:-false}
-      SEED_ADMIN_FULL_NAME: ${SEED_ADMIN_FULL_NAME:-}
-      SEED_ADMIN_TENANT_NAME: ${SEED_ADMIN_TENANT_NAME:-FerstacLabs Demo}
-      SEED_SUPERVISOR_EMAIL: ${SEED_SUPERVISOR_EMAIL:-}
-      SEED_SUPERVISOR_PASSWORD: ${SEED_SUPERVISOR_PASSWORD:-}
-      SEED_SUPERVISOR_FULL_NAME: ${SEED_SUPERVISOR_FULL_NAME:-}
-      SEED_SUPERVISOR_PHONE: ${SEED_SUPERVISOR_PHONE:-}
-      SEED_SUPERVISOR_SITE_ID: ${SEED_SUPERVISOR_SITE_ID:-}
-      SEED_BAKINITY_DEMO: ${SEED_BAKINITY_DEMO:-false}
-      SEED_BAKINITY_DEMO_RESET: ${SEED_BAKINITY_DEMO_RESET:-false}
-      SEED_BAKINITY_DEMO_PASSWORD: ${SEED_BAKINITY_DEMO_PASSWORD:-}
-      SEED_BAKINITY_DEMO_EMAIL: ${SEED_BAKINITY_DEMO_EMAIL:-eldar@bakinity.az}
-      SEED_BAKINITY_DEMO_PRORAB_PASSWORD: ${SEED_BAKINITY_DEMO_PRORAB_PASSWORD:-}
-      SEED_BAKINITY_DEMO_SUPPLY_PASSWORD: ${SEED_BAKINITY_DEMO_SUPPLY_PASSWORD:-}
-      SEED_SKYSNAP_DEMO: ${SEED_SKYSNAP_DEMO:-false}
-      SEED_SKYSNAP_DEMO_RESET: ${SEED_SKYSNAP_DEMO_RESET:-false}
-      SEED_SKYSNAP_DEMO_EMAIL: ${SEED_SKYSNAP_DEMO_EMAIL:-tomasz.odrobinski@skysnap.pl}
-      SEED_SKYSNAP_DEMO_PASSWORD: ${SEED_SKYSNAP_DEMO_PASSWORD:-}
 
       DAHUA_ACTIVE_REGISTER_ENABLED: "true"
       DAHUA_ACTIVE_REGISTER_PORTS: "7000,9500"
@@ -170,22 +176,19 @@ services:
       - "7000:7000/tcp"
       # - "7001:7001/tcp"
     volumes:
-      - ./backend/vendor/dahua-netsdk:/app/vendor/dahua-netsdk:ro
-      - ./data:/app/data
+      - type: bind
+        source: ${DAHUA_SDK_RUNTIME_PATH:?SDK runtime directory is required}
+        target: /app/vendor/dahua-netsdk/linux-x64
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BUILDTRACK_DATA_PATH:?Existing data directory is required}
+        target: /app/data
+        bind:
+          create_host_path: false
 
 volumes:
   buildtrack-postgres:
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    external: true
+    name: ${BUILDTRACK_POSTGRES_VOLUME:?Existing PostgreSQL volume name is required}
