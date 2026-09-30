@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/backend/:path*",
-      "destination": "http://46.101.182.202:8080/:path*"
+      "destination": "https://api.buildtrack.ferstaclabs.com/:path*"
     },
     {
       "source": "/(.*)",
