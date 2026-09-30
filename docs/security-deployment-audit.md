@@ -32,6 +32,18 @@ The targeted scan returned no private-key, OpenAI/GitHub token or literal Dahua 
 - Docker image build attempts could not connect to the local Docker Desktop Linux daemon. Linux image builds run in CI; licensed native SDK load/export preflight runs on VPS. No claim of a local Docker/native hardware test.
 - Existing repository lint is not clean: full scan encounters ESLint/parser incompatibility and generated artifacts; focused scan reports existing React effect rules in Devices/Settings. No unrelated UI behavior was rewritten to suppress these findings.
 
+## Verified Linux CI result
+
+GitHub Actions run [36780321903](https://github.com/FerstacLabs/ferstaclabs-buildtrack-dashboard/actions/runs/36780321903) completed successfully for implementation commit `74f422c`:
+
+- 333 tests passed, zero failures, zero skips, including independent PostgreSQL advisory-lock contention/release and concurrent full database initializers.
+- API readiness returned success with PostgreSQL available and HTTP 503 after the test database container stopped.
+- Frontend build and Release backend build passed.
+- Both linux/amd64 production Docker images built and were pushed to GHCR with SHA and main tags.
+- The minimal deployment archive was uploaded as `buildtrack-deployment`.
+
+The native proprietary SDK/device/VPS check still must be performed by the deployment preflight and operator; CI does not contain licensed vendor binaries. A follow-up pins runner OS to Ubuntu 24.04 and checks every shell script individually, avoiding future ubuntu-latest migration drift.
+
 ## Deliberate boundaries
 
 No firewall rules changed. No live VPS commands run by this change. No native parser, attendance classification, identity policy, SaaS auth/session design or frontend page layout refactored. SDK binaries are not published without vendor redistribution approval. Runtime-only SDK still needs licensed artifacts and a real terminal smoke test. API Swagger behavior remains unchanged; decide separately whether to restrict docs at host Nginx.
